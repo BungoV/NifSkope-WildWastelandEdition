@@ -1540,6 +1540,15 @@ std::uintptr_t objCellCopyTwin( GlProc gp, const ObjBlTexUnit & u, int red, std:
 	return key;
 }
 
+/* lane VKWATER3: the GL-owned frame inputs read through a copy twin: the screen terms every cell twin reads (bl's and the cell
+ * route's: the obscurance, the AO decal target, the SSR result; ruling 11-15) and the effect twins' own (7 and up) */
+static bool objCopyTwinName( const std::string & n, int twin )
+{
+	if ( n == "cellAo" || n == "cellAoDecal" || n == "cellSsr" )
+		return true;
+	return twin >= 7 && ( n == "fxDepth" || n == "airTerr" || n == "cellGiAir" || n == "volEnvHist" );
+}
+
 /* lane VKOBJ5 round 5: a plain GL_TEXTURE_CUBE_MAP (the particles' CubeMap with hasCubeMap 1: the .bgem's env cube, BC or
  * RGBA) as a plain-cube twin (farTwin type 4: a CUBE view of 6 layers, GL's own format and levels), GL's 6 faces of every
  * level copied in (glCopyImageSubData) once a frame like objCellCopyTwin; GL's sampler state is read for it as for any unit */
@@ -1682,8 +1691,8 @@ bool objBlBindUnits(GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st,
 				continue;
 			}
 			std::string w;
-			// lane VKWATER3: the effect twins read GL's own frame inputs (only these: a material map stays a refusal) through copy twins
-			if ( !key && d.twin >= 7 && ( u.name == "fxDepth" || u.name == "airTerr" || u.name == "cellGiAir" || u.name == "volEnvHist" ) ) {
+			// lane VKWATER3: GL's own frame inputs (only the name table's: a material map stays a refusal) through copy twins
+			if ( !key && d.copyRed != 2 && objCopyTwinName( u.name, d.twin ) ) {
 				key = objCellCopyTwin( gp, u, d.copyRed, w );
 				if ( !key ) {
 					st.misfit++;
@@ -2921,7 +2930,13 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 		return fail( "no twin, program, rows or commands" );
 	ObjBlDraw d;
 	d.twin = s.twin;
-	d.pipeRed = s.red;
+	d.pipeRed = s.red == 1 ? 1 : 0;
+	if ( s.red == 9 || s.red == 10 ) {  // lane VKWATER3: the RT GI variant's texel buffers, one each (objCellShade's reds)
+		d.texelRed = 1;
+		d.texelRedName = s.red == 9 ? "cellRestir" : "cellDdgiAtlas";
+	}
+	d.dropName = s.red == 11 ? "cellGiHalf" : s.red == 12 ? "cellGiHalfKey" : nullptr;
+	d.copyRed = s.standInRed ? 2 : s.red == 8 ? 1 : 0;  // red copy; standin: no copy twin (the stand-in)
 	d.vs = vkframe_objbl_vs_spv;
 	d.vsWords = sizeof( vkframe_objbl_vs_spv ) / 4;
 	if ( s.rt ) {
@@ -3002,6 +3017,14 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 	ObjBlBindStat bst;
 	if ( !objBlBindUnits( gp, s.prog, d, bst, w2 ) )
 		return fail( "the texture units: " + w2 );
+	// lane VKWATER3 (ruling 11-15): a GL-owned texture with no twin goes to GL, never a stand-in (a silent wrong picture);
+	// red standInRed restores the stand-in
+	if ( !s.standInRed && bst.misfit )
+		return fail( "a texture: " + bst.misfitWhy );
+	if ( !s.standInRed && bst.glOwn )
+		return fail( std::to_string( bst.glOwn ) + " GL textures with no twin: " + bst.glOwnNames );
+	if ( !s.standInRed && bst.texelRefused )
+		return fail( "a texel buffer: " + bst.texelWhy );
 	{
 		ObjBlRunStat & rs = opS().st;
 		rs.shared += bst.shared;

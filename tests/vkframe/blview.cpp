@@ -1136,17 +1136,20 @@ int main( int argc, char ** argv )
 	// lane VKWATER3 (ruling 11-15): the shipped twins on the app's key (WW_CELL_FOGLEAK + WW_FRAME_UBO) against GL built with the
 	// same defines (blview.sh's spvapp); the plain variant (no define, both sides) stays as a regression row
 	const bool colOk = twinOk && ( pfxOnly || colourGate( spvDir + "/spvapp/spirv", handles, anisoAt, aniso1H, 0 ) );
-	const bool colCsmOk = twinOk && pfxOnly ? true : twinOk && colourGate( spvDir + "/spvapp/spirv", handles, anisoAt, aniso1H, 1 );  // gap 4: fo4_cellcsmbl
+	const bool colCsmOk = twinOk && ( pfxOnly || colourGate( spvDir + "/spvapp/spirv", handles, anisoAt, aniso1H, 1 ) );  // gap 4: fo4_cellcsmbl
 	const bool colPlain = twinOk && ( pfxOnly || colourGate( spvDir + "/spvset/spirv", handles, anisoAt, aniso1H, 0, 0, spvDir + "/fo4_cellbl_ps.pipe.spv" ) );
 	const bool colCsmPlain = twinOk && ( pfxOnly || colourGate( spvDir + "/spvset/spirv", handles, anisoAt, aniso1H, 1, 0, spvDir + "/fo4_cellcsmbl_ps.pipe.spv" ) );
-	// lane VKOBJ5 (G4): skinned (kind 1), alpha-tested (kind 2), single rigid (kind 3), own VAO (kind 4) through both bl twins
-	// (the shipped twins: GL's app-key set)
+	// lane VKWATER3 ruling 3: the RT GI variant on the app's all-on key (blview.sh's spvrt) against the shipped rt twins
+	const bool colRt = twinOk && ( pfxOnly || colourGate( spvDir + "/spvrt/spirv", handles, anisoAt, aniso1H, 0, 0, std::string(), true ) );
+	const bool colCsmRt = twinOk && ( pfxOnly || colourGate( spvDir + "/spvrt/spirv", handles, anisoAt, aniso1H, 1, 0, std::string(), true ) );
+	// lane VKOBJ5 (G4): skinned (kind 1), alpha-tested (kind 2), single rigid (kind 3), own VAO (kind 4) through both bl twins,
+	// GL on the app's key as the shipped twins (VKWATER3 ruling 1); lane VKWATER3 kind 5 `ao`: GL's own cellAo must refuse
 	bool kindOk = true;
 	for ( int tw = 0; tw < 2 && !pfxOnly; tw++ )
-		for ( int kd = 1; kd <= 4; kd++ )
+		for ( int kd = 1; kd <= 5; kd++ )
 			kindOk = ( twinOk && colourGate( spvDir + "/spvapp/spirv", handles, anisoAt, aniso1H, tw, kd ) ) && kindOk;
 	ok = kindOk && ok;
-	ok = colOk && colCsmOk && colPlain && colCsmPlain && ok;
+	ok = colOk && colCsmOk && colPlain && colCsmPlain && colRt && colCsmRt && ok;
 	if ( bc && !pfxOnly ) {  // lane VKWATER3 G4: GL's fo4_cell / fo4_cellcsm against the non-bindless twins through objCellShade
 		/* BaseMap DXT5, NormalMap DXT1, SpecularMap BC5 signed (R,G,0,1: .g the gloss), GlowMap DXT1. Not texture 4: the twin made
 		 * before it is texture 3's first, gone when frame 1 replaced it, so the red `key` had no image to read */
@@ -1190,8 +1193,16 @@ int main( int argc, char ** argv )
 		const bool c4rt = cellGate( spvDir + "/cellset/spirv", 4, pbrm, 0u, "rt", 8u );
 		const bool c5rt = cellGate( spvDir + "/cellset/spirv", 5, pbrm, 0xFu << 9, "rt", 1u | 8u );
 		const bool c6rt = cellGate( spvDir + "/cellset/spirv", 6, pbrm, 0xFu << 9, "rt", 1u | 8u );
-		const bool c7rt = cellGate( spvDir + "/cellset/spirv", 7, fx, 0xEu << 9, "rt", 1u | 8u );  // no restir red: see the fixture
-		ok = c3rt && c2rt && c4rt && c5rt && c6rt && c7rt && ok;
+		const bool c7rt = cellGate( spvDir + "/cellset/spirv", 7, fx, 0xEu << 9, "rt", 1u | 8u );  // plain lit cards: no restir red
+		// ruling 3: the lit cards volumetric (vars 16), where the ReSTIR ratio reaches an effect: the restir red with the other three
+		const bool c7vol = cellGate( spvDir + "/cellset/spirv", 7, fx, 0xFu << 9, "rtvol", 1u | 8u | 16u );
+		ok = c3rt && c2rt && c4rt && c5rt && c6rt && c7rt && c7vol && ok;
+		/* ruling 3, twin 8 (fo4_effectdecalcsm: an effect decal or an exterior's room-lit effect, lit as its surface, the cascades):
+		 * the effect's maps; reds offset, half, key, light, copy; BC4 as GreyscaleMap for swz; the RT variant with its four reds */
+		const bool c8 = cellGate( spvDir + "/cellset/spirv", 8, fx, 0xBu | 1u << 4 | 1u << 8 );
+		const bool c8s = cellGate( spvDir + "/cellset/spirv", 8, fxBc4, 1u << 2, "bc4" );
+		const bool c8rt = cellGate( spvDir + "/cellset/spirv", 8, fx, 0xFu << 9, "rt", 1u | 8u );
+		ok = c8 && c8s && c8rt && ok;
 	} else
 		std::printf( "BLVIEW cell not run (the cell twins read the texture cache's twins: MODE=bc)\n" );
 	vk().vkWaitForFences( vk().dev, 1, &gv.fence, VK_TRUE, 1000000000ull );

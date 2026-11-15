@@ -41,7 +41,17 @@
  * compare LEQUAL) on csmMap's unit, so both sides compare the same texels. Lit-by-the-map clause: csmForce 1 (no shadow)
  * moves GL's colour on >= 20 % of the pixels GL covers (the map reaches the colour). Red csmmap: the map's checker
  * inverted after GL drew must FAIL and move the Vulkan colour (Vulkan reads the map, not a stand-in). cellShadow: no
- * light reaches the fixture (the cluster and light units unbound: the zero texel on both sides), so its unit is not read. */
+ * light reaches the fixture (the cluster and light units unbound: the zero texel on both sides), so its unit is not read.
+ * RT row (lane VKWATER3 ruling 3, 11-15; stated before its first run, never widened): `rt` draws the RT GI variant, GL built on
+ * the app's all-on key (blview.sh's spvrt: WW_CELL_FOGLEAK + WW_FRAME_UBO + WW_CELL_RESTIR + RTDDGI + RTDDGI_CASCADES) against
+ * the shipped objbl_cell(csm)_rt_ps twins (objBlShade s.rt), the lines `BLVIEW colour rt` / `colourcsm rt`. Inputs as the cell
+ * gate's RT row: 3 omni lights over the shapes, each shadowed (texel 4 y 1: the ReSTIR ratio is the shadow), the flat loop;
+ * the ratio (GL's RG32F buffer texture; its depth on GL's surfaces, 1 in 8 a miss, 1 in 8 off the surface), the atlas (a
+ * store, one cascade over the shapes), the screen GI and its key (shared targets, the key from GL's first draw). BAR: the
+ * 2-buffer arm's bars above (depth, colour EXACT or BOUND 4e-3, >= 2000 lit pixels, 1 run 0 failed). Probes: cellLightCount 0,
+ * cellRestirOn 0, cellDdgiOn 0, cellGiHalfOn 0 each move GL's colour on >= 20 % of the covered pixels. Reds (each must FAIL
+ * and move the Vulkan colour): glow, slot, csmmap as above, then restir (the ratio copied from two texels on), atlas (read a
+ * texel on), gihalf / gikey (dropped to the stand-in). The 1-buffer, 4-sample and texture arms stay the base rows'. */
 /* lane VKOBJ5 (plan row G4: skinned and alpha-tested, the app's vkBlDraw): colourGate's kind 1 skin / 2 alpha runs the main arm
  * only (GL's draw, objBlShade, depth and colour vs GL, one red), the lines `BLVIEW colour[csm] skin` / `... alpha`.
  * Skin (stated before the first run, never widened): the class gains the bone codes at locations 5 / 6 (bone + weight: 4 bones
@@ -60,33 +70,43 @@
  * shape VAO (no pool): locations 0..4 interleaved fp32 at stride 64 from byte 32 of one buffer, the uv (location 7) two
  * halves at stride 4 from byte 8 of another, the class's index buffer; Vulkan through ownVao. Bars as the main arm, 1 run.
  * Reds offset (every attribute read from offset 0) and half (the halves read as 16-bit unorm) must FAIL and move. Check:
- * location 5 disabled with current value (0.5,0,0,1) must refuse ("disabled with a current value"). */
+ * location 5 disabled with current value (0.5,0,0,1) must refuse ("disabled with a current value"). The kinds run GL on the
+ * app's key, as the shipped twins (VKWATER3 ruling 1). */
 static int gColTwin = 0;  // colPrintf: 1 prints `BLVIEW colourcsm` for `BLVIEW colour`
-static int gColKind = 0;  // lane VKOBJ5: 1 ` skin`, 2 ` alpha`, 3 ` single`, 4 ` own` after it
-static const char * kColKindName[5] = { "", " skin", " alpha", " single", " own" };
-static const char * gColTag = "";  // the plain row: `BLVIEW colour plain`
+static const char * gColTag = "";  // the plain row: `BLVIEW colour plain`; the RT row: `BLVIEW colour rt`
+static int gColKind = 0;  // lane VKOBJ5: 1 ` skin`, 2 ` alpha`, 3 ` single`, 4 ` own` after it; lane VKWATER3: 5 ` ao`
+static const char * kColKindName[6] = { "", " skin", " alpha", " single", " own", " ao" };
+/* lane VKWATER3 (manager ruling 11-15, the AO note; stated before its first run, never widened): kind 5 `ao` runs the main arm
+ * on the app's key with a GL R32F texture on cellAo (half the view, a ramp in y and a 7-texel saw in x, bilinear, clamped),
+ * cellAoOn 1, cellAoRect the frame. GL probe: cellAoOn 0 moves GL's colour on >= 20 % of the covered pixels. Ruling item 3:
+ * cellAo reads GL's texture through its copy twin, so the main arm draws at the main arm's bars with one copy of the texture's
+ * bytes (half the view, 4 bytes a texel). Reds: standin (ObjBlShade.standInRed: no copy twin, the old stand-in) and copy (red 26 =
+ * objBlShade's 8: copied from one texel on in x) must FAIL. Check: the same texture on cellSsgi (GL's own, no twin) must refuse
+ * naming cellSsgi (`REFUSED OK`). */
 void colPrintf( const char * fmt, ... )
 {
 	std::string f2( fmt );
 	const std::size_t at = f2.find( "colour" );
-	if ( gColKind && at != std::string::npos )
-		f2.insert( at + 6, kColKindName[gColKind] );
 	if ( at != std::string::npos )
-		f2.insert( at + 6, std::string( gColTwin ? "csm" : "" ) + gColTag );
+		f2.insert( at + 6, std::string( gColTwin ? "csm" : "" ) + gColTag + kColKindName[gColKind] );
 	va_list ap;
 	va_start( ap, fmt );
 	std::vprintf( f2.c_str(), ap );
 	va_end( ap );
 }
 bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fixture, int anisoAt, GLuint64 aniso1, int twin = 0,
-	int kind = 0, const std::string & plainSpv = std::string() )
+	int kind = 0, const std::string & plainSpv = std::string(), bool rt = false )
 {
 	using namespace WwVkPresent;
 	gColTwin = twin;
 	gColKind = kind;
-	gColTag = plainSpv.empty() ? "" : " plain";
+	gColTag = plainSpv.empty() ? ( rt ? " rt" : "" ) : " plain";
 	const std::uint32_t * psWords = twin ? vkframe_objbl_cellcsm_ps_spv : vkframe_objbl_cell_ps_spv;
 	std::size_t psCount = twin ? sizeof( vkframe_objbl_cellcsm_ps_spv ) / 4 : sizeof( vkframe_objbl_cell_ps_spv ) / 4;
+	if ( rt ) {  // ruling 3: the RT GI variant's twins (objBlShade's s.rt)
+		psWords = twin ? vkframe_objbl_cellcsm_rt_ps_spv : vkframe_objbl_cell_rt_ps_spv;
+		psCount = twin ? sizeof( vkframe_objbl_cellcsm_rt_ps_spv ) / 4 : sizeof( vkframe_objbl_cell_rt_ps_spv ) / 4;
+	}
 	// the plain row (ruling 11-15): the twin with no loader define (blview.sh's pipe form) against GL's plain set
 	std::vector<std::uint32_t> plainWords;
 	if ( !plainSpv.empty() ) {
@@ -119,14 +139,18 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		void( WINAPI * um4 )( GLint, GLsizei, GLboolean, const GLfloat * ) = nullptr;
 		void( WINAPI * clearTexSub )( GLuint, GLint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei, GLenum, GLenum, const void * ) = nullptr;
 		void( WINAPI * texParami )( GLuint, GLenum, GLint ) = nullptr;
+		void( WINAPI * texBuffer )( GLenum, GLenum, GLuint ) = nullptr;
+		void( WINAPI * ui[4] )( GLint, GLsizei, const GLint * ) = {};  // ivec2..4 (the RT row's cellDdgiCDims)
 	} u;
 	const char * n4 = "1234";
 	bool okLoad = load( u.shaderBinary, "glShaderBinary" ) && load( u.specialize, "glSpecializeShader" ) && load( u.ifaceIv, "glGetProgramInterfaceiv" )
 		&& load( u.resIv, "glGetProgramResourceiv" ) && load( u.ui1, "glUniform1i" ) && load( u.uu1, "glUniform1ui" )
 		&& load( u.bindTextures, "glBindTextures" ) && load( u.bindSamplers, "glBindSamplers" ) && load( u.deleteProgram, "glDeleteProgram" )
-		&& load( u.um4, "glUniformMatrix4fv" ) && load( u.clearTexSub, "glClearTexSubImage" ) && load( u.texParami, "glTextureParameteri" );
+		&& load( u.um4, "glUniformMatrix4fv" ) && load( u.clearTexSub, "glClearTexSubImage" ) && load( u.texParami, "glTextureParameteri" )
+		&& load( u.texBuffer, "glTexBuffer" );
 	for ( int i = 0; i < 4; i++ )
-		okLoad = okLoad && load( u.uf[i], ( std::string( "glUniform" ) + n4[i] + "fv" ).c_str() );
+		okLoad = okLoad && load( u.uf[i], ( std::string( "glUniform" ) + n4[i] + "fv" ).c_str() )
+			&& load( u.ui[i], ( std::string( "glUniform" ) + n4[i] + "iv" ).c_str() );
 	if ( !okLoad || !sx.prog ) {
 		colPrintf( "BLVIEW colour FAIL (GL entry points missing, or no shade fixture)\n" );
 		return false;
@@ -270,7 +294,12 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			u.um4( at, 1, GL_FALSE, v );
 		else if ( t == 0x1405 )  // uint
 			u.uu1( at, GLuint( v[0] ) );
-		else  // int, bool
+		else if ( t >= 0x8B53 && t <= 0x8B55 ) {  // ivec2..4
+			GLint iv[4] = {};
+			for ( std::size_t k = 0; k < vals.size() && k < 4; k++ )
+				iv[k] = GLint( v[k] );
+			u.ui[t - 0x8B53 + 1]( at, 1, iv );
+		} else  // int, bool
 			u.ui1( at, GLint( v[0] ) );
 		if ( glGetError() != GL_NO_ERROR && putBad.empty() )
 			putBad = std::string( name ) + " (GL type 0x" + std::to_string( t ) + ")";
@@ -345,6 +374,141 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		put( "ussCsmFilter", { 1.0f, 1.5f, 12.0f, 0.0f } );
 		if ( csmUnit < 0 || glGetError() != GL_NO_ERROR ) {
 			colPrintf( "BLVIEW colour FAIL (csmMap has no unit (location %d), or a GL error filling the map)\n", int( l ) );
+			return false;
+		}
+	}
+	/* the RT row: the lights (8 RGBA32F texels each, view space; cellRow is the identity), the ratio, the atlas (one cascade
+	 * of 17 x 9 x 7 probes, spacing 4, over x -32 .. 32, y -16 .. 16, z -32 .. -8: the shapes), the screen GI and its key */
+	static int giHalfAt = 0, giKeyAt = 0;
+	const std::uintptr_t giHalfKey = reinterpret_cast<std::uintptr_t>( &giHalfAt ), giKeyKey = reinterpret_cast<std::uintptr_t>( &giKeyAt );
+	GLuint lightTex = 0, lightBuf = 0, restirTex = 0, restirBuf = 0, atlasTex = 0, giHalfTex = 0, giKeyTex = 0;
+	unsigned atlasBuf = 0;
+	int rtUnit[5] = { -1, -1, -1, -1, -1 };  // cellLights, cellRestir, cellDdgiAtlas, cellGiHalf, cellGiHalfKey
+	const int hw = kSW / 2, hh = kSH / 2, cdx = 17, cdy = 9, cdz = 7, nP = cdx * cdy * cdz;
+	if ( rt ) {
+		const float lt[3][8][4] = {
+			{ { -10.0f, 5.0f, -14.0f, 28.0f }, { 1.2f, 0.9f, 0.6f, -2.0f }, { 0, 0, -1, 1 }, { 0, 1, 2, 0 }, { -1, 1, 0, 0 } },
+			{ { 10.0f, -3.0f, -18.0f, 28.0f }, { 0.6f, 0.9f, 1.4f, -2.0f }, { 0, 0, -1, 1 }, { 0, 1, 2, 0 }, { -1, 1, 0, 0 } },
+			{ { 0.0f, 2.0f, -26.0f, 24.0f }, { 0.8f, 1.3f, 0.7f, -2.0f }, { 0, 0, -1, 1 }, { 0, 1, 2, 1 }, { -1, 1, 0, 0 } } };  // no specular
+		f.genBuffers( 1, &lightBuf );
+		f.bindBuffer( 0x8C2A, lightBuf );  // TEXTURE_BUFFER
+		f.bufferData( 0x8C2A, std::ptrdiff_t( sizeof( lt ) ), lt, 0x88E4 );
+		std::vector<float> rs( std::size_t( kSW ) * std::size_t( kSH ) * 2, 1.0e6f );  // keyed on GL's surfaces after GL's first draw
+		f.genBuffers( 1, &restirBuf );
+		f.bindBuffer( 0x8C2A, restirBuf );
+		f.bufferData( 0x8C2A, std::ptrdiff_t( rs.size() * 4 ), rs.data(), 0x88E4 );
+		f.bindBuffer( 0x8C2A, 0 );
+		glGenTextures( 1, &lightTex );
+		glBindTexture( 0x8C2A, lightTex );
+		u.texBuffer( 0x8C2A, kRgba32fi, lightBuf );
+		glGenTextures( 1, &restirTex );
+		glBindTexture( 0x8C2A, restirTex );
+		u.texBuffer( 0x8C2A, 0x8230, restirBuf );  // RG32F
+		// irradiance tiles in 0.3 .. 0.9, distances far (no Chebyshev cut), every probe usable (2)
+		std::vector<float> atl( std::size_t( 193 * nP ) * 4, 0.0f );
+		std::mt19937 ar( 31 );
+		std::uniform_real_distribution<float> a01( 0.0f, 1.0f );
+		for ( std::size_t t = 0; t < std::size_t( 64 * nP ); t++ )
+			for ( int c = 0; c < 4; c++ )
+				atl[t * 4 + std::size_t( c )] = c < 3 ? 0.3f + 0.6f * a01( ar ) : 0.4f + 0.6f * a01( ar );
+		for ( std::size_t t = std::size_t( 64 * nP ); t < std::size_t( 192 * nP ); t++ ) {
+			atl[t * 4] = atl[t * 4 + 2] = 1000.0f;
+			atl[t * 4 + 1] = atl[t * 4 + 3] = 1.0e6f;
+		}
+		for ( std::size_t t = std::size_t( 192 * nP ); t < std::size_t( 193 * nP ); t++ )
+			atl[t * 4 + 3] = 2.0f;
+		const std::size_t aBytes = atl.size() * 4;
+		if ( !objBlTexelStore( atlasBuf, aBytes, why ) || !objBlTexelStoreWrite( atlasBuf, 0, aBytes, atl.data(), why ) ) {
+			colPrintf( "BLVIEW colour FAIL (the atlas store: %s)\n", why.c_str() );
+			return false;
+		}
+		glGenTextures( 1, &atlasTex );
+		glBindTexture( 0x8C2A, atlasTex );
+		u.texBuffer( 0x8C2A, kRgba32fi, GLuint( atlasBuf ) );
+		glBindTexture( 0x8C2A, 0 );
+		if ( !sharedTarget( giHalfKey, 0, hw, hh, 1, kRgba32fi, giHalfTex, why ) || !sharedTarget( giKeyKey, 0, hw, hh, 1, kRgba32fi, giKeyTex, why ) ) {
+			colPrintf( "BLVIEW colour FAIL (the screen GI's shared targets: %s)\n", why.c_str() );
+			return false;
+		}
+		std::vector<float> gh( std::size_t( hw ) * std::size_t( hh ) * 4 ), gk( gh.size(), -1.0f );
+		for ( int y = 0; y < hh; y++ )
+			for ( int x = 0; x < hw; x++ ) {
+				float * p = gh.data() + ( std::size_t( y ) * std::size_t( hw ) + std::size_t( x ) ) * 4;
+				p[0] = 0.2f + 0.075f * float( ( x + 2 * y ) % 9 );
+				p[1] = 0.2f + 0.1f * float( ( 3 * x + y ) % 7 );
+				p[2] = 0.3f + 0.125f * float( ( x * y ) % 5 );
+				p[3] = 0.5f + 0.25f * float( ( x + y ) % 3 );
+			}
+		for ( int k = 0; k < 2; k++ ) {
+			glBindTexture( GL_TEXTURE_2D, k ? giKeyTex : giHalfTex );
+			glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, hw, hh, GL_RGBA, GL_FLOAT, k ? gk.data() : gh.data() );
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+		}
+		glBindTexture( GL_TEXTURE_2D, 0 );
+		GLint( WINAPI * loc )( GLuint, const char * ) = nullptr;
+		load( loc, "glGetUniformLocation" );
+		const char * nm[5] = { "cellLights", "cellRestir", "cellDdgiAtlas", "cellGiHalf", "cellGiHalfKey" };
+		std::string noUnit;
+		for ( int k = 0; k < 5; k++ ) {
+			GLint l = loc ? loc( prog, nm[k] ) : -1;
+			if ( l < 0 && reg.count( nm[k] ) )
+				l = reg[nm[k]];
+			rtUnit[k] = unitAt.count( l ) ? unitAt[l] : -1;
+			if ( rtUnit[k] < 0 )
+				noUnit += std::string( " " ) + nm[k];
+		}
+		const int inactive0 = inactive;
+		put( "cellLightCount", { 3 } );
+		put( "cellClusterOn", { 0 } );
+		put( "cellShadowOn", { 1 } );
+		put( "cellRestirOn", { 1 } );
+		put( "cellRestirSize", { float( kSW ), float( kSH ), 0.0f, 0.0f } );
+		put( "cellDdgiOn", { 1 } );
+		put( "cellDdgiCount", { 1 } );
+		put( "cellDdgiCOrigin", { -32.0f, -16.0f, -32.0f, 4.0f }, 0 );  // w: the smallest spacing
+		put( "cellDdgiCStep", { 4.0f, 4.0f, 4.0f, 0.1f }, 0 );          // w: the self-shadow bias
+		put( "cellDdgiCDims", { float( cdx ), float( cdy ), float( cdz ), float( nP ) }, 0 );
+		put( "cellDdgiCBase", { 0 }, 0 );
+		put( "cellDdgiRed", { 0 } );
+		put( "cellGiLoop8", { 8 } );
+		put( "cellGiHalfOn", { 0 } );  // on once the key holds GL's surfaces
+		put( "cellGiHalfRect", { 0.0f, 0.0f, float( hw ), float( hh ) } );
+		put( "cellGiHalfScale", { 0.5f } );
+		colPrintf( "BLVIEW colour RT state: %d of 16 values with no active location or member\n", inactive - inactive0 );
+		if ( !noUnit.empty() || glGetError() != GL_NO_ERROR ) {
+			colPrintf( "BLVIEW colour FAIL (no unit for:%s; or a GL error making the RT inputs)\n", noUnit.c_str() );
+			return false;
+		}
+	}
+	// lane VKWATER3 kind 5: GL's own obscurance texture on cellAo
+	GLuint aoTex = 0;
+	int aoUnit = -1, ownUnit = -1;  // ownUnit: the refusal check's unit (cellSsgi), else none
+	if ( kind == 5 ) {
+		const int aw = kSW / 2, ah = kSH / 2;
+		std::vector<float> av( std::size_t( aw ) * std::size_t( ah ) );
+		for ( int y = 0; y < ah; y++ )
+			for ( int x = 0; x < aw; x++ )
+				av[std::size_t( y ) * std::size_t( aw ) + std::size_t( x )] = 0.15f + 0.5f * float( y ) / float( ah - 1 ) + 0.3f * float( x % 7 ) / 6.0f;
+		glGenTextures( 1, &aoTex );
+		glBindTexture( GL_TEXTURE_2D, aoTex );
+		glTexImage2D( GL_TEXTURE_2D, 0, 0x822E, aw, ah, 0, 0x1903, GL_FLOAT, av.data() );  // R32F from RED
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, 0x812F );  // CLAMP_TO_EDGE
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, 0x812F );
+		glTexParameteri( GL_TEXTURE_2D, 0x813D, 0 );  // MAX_LEVEL
+		glBindTexture( GL_TEXTURE_2D, 0 );
+		GLint( WINAPI * loc )( GLuint, const char * ) = nullptr;
+		load( loc, "glGetUniformLocation" );
+		GLint l = loc ? loc( prog, "cellAo" ) : -1;
+		if ( l < 0 && reg.count( "cellAo" ) )
+			l = reg["cellAo"];
+		aoUnit = unitAt.count( l ) ? unitAt[l] : -1;
+		put( "cellAoOn", { 1 } );
+		put( "cellAoRect", { 0.0f, 0.0f, 1.0f / float( kSW ), 1.0f / float( kSH ) } );
+		if ( aoUnit < 0 || glGetError() != GL_NO_ERROR ) {
+			colPrintf( "BLVIEW colour FAIL (no unit for cellAo, or a GL error making its texture)\n" );
 			return false;
 		}
 	}
@@ -525,6 +689,15 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		u.bindSamplers( 0, 64, nullptr );
 		if ( csmTex )
 			u.bindTextures( GLuint( csmUnit ), 1, &csmTex );
+		if ( rt ) {
+			const GLuint rtTex[5] = { lightTex, restirTex, atlasTex, giHalfTex, giKeyTex };
+			for ( int k = 0; k < 5; k++ )
+				u.bindTextures( GLuint( rtUnit[k] ), 1, &rtTex[k] );
+		}
+		if ( aoTex )
+			u.bindTextures( GLuint( aoUnit ), 1, &aoTex );
+		if ( aoTex && ownUnit >= 0 )
+			u.bindTextures( GLuint( ownUnit ), 1, &aoTex );
 		f.bindBufferBase( 0x8A11, 0, ubo[0] );
 		f.bindBufferBase( 0x8A11, 1, ubo[1] );
 		if ( sfB ) {  // the cascade values as put() left them (a red or probe set after GL drew reaches both sides)
@@ -598,6 +771,61 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 	}
 	shadeRead( gl.depth, &gl.c0, &gl.c1 );
 	glFinish();
+	auto glDraw = [&]( ColOut & o ) {  // GL's draw again (a probe, the RT row's keyed frame)
+		shadeClear();
+		frameState();
+		f.bindVertexArray( vao );
+		f.bindBuffer( 0x8F3F, sx.ind );
+		sf.multiDrawElementsIndirect( GL_TRIANGLES, GL_UNSIGNED_SHORT, nullptr, GLsizei( sx.cmds.size() / 5 ), 20 );
+		f.bindBuffer( 0x8F3F, 0 );
+		f.bindVertexArray( 0 );
+		frameOff();
+		shadeRead( o.depth, &o.c0, &o.c1 );
+		glFinish();
+	};
+	if ( rt ) {  // the screen GI's key: GL's surfaces above (view = world), normal +z; the ratio's depth on them; then GL again
+		std::vector<float> gk( std::size_t( hw ) * std::size_t( hh ) * 4, -1.0f ), rs( std::size_t( kSW ) * std::size_t( kSH ) * 2 );
+		std::size_t keyed = 0, onD = 0, offD = 0, missD = 0;
+		for ( int y = 0; y < hh; y++ )
+			for ( int x = 0; x < hw; x++ ) {
+				const int px = 2 * x, py = 2 * y;
+				const float d = gl.depth[std::size_t( py ) * std::size_t( kSW ) + std::size_t( px )];
+				if ( !( d < 1.0f ) )
+					continue;
+				const float wv = sx.proj[14] / ( 2.0f * d - 1.0f + sx.proj[10] );
+				const float nx = 2.0f * ( float( px ) + 0.5f ) / float( kSW ) - 1.0f, ny = 2.0f * ( float( py ) + 0.5f ) / float( kSH ) - 1.0f;
+				float * p = gk.data() + ( std::size_t( y ) * std::size_t( hw ) + std::size_t( x ) ) * 4;
+				p[0] = nx * wv / sx.proj[0];
+				p[1] = ny * wv / sx.proj[5];
+				p[2] = -wv;
+				p[3] = 1024.0f * 2048.0f + 1024.0f;  // cellGiKeyNormal: (0, 0, 1)
+				keyed++;
+			}
+		for ( int y = 0; y < kSH; y++ )
+			for ( int x = 0; x < kSW; x++ ) {
+				const std::size_t p = std::size_t( y ) * std::size_t( kSW ) + std::size_t( x );
+				const float d = gl.depth[p];
+				rs[p * 2] = 0.1f + 0.09f * float( ( x * 7 + y * 3 ) % 11 );
+				if ( !( d < 1.0f ) ) {
+					rs[p * 2 + 1] = 1.0e6f;
+					continue;
+				}
+				const float wv = sx.proj[14] / ( 2.0f * d - 1.0f + sx.proj[10] );
+				const int h = ( x * 5 + y * 3 ) % 8;
+				rs[p * 2 + 1] = h == 0 ? 1.0e6f : h == 1 ? 1.5f * wv + 10.0f : wv;
+				( h == 0 ? missD : h == 1 ? offD : onD )++;
+			}
+		glBindTexture( GL_TEXTURE_2D, giKeyTex );
+		glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, hw, hh, GL_RGBA, GL_FLOAT, gk.data() );
+		glBindTexture( GL_TEXTURE_2D, 0 );
+		f.bindBuffer( 0x8C2A, restirBuf );
+		f.bufferData( 0x8C2A, std::ptrdiff_t( rs.size() * 4 ), rs.data(), 0x88E4 );
+		f.bindBuffer( 0x8C2A, 0 );
+		put( "cellGiHalfOn", { 1 } );
+		glDraw( gl );
+		colPrintf( "BLVIEW colour RT inputs: ratio %d x %d (on GL's depth %zu, off %zu, missed %zu), atlas %u B (a store), screen GI %d x %d, %zu key "
+			"texels on GL's surfaces\n", kSW, kSH, onD, offD, missD, unsigned( 193 * nP * 16 ), hw, hh, keyed );
+	}
 	{  // does the sun reach this fixture's colour at all (GL against GL)
 		ColOut g2;
 		put( "glowMult", { 0 } );
@@ -677,6 +905,48 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		colPrintf( "BLVIEW colour GL map probe %s: csmForce 1 moves GL's colour on %zu of %zu covered pixels (bar >= 20 %%)\n",
 			csmReach ? "OK" : "FAIL", moved, cov );
 	}
+	if ( rt ) {  // the lights and each RT input reach GL's colour (else a red could test nothing)
+		static const char * rtOff[4] = { "cellLightCount", "cellRestirOn", "cellDdgiOn", "cellGiHalfOn" };
+		for ( int k = 0; k < 4; k++ ) {
+			ColOut g2;
+			put( rtOff[k], { 0 } );
+			glDraw( g2 );
+			put( rtOff[k], { k ? 1.0f : 3.0f } );
+			std::size_t cov = 0, moved = 0;
+			for ( std::size_t i = 0; i < gl.depth.size(); i++ ) {
+				if ( !( gl.depth[i] < 1.0f ) )
+					continue;
+				cov++;
+				bool mv = false;
+				for ( int ch = 0; ch < 4; ch++ )
+					mv = mv || gl.c0[i * 4 + ch] != g2.c0[i * 4 + ch];
+				moved += mv;
+			}
+			const bool reach = cov > 0 && double( moved ) >= 0.2 * double( cov );
+			colPrintf( "BLVIEW colour GL RT probe %s: %s 0 moves GL's colour on %zu of %zu covered pixels (bar >= 20 %%)\n", reach ? "OK" : "FAIL",
+				rtOff[k], moved, cov );
+			csmReach = csmReach && reach;
+		}
+	}
+	if ( kind == 5 ) {  // lane VKWATER3: the obscurance reaches GL's colour (else a stand-in could draw the same picture)
+		ColOut g2;
+		put( "cellAoOn", { 0 } );
+		glDraw( g2 );
+		put( "cellAoOn", { 1 } );
+		std::size_t cov = 0, moved = 0;
+		for ( std::size_t i = 0; i < gl.depth.size(); i++ ) {
+			if ( !( gl.depth[i] < 1.0f ) )
+				continue;
+			cov++;
+			bool mv = false;
+			for ( int ch = 0; ch < 4; ch++ )
+				mv = mv || gl.c0[i * 4 + ch] != g2.c0[i * 4 + ch];
+			moved += mv;
+		}
+		kindReach = cov > 0 && double( moved ) >= 0.2 * double( cov );
+		colPrintf( "BLVIEW colour GL ao probe %s: cellAoOn 0 moves GL's colour on %zu of %zu covered pixels (bar >= 20 %%)\n",
+			kindReach ? "OK" : "FAIL", moved, cov );
+	}
 	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
 		colPrintf( "BLVIEW colour FAIL (GL error 0x%x reading GL's fo4_cellbl draw)\n", unsigned( e ) );
 		return false;
@@ -700,13 +970,15 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		s.nRows = nRows;
 		s.cmds = sx.cmds.data();
 		s.nCmds = sx.cmds.size() / 5;
-		s.red = red == 10 ? 1 : 0;
+		s.red = red == 10 ? 1 : red >= 21 && red <= 24 ? red - 12 : red == 26 ? 8 : 0;  // 21 .. 24: the RT reds (objBlShade's 9 .. 12); 26 copy
+		s.rt = rt;
 		s.psGate = plainWords.empty() ? nullptr : plainWords.data();
 		s.psGateWords = plainWords.size();
 		s.skinRed = red == 11 ? 1 : 0;   // lane VKOBJ5 red bone
 		s.alphaRed = red == 12 ? 1 : 0;  // lane VKOBJ5 red flags
 		s.ownVao = kind == 4;            // lane VKOBJ5 round 2: the VAO bound below
 		s.ownRed = red == 14 ? 1 : red == 15 ? 2 : 0;  // reds offset / half
+		s.standInRed = red == 25;        // lane VKWATER3 red standin
 		bool ran = true;
 		if ( kind == 3 ) {  // lane VKOBJ5 round 2: a crossing a shape, its one row (red 13 base: rowsAtBase off, padded rows)
 			for ( std::size_t c = 0; c < single.size() / 5; c++ ) {
@@ -817,13 +1089,21 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 				double( fromHalf( a[p * 4 + 3] ) ) );
 		}
 		ok = ok && crossOk &&( dc.exact() || dc.bound() ) && litOk && ( cc.exact() || cc.bound() ) && csmReach && kindReach;
+		if ( kind == 5 ) {  // lane VKWATER3: cellAo through its copy twin, once a frame
+			const std::uint64_t aoBytes = std::uint64_t( kSW / 2 ) * std::uint64_t( kSH / 2 ) * 4u;
+			const bool copyOk = rs.copies == 1 && rs.copyBytes == aoBytes;
+			colPrintf( "BLVIEW colour check cellAo copy twin %s (%d copies, %llu bytes, want 1 of %llu)\n", copyOk ? "OK" : "FAIL", rs.copies,
+				static_cast<unsigned long long>( rs.copyBytes ), static_cast<unsigned long long>( aoBytes ) );
+			ok = ok && copyOk;
+		}
 	}
 	const char * redName[3] = { "glow (glowMult 0 after GL drew)", "slot (each row's maps one slot on)",
 		"map (the cascade map's checker inverted after GL drew)" };
 	const char * kindRedName[5] = { " bone (bone i reads bone i + 1's transform)", " flags (the mirrored alphaFlags 0)",  // lane VKOBJ5
 		" base (rowsAtBase off: the mirrored wwDrawBase kept)", " offset (every attribute read from offset 0)",
 		" half (the halves read as 16-bit unorm)" };
-	const int redLo = kind == 0 ? 1 : kind == 4 ? 14 : 10 + kind, redHi = kind == 0 ? ( twin ? 3 : 2 ) : kind == 4 ? 15 : 10 + kind;
+	const int redLo = kind == 0 ? 1 : kind == 4 ? 14 : kind == 5 ? 25 : 10 + kind;
+	const int redHi = kind == 0 ? ( twin ? 3 : 2 ) : kind == 4 ? 15 : kind == 5 ? 26 : 10 + kind;
 	for ( int r = redLo; r <= redHi; r++ ) {
 		ColOut o;
 		std::string rw;
@@ -841,9 +1121,22 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			passes = ( dc.exact() || dc.bound() ) && ( cc.exact() || cc.bound() );
 		}
 		colPrintf( "BLVIEW RED colour%s %s (%zu values over the bound, %zu Vulkan colour values moved off the Vulkan base%s%s)\n",
-			r > 10 ? kindRedName[r - 11] : redName[r - 1],
+			r == 25 ? " standin (no copy twin: GL's own cellAo texture stood in)" : r == 26 ? " copy (cellAo copied from one texel on in x)"
+			: r > 10 ? kindRedName[r - 11] : redName[r - 1],
 			passes ? "PASSED" : vch ? "FAIL" : "TESTS NOTHING", over, vch, rr ? "" : "; refused: ", rr ? "" : rw.c_str() );
 		ok = ok && !passes && vch > 0;
+	}
+	if ( kind == 5 ) {  // lane VKWATER3: a GL-owned texture with no twin (the AO texture on cellSsgi) must refuse the draw to GL
+		const GLint l = reg.count( "cellSsgi" ) ? reg["cellSsgi"] : -1;
+		ownUnit = unitAt.count( l ) ? unitAt[l] : -1;
+		std::string rw;
+		ColOut o;
+		const bool refused = ownUnit >= 0 && !vkRun( 0, o, rw ) && rw.find( "no twin" ) != std::string::npos
+			&& rw.find( "cellSsgi" ) != std::string::npos;
+		ownUnit = -1;
+		colPrintf( "BLVIEW colour check cellSsgi (GL's own texture, no twin) %s (%s)\n", refused ? "REFUSED OK" : "FAIL",
+			rw.empty() ? "no unit for cellSsgi, or it drew" : rw.c_str() );
+		ok = ok && refused;
 	}
 	if ( kind == 4 ) {  // lane VKOBJ5 round 2: location 5 disabled with a current value other than (0,0,0,1) must refuse
 		void( WINAPI * attrib4f )( GLuint, GLfloat, GLfloat, GLfloat, GLfloat ) = nullptr;
@@ -858,17 +1151,52 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		colPrintf( "BLVIEW colour check location 5 current (0.5,0,0,1): %s (%s)\n", refused ? "REFUSED OK" : "FAIL", rw.c_str() );
 		ok = ok && refused;
 	}
-	if ( kind ) {  // lane VKOBJ5: a kind runs the main arm only (its buffers stay with the context, as the arm's own do)
-		if ( csmTex ) {
-			u.bindTextures( 0, 64, nullptr );
-			sharedTargetDrop( csmKey );
+	if ( rt ) {  // the RT reds (vkRun 21 .. 24)
+		const char * rtRed[4] = { "restir (the ReSTIR ratio copied from two texels on)", "atlas (the GI atlas read one texel on)",
+			"gihalf (the screen GI dropped to the stand-in)", "gikey (the screen GI's key dropped to the stand-in)" };
+		for ( int r = 21; r <= 24; r++ ) {
+			ColOut o;
+			std::string rw;
+			takeObjBlRunStat();  // a fresh frame: the texel buffers copy again
+			const bool rr = vkRun( r, o, rw );
+			bool passes = false;
+			std::size_t over = 0, vch = 0;
+			if ( rr ) {
+				const DepthCmp dc = depthCmp( o.depth, gl.depth );
+				const ColCmp cc = colCmp( o );
+				over = cc.over;
+				for ( std::size_t i = 0; ran && i < o.c0.size() && i < vk0.c0.size(); i++ )
+					vch += o.c0[i] != vk0.c0[i];
+				passes = ( dc.exact() || dc.bound() ) && ( cc.exact() || cc.bound() );
+			}
+			colPrintf( "BLVIEW RED colour %s %s (%zu values over the bound, %zu Vulkan colour values moved off the Vulkan base%s%s)\n", rtRed[r - 21],
+				passes ? "PASSED" : vch ? "FAIL" : "TESTS NOTHING", over, vch, rr ? "" : "; refused: ", rr ? "" : rw.c_str() );
+			ok = ok && !passes && vch > 0;
 		}
+	}
+	if ( rt || kind ) {  // a kind (VKOBJ5) or the RT row (VKWATER3) runs the main arm only; the 1-buffer, 4-sample and texture arms are the base rows'
+		u.bindTextures( 0, 64, nullptr );
+		if ( rt ) {
+			glDeleteTextures( 1, &lightTex );
+			glDeleteTextures( 1, &restirTex );
+			glDeleteTextures( 1, &atlasTex );
+			objBlTexelStoreDrop( atlasBuf );
+			sharedTargetDrop( giHalfKey );
+			sharedTargetDrop( giKeyKey );
+		}
+		if ( csmTex )
+			sharedTargetDrop( csmKey );
+		if ( aoTex )
+			glDeleteTextures( 1, &aoTex );
+		if ( rt || kind == 5 )
+			colPrintf( "BLVIEW colour %s\n", ok ? "OK" : "FAILED" );
 		gColTwin = gColKind = 0;
+		gColTag = "";
 		objBlLocsLoad( spirvDir + "/no_locs.txt", why );
 		f.useProgram( 0 );
 		u.deleteProgram( prog );
 		if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
-			std::printf( "BLVIEW colour%s FAIL (GL error 0x%x left)\n", kColKindName[kind], unsigned( e ) );
+			std::printf( "BLVIEW colour%s%s FAIL (GL error 0x%x left)\n", rt ? " rt" : "", kColKindName[kind], unsigned( e ) );
 			ok = false;
 		}
 		return ok;

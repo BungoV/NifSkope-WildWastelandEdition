@@ -51,18 +51,26 @@ done
 "$PY" -I -X utf8 "$ROOT/tests/hlsllive/build_all.py" "$ROOT" "$OUT/spvapp" --only fo4_cellbl,fo4_cellcsmbl --defines WW_CELL_FOGLEAK=1,WW_FRAME_UBO=1 \
 	--jobs 4 > "$OUT/spvapp.txt" 2>&1 \
 	|| { tail -8 "$OUT/spvapp.txt"; echo "BLVIEW GATE FAILED (build_all.py, the app-key fo4_cellbl / fo4_cellcsmbl SPIR-V set)"; exit 1; }
+# lane VKWATER3 ruling 3: the pair on the all-on key (the rt twins' defines: objbl_cell(csm)_rt_ps)
+KAPP="-D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1"
+KRT="$KAPP -D WW_CELL_RESTIR=1 -D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1"
+"$PY" -I -X utf8 "$ROOT/tests/hlsllive/build_all.py" "$ROOT" "$OUT/spvrt" --only fo4_cellbl,fo4_cellcsmbl \
+	--defines WW_CELL_FOGLEAK=1,WW_FRAME_UBO=1,WW_CELL_RESTIR=1,WW_CELL_RTDDGI=1,WW_CELL_RTDDGI_CASCADES=1 --jobs 4 > "$OUT/spvrt.txt" 2>&1 \
+	|| { tail -8 "$OUT/spvrt.txt"; echo "BLVIEW GATE FAILED (build_all.py, the all-on fo4_cellbl / fo4_cellcsmbl SPIR-V set)"; exit 1; }
 # set-wide --defines also reach the vertex stage (variants.txt gives it none): its DXC output must not move (the two sets'
 # uniform locations differ by their own registries, so the source compile is compared, not the patched sets)
-for d in "" "-D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1"; do
+for d in "" "$KAPP" "$KRT"; do
 	"$DXC" "${SPV[@]}" -T vs_6_0 -E main $d "$ROOT/res/shaders/hlsl/near/fo4_defaultbl_vs.hlsl" -Fo "$OUT/fo4_defaultbl_vs.k${#d}.spv" \
 		> /dev/null 2>&1 || { echo "BLVIEW GATE FAILED (dxc, fo4_defaultbl_vs [$d])"; exit 1; }
 done
-cmp -s "$OUT/fo4_defaultbl_vs.k0.spv" "$OUT/fo4_defaultbl_vs.k38.spv" \
-	|| { echo "BLVIEW GATE FAILED (the app key's defines moved GL's fo4_defaultbl vertex stage: variants.txt gives it none)"; exit 1; }
+for d in "$KAPP" "$KRT"; do
+	cmp -s "$OUT/fo4_defaultbl_vs.k0.spv" "$OUT/fo4_defaultbl_vs.k${#d}.spv" \
+		|| { echo "BLVIEW GATE FAILED (the defines [$d] moved GL's fo4_defaultbl vertex stage: variants.txt gives it none)"; exit 1; }
+done
 # lane VKWATER3 G4: GL's fo4_cell and fo4_cellcsm (with their variants, the base WW_CELL_FOGLEAK+WW_FRAME_UBO among them) for the cell gate
 if [ "$MODE" = bc ]; then
-	"$PY" -I -X utf8 "$ROOT/tests/hlsllive/build_all.py" "$ROOT" "$OUT/cellset" --only fo4_cell.prog,fo4_cellcsm.prog,pbrm_default.prog,pbrm_cell.prog,pbrm_cellcsm.prog,fo4_effectcell.prog --jobs 4 > "$OUT/cellset.txt" 2>&1 \
-		|| { tail -8 "$OUT/cellset.txt"; echo "BLVIEW GATE FAILED (build_all.py, the fo4_cell / fo4_cellcsm / pbrm_default / pbrm_cell / pbrm_cellcsm / fo4_effectcell SPIR-V set)"; exit 1; }
+	"$PY" -I -X utf8 "$ROOT/tests/hlsllive/build_all.py" "$ROOT" "$OUT/cellset" --only fo4_cell.prog,fo4_cellcsm.prog,pbrm_default.prog,pbrm_cell.prog,pbrm_cellcsm.prog,fo4_effectcell.prog,fo4_effectdecalcsm.prog --jobs 4 > "$OUT/cellset.txt" 2>&1 \
+		|| { tail -8 "$OUT/cellset.txt"; echo "BLVIEW GATE FAILED (build_all.py, the fo4_cell / fo4_cellcsm / pbrm_default / pbrm_cell / pbrm_cellcsm / fo4_effectcell / fo4_effectdecalcsm SPIR-V set)"; exit 1; }
 	# lane VKOBJ5 G4 round 3: GL's particles_cell (particles.vert + particles.geom + the base variant's frag) for the pfx gate
 	"$PY" -I -X utf8 "$ROOT/tests/hlsllive/build_all.py" "$ROOT" "$OUT/pfxset" --only particles_cell.prog --jobs 4 > "$OUT/pfxset.txt" 2>&1 \
 		|| { tail -8 "$OUT/pfxset.txt"; echo "BLVIEW GATE FAILED (build_all.py, the particles_cell SPIR-V set)"; exit 1; }

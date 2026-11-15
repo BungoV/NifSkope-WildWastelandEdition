@@ -569,17 +569,18 @@ bool vkShade( const NifSkopeOpenGLContext::Program * prog, GLsizei n )
 		return false;
 	}
 	/* lane VKWATER3 G4: the bl twins are the base variant (fo4_cellbl.frag@WW_CELL_FOGLEAK+WW_FRAME_UBO) and the all-on route's
-	 * RT GI variant (objBlVariant); the loader's other defines make another program, which GL draws. The RT twin is built
-	 * (objbl_cell(csm)_rt_ps) but its colour gate is owed: GL draws that key until it passes */
+	 * RT GI variant (objBlVariant 1: objbl_cell(csm)_rt_ps, gated by blview `colour rt` / `colourcsm rt`); the loader's other
+	 * defines make another program, which GL draws */
 	const char * no = nullptr;
 	const int variant = WwVkPresent::objBlVariant( prog->wwDefs, no );
-	if ( variant != 0 ) {
-		WwVkPresent::objBlOnGl( variant < 0 ? no : "the RT GI variant: its bl twin is built, its colour gate owed (GL draws it)" );
+	if ( variant < 0 ) {
+		WwVkPresent::objBlOnGl( no );
 		return false;
 	}
 	const Class & k = *c.boundCls;
 	WwVkPresent::ObjBlShade s;
 	s.twin = twin;
+	s.rt = variant == 1;
 	s.prog = prog->id;
 	s.poolKey = reinterpret_cast<std::uintptr_t>( &k );
 	s.pool.attrMask = k.attrMask;

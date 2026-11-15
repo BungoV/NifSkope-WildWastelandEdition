@@ -56,22 +56,34 @@
  * Probes: cellRestirOn 0, cellDdgiOn 0, cellGiHalfOn 0 each move GL's colour on >= 20 % of the covered pixels. The texel
  * line: the ratio copied once for the sweep, the lights once a draw (copied 7, their bytes), the atlas imported once a draw. Reds
  * (ObjCellShade.red 9 .. 12): restir (the ratio copied from two texels on), atlas (read one texel on), gihalf, gikey (each image
- * dropped to the stand-in). */
+ * dropped to the stand-in).
+ * Volumetric cards (lane VKWATER3 ruling 3, vars 16 with 8 on twin 7, `BLVIEW effectcell rtvol`; stated before its first run,
+ * never widened): lit draw 4 as a volumetric mesh card (volPart 1, fxAirCard 1 as renderer.cpp sets it,
+ * volTerms 2: their lamps through vpLight, where a shadow-casting light takes the ReSTIR ratio on the ratio's depth), so the
+ * ratio reaches an effect; lit draws 0, 1, 3 stay plain (an air card takes no GI surface term, so the GI probes and the atlas
+ * red reach GL through them; as air cards draws 1 and 3 fade out whole).
+ * The RT row's bar, probes (cellRestirOn 0 among them) and its four reds, restir with them. */
 bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], unsigned reds = 15u, const char * label = nullptr, unsigned vars = 0u )
 {
 	using namespace WwVkPresent;
-	static const char * twinTag[8] = { "", "", "cell", "cellcsm", "pbrm", "pbrmcell", "pbrmcellcsm", "effectcell" };
-	static const char * twinFrag[8] = { "", "", "fo4_cell", "fo4_cellcsm", "pbrm_default", "pbrm_cell", "pbrm_cellcsm", "fo4_effectcell" };
-	if ( twin < 2 || twin > 7 ) {
+	static const char * twinTag[9] = { "", "", "cell", "cellcsm", "pbrm", "pbrmcell", "pbrmcellcsm", "effectcell", "effectdecalcsm" };
+	static const char * twinFrag[9] = { "", "", "fo4_cell", "fo4_cellcsm", "pbrm_default", "pbrm_cell", "pbrm_cellcsm", "fo4_effectcell",
+		"fo4_effectdecalcsm" };
+	if ( twin < 2 || twin > 8 ) {
 		std::printf( "BLVIEW cell FAIL (no twin %d)\n", twin );
 		return false;
 	}
 	// twin 7: fo4_effectcell (the game's effect shader, cell-lit): one target, its own maps and state, the soft fade's depth
-	const bool fxT = twin == 7, pbrmT = twin >= 4 && !fxT, csmT = twin == 3 || twin == 6;
+	/* twin 8: fo4_effectdecalcsm (lane VKWATER3 G4: an effect decal, or an exterior's room-lit effect, lit as the surface it
+	 * lies on, with the cascades): the effect's maps and state, outdoors (cellInterior 0, the sun and its shadow), draws 1, 4
+	 * room-lit (fxRoomLit: cellFxBase x the spot's open-air share), the rest the decal's surface light (fxDecalLin) */
+	const bool decT = twin == 8;
+	const bool fxT = twin == 7 || decT, pbrmT = twin >= 4 && !fxT, csmT = twin == 3 || twin == 6 || decT;
 	// lights: vars 1, every twin from 5, and the RT variant but on twin 4 (pbrm_default's RT program has no lights)
 	const bool lightsV = ( vars & 1u ) != 0 || twin >= 5 || ( ( vars & 8u ) != 0 && twin != 4 );
 	const bool oneT = twin == 4 || fxT;  // writes target 0 only
 	const bool skinV = ( vars & 2u ) != 0, alphaV = ( vars & 4u ) != 0, rtV = ( vars & 8u ) != 0;
+	const bool volV = twin == 7 && ( vars & 16u ) != 0;  // twin 7: the lit cards volumetric (the ReSTIR ratio's way into an effect)
 	const std::string tagS = std::string( twinTag[twin] ) + ( label ? std::string( " " ) + label : std::string() );
 	const char * tag = tagS.c_str();
 	struct CellGl
@@ -132,7 +144,7 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	}
 	// GL's program from the set, the app's base variant, the binaries as they are
 	const GLuint prog = f.createProgram();
-	const std::string stage[2] = { "fo4_default.vert", std::string( twinFrag[twin] ) + ( fxT ? ".frag@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+" : ".frag@WW_CELL_FOGLEAK+" )
+	const std::string stage[2] = { "fo4_default.vert", std::string( twinFrag[twin] ) + ( fxT && !decT ? ".frag@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+" : ".frag@WW_CELL_FOGLEAK+" )
 		+ ( rtV ? "WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO" : "WW_FRAME_UBO" ) };
 	for ( int s = 0; s < 2; s++ ) {
 		const std::string bin = index.count( stage[s] ) ? readFile( spirvDir + "/" + index[stage[s]] ) : std::string();
@@ -452,9 +464,9 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		const GLint l = locOf( "fxDepth" );
 		fxDepthUnit = unitAt.count( l ) ? unitAt[l] : -1;
 		/* RT GI: outdoors under a sun (fxLocalOn), so the lit cards take the GI as a surface (fxLocalSky: the atlas and the
-		 * screen GI at normal +z). The ReSTIR ratio reaches an effect only through a volumetric card's lamps (vpLight), which
-		 * this fixture does not draw (nor the base one): no restir red here */
-		set( "cellInterior", { ( vars & 8u ) != 0 ? 0 : 1 } );
+		 * screen GI at normal +z). The ReSTIR ratio reaches an effect only through a volumetric card's lamps (vpLight): the
+		 * rtvol row (vars 16) draws the lit cards volumetric, with the restir red; the rt row draws them plain */
+		set( "cellInterior", { ( vars & 8u ) != 0 || decT ? 0.0f : 1.0f } );
 		if ( ( vars & 8u ) != 0 )
 			set( "vpSun", { 0.7f, 0.6f, 0.5f, 1.0f } );
 		set( "hasSourceTexture", { 1 } );
@@ -724,7 +736,23 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 			set( "hasEnvMask", { i % 2 == 0 ? 1.0f : 0.0f } );
 			set( "lightingInfluence", { 0.4f + 0.6f * q( r ) } );
 			set( "fxLitMode", { i % 3 != 2 ? 3.0f : 0.0f } );  // lit by every light (cellLightCount), or unlit
+			if ( volV ) {  // the lit cards volumetric, lit by their lamps alone (volTerms 2: placed)
+				const float volCard = i == 4 ? 1.0f : 0.0f;
+				set( "volPart", { volCard } );
+				set( "fxAirCard", { volCard } );  // a volumetric mesh card is a slab of air (renderer.cpp)
+				set( "volTerms", { 2 } );
+				// the air's phase (the app's weather feeds it; left 0 the lamps scatter nothing): Rayleigh, forward, back
+				set( "volPhase", { 0.5f, 0.45f, 0.4f, 0.0f }, 0 );
+				set( "volPhase", { 0.3f, 0.3f, 0.3f, 0.6f }, 1 );
+				set( "volPhase", { 0.2f, 0.25f, 0.3f, -0.3f }, 2 );
+				set( "volGi", { 1.0f, 1.0f, 1.0f, 0.12f } );
+			}
 			set( "fxEmit", { 0.8f, 0.6f, 0.4f, i == 4 ? 1.0f : 0.0f } );
+			if ( decT ) {
+				set( "fxRoomLit", { i % 3 == 1 ? 1.0f : 0.0f } );
+				set( "fxDecalProbe", { 0.0f } );
+				set( "cellFxBase", { 1.1f + 0.4f * q( r ), 1.0f + 0.3f * q( r ), 0.9f + 0.2f * q( r ) } );
+			}
 		}
 		if ( lightsV )
 			set( "cellLightCount", { float( probe == 1 ? 0 : 3 - i % 3 ) } );
