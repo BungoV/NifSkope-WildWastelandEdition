@@ -7881,6 +7881,13 @@ struct CsmFb
 	VkImageView view = VK_NULL_HANDLE;
 	VkFramebuffer fb = VK_NULL_HANDLE;
 };
+// lane VKSHADOW4: a per-draw caster's place in the mesh pool (vklamp.inc LampPlace's law; that file comes later in this TU)
+struct CsmPlace
+{
+	std::uint64_t gen = 0;
+	std::uint32_t firstIndex = 0, verts = 0, indices = 0;
+	std::int32_t baseVertex = 0;
+};
 struct Csm
 {
 	bool made = false, broken = false;
@@ -7896,6 +7903,10 @@ struct Csm
 	VkFence fence = VK_NULL_HANDLE;
 	bool pending = false;
 	CsmBuf pos, idx, mats, cmds;
+	CsmBuf mpos, midx;                          // lane VKSHADOW4: the mesh pool (host-visible, Vulkan's own)
+	std::map<std::uintptr_t, CsmPlace> pool;    // key -> place in mpos / midx
+	std::uint64_t posUsed = 0, idxUsed = 0;
+	std::vector<std::uint32_t> mcmd;            // per mesh draw: index count, instances, first index, vertex offset, matrix
 	std::vector<CsmFb> fbs;
 	std::uint64_t fbGen = 0;
 	std::vector<WwVkPresent::CsmDraw> d;
@@ -8207,6 +8218,89 @@ int csmFb( std::uintptr_t key, int layer, std::string & why )
 
 // the worker: every layer's draws in one render pass each (depth-only LEQUAL: the order does not matter), GL's signal
 // waited, signalled back, with the fence
+// gates only (shadowview): 1 = the key alone (the generation not compared), 2 = grow without copying the kept meshes again
+int csmPoolRed()
+{
+	const char * e = std::getenv( "WW_VKCSM_POOL_RED" );
+	return e ? std::atoi( e ) : 0;
+}
+
+/* lane VKSHADOW4: the meshes the run's mesh draws use into the pool (the last run is done: fenceDone), vklamp.inc lampPool's
+ * law. A kept mesh (key, sizes and gen equal) is served where it sits; a miss is appended; when the misses do not fit, the
+ * pool repacks: emptied, grown to twice the run's meshes when they need it, and every mesh of the run copied again */
+bool csmPool( const WwVkPresent::CsmRun & t, int red, std::string & why )
+{
+	Csm & S = csmS();
+	std::vector<char> used( t.nMeshes, 0 );
+	bool any = false;
+	for ( const WwVkPresent::CsmDraw & D : t.d )
+		for ( std::uint32_t k = D.mesh ? D.first : 0; D.mesh && k < D.first + D.n; k++ ) {
+			used[t.mdraws[4 * std::size_t( k )]] = 1;
+			any = true;
+		}
+	if ( !any )
+		return true;
+	auto kept = [&]( const WwVkPresent::CsmMesh & m, bool count ) {
+		const auto it = S.pool.find( m.key );
+		if ( it == S.pool.end() || it->second.verts != m.verts || it->second.indices != m.indices )
+			return false;
+		if ( it->second.gen == m.gen )
+			return true;
+		if ( count )
+			( red == 1 ? S.st.redSkips : S.st.regen )++;
+		return red == 1;
+	};
+	std::uint64_t liveV = 0, liveI = 0, missV = 0, missI = 0;
+	for ( std::size_t m = 0; m < t.nMeshes; m++ ) {
+		if ( !used[m] )
+			continue;
+		const WwVkPresent::CsmMesh & me = t.meshes[m];
+		liveV += me.verts;
+		liveI += me.indices;
+		if ( !kept( me, true ) ) {
+			missV += me.verts;
+			missI += me.indices;
+		}
+	}
+	if ( !S.mpos.buf || !S.midx.buf || S.posUsed + missV > S.mpos.cap / 12 || S.idxUsed + missI > S.midx.cap / 2 ) {
+		S.st.repacks++;
+		if ( red != 2 ) {
+			S.pool.clear();
+			S.posUsed = S.idxUsed = 0;
+		}
+		const std::uint64_t needV = 2 * ( red == 2 ? S.posUsed + missV : liveV ), needI = 2 * ( red == 2 ? S.idxUsed + missI : liveI );
+		if ( !csmBuf( S.mpos, VkDeviceSize( needV ) * 12, false, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, why, "the cascades' mesh positions" )
+			|| !csmBuf( S.midx, VkDeviceSize( needI ) * 2, false, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, why, "the cascades' mesh indices" ) ) {
+			S.pool.clear();
+			S.posUsed = S.idxUsed = 0;
+			return false;
+		}
+	}
+	for ( std::size_t m = 0; m < t.nMeshes; m++ ) {
+		if ( !used[m] )
+			continue;
+		const WwVkPresent::CsmMesh & me = t.meshes[m];
+		if ( kept( me, false ) ) {
+			S.st.hits++;
+			continue;
+		}
+		CsmPlace p;
+		p.gen = me.gen;
+		p.verts = me.verts;
+		p.indices = me.indices;
+		p.baseVertex = std::int32_t( S.posUsed );
+		p.firstIndex = std::uint32_t( S.idxUsed );
+		std::memcpy( static_cast<char *>( S.mpos.ptr ) + std::size_t( S.posUsed ) * 12, me.pos, std::size_t( me.verts ) * 12 );
+		std::memcpy( static_cast<char *>( S.midx.ptr ) + std::size_t( S.idxUsed ) * 2, me.idx, std::size_t( me.indices ) * 2 );
+		S.posUsed += me.verts;
+		S.idxUsed += me.indices;
+		S.pool[me.key] = p;
+		S.st.copies++;
+		S.st.copyKb += double( std::size_t( me.verts ) * 12 + std::size_t( me.indices ) * 2 ) / 1024.0;
+	}
+	return true;
+}
+
 bool csmWork( std::string & why )
 {
 	Vk & v = vk();
@@ -8216,7 +8310,7 @@ bool csmWork( std::string & why )
 	VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	v.vkBeginCommandBuffer( S.cmd, &bi );
-	const VkBuffer vbs[2] = { S.pos.buf, S.mats.buf };
+	const VkBuffer vbs[2] = { S.pos.buf, S.mats.buf }, mvbs[2] = { S.mpos.buf, S.mats.buf };
 	const VkDeviceSize vbo[2] = { 0, 0 };
 	for ( std::size_t f = 0; f < S.fbs.size(); f++ ) {
 		const CsmFb & F = S.fbs[f];
@@ -8230,9 +8324,7 @@ bool csmWork( std::string & why )
 		rbi.framebuffer = F.fb;
 		rbi.renderArea = { { 0, 0 }, { std::uint32_t( F.w ), std::uint32_t( F.h ) } };
 		v.vkCmdBeginRenderPass( S.cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE );
-		v.vkCmdBindVertexBuffers( S.cmd, 0, 2, vbs, vbo );
-		v.vkCmdBindIndexBuffer( S.cmd, S.idx.buf, 0, VK_INDEX_TYPE_UINT16 );
-		int bound = -1;
+		int bound = -1, form = -1;  // form: 0 the queue's pool, 1 the mesh pool (lane VKSHADOW4), the same pipelines
 		for ( std::size_t k = 0; k < S.d.size(); k++ ) {
 			if ( S.dFb[k] != int( f ) )
 				continue;
@@ -8241,6 +8333,11 @@ bool csmWork( std::string & why )
 			if ( p != bound )
 				v.vkCmdBindPipeline( S.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, S.pipe[p] );
 			bound = p;
+			if ( int( D.mesh ) != form ) {
+				form = int( D.mesh );
+				v.vkCmdBindVertexBuffers( S.cmd, 0, 2, D.mesh ? mvbs : vbs, vbo );
+				v.vkCmdBindIndexBuffer( S.cmd, D.mesh ? S.midx.buf : S.idx.buf, 0, VK_INDEX_TYPE_UINT16 );
+			}
 			const VkViewport vp { 0.0f, 0.0f, float( D.vw ), float( D.vh ), 0.0f, 1.0f };
 			VkRect2D sc { { 0, 0 }, { std::uint32_t( F.w ), std::uint32_t( F.h ) } };
 			if ( D.sc[2] > D.sc[0] ) {
@@ -8252,7 +8349,12 @@ bool csmWork( std::string & why )
 			v.vkCmdSetScissor( S.cmd, 0, 1, &sc );
 			v.vkCmdSetDepthBias( S.cmd, D.unit, D.clamp, D.slope );  // glPolygonOffset( slope, unit ): the same D16 law
 			v.vkCmdPushConstants( S.cmd, S.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, D.clip );
-			if ( v.multiDrawIndirect ) {
+			if ( D.mesh ) {
+				for ( std::uint32_t k = D.first; k < D.first + D.n; k++ ) {
+					const std::uint32_t * c = &S.mcmd[5 * std::size_t( k )];
+					v.vkCmdDrawIndexed( S.cmd, c[0], c[1], c[2], std::int32_t( c[3] ), c[4] );
+				}
+			} else if ( v.multiDrawIndirect ) {
 				for ( std::uint32_t at = 0; at < D.n; at += 65535u )
 					v.vkCmdDrawIndexedIndirect( S.cmd, S.cmds.buf, VkDeviceSize( D.first + at ) * kCsmCmdBytes,
 						std::min( D.n - at, 65535u ), kCsmCmdBytes );
@@ -8288,15 +8390,17 @@ bool csmWork( std::string & why )
 void csmDrop()
 {
 	Csm & S = csmS();
-	if ( !S.glDone && !S.pending && S.fbs.empty() && !S.pos.buf && !S.mats.buf )
+	if ( !S.glDone && !S.pending && S.fbs.empty() && !S.pos.buf && !S.mats.buf && !S.mpos.buf )
 		return;
 	drain();
 	vk().vkDeviceWaitIdle( vk().dev );
 	S.pending = false;
 	csmFbsDrop();
 	S.fbGen = 0;
-	for ( CsmBuf * b : { &S.pos, &S.idx, &S.mats, &S.cmds } )
+	for ( CsmBuf * b : { &S.pos, &S.idx, &S.mats, &S.cmds, &S.mpos, &S.midx } )
 		csmBufFree( *b, gl().ok && b->glCtx == gl().ctx );
+	S.pool.clear();
+	S.posUsed = S.idxUsed = 0;
 	csmSemsDrop( gl().ok && S.semCtx == gl().ctx );
 }
 }  // namespace
@@ -8345,12 +8449,26 @@ bool csmRun( const CsmRun & t, std::string & why )
 		return refuse( no );
 	if ( t.d.empty() )
 		return true;  // nothing queued this pass
-	if ( !t.pos || !t.idx || !t.posBytes || !t.idxBytes || !t.mats || !t.nMats || !t.cmds || !t.nCmds )
-		return refuse( "no pool, matrices or commands" );
+	// lane VKSHADOW4: each form is checked when a draw uses it (a run may be mesh draws only, or queue draws only)
+	bool queue = false, meshes = false;
+	for ( const CsmDraw & D : t.d )
+		( D.mesh ? meshes : queue ) = true;
+	if ( !t.mats || !t.nMats )
+		return refuse( "no matrices" );
+	if ( queue && ( !t.pos || !t.idx || !t.posBytes || !t.idxBytes || !t.cmds || !t.nCmds ) )
+		return refuse( "no pool or commands" );
+	if ( meshes && ( !t.meshes || !t.nMeshes || !t.mdraws || !t.nMDraws ) )
+		return refuse( "no meshes or mesh draws" );
+	for ( std::size_t k = 0; meshes && k < t.nMDraws; k++ ) {
+		const std::uint32_t * m = &t.mdraws[4 * k];
+		if ( m[0] >= t.nMeshes || m[1] >= t.nMats || !t.meshes[m[0]].pos || !t.meshes[m[0]].idx
+			|| std::uint64_t( m[2] ) + m[3] > t.meshes[m[0]].indices )
+			return refuse( "a mesh draw's mesh, matrix or indices are out of range" );
+	}
 	for ( const CsmDraw & D : t.d ) {
 		if ( D.target < 0 || D.target > 1 || !t.tex[D.target] || !t.key[D.target] || D.layer < 0 || D.layer >= t.layers )
 			return refuse( "a draw names no shared target layer" );
-		if ( std::size_t( D.first ) + D.n > t.nCmds || D.vw < 1 || D.vh < 1 )
+		if ( std::size_t( D.first ) + D.n > ( D.mesh ? t.nMDraws : t.nCmds ) || D.vw < 1 || D.vh < 1 )
 			return refuse( "a draw's commands or viewport are out of range" );
 		if ( D.clamp != 0.0f && !v.depthBiasClamp )
 			return refuse( "no depthBiasClamp (glPolygonOffsetClamp's twin)" );
@@ -8376,24 +8494,46 @@ bool csmRun( const CsmRun & t, std::string & why )
 		if ( S.dFb[k] < 0 )
 			return breakOff( w );
 	}
-	if ( !csmBuf( S.pos, VkDeviceSize( t.posBytes ), true, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, w )
-		|| !csmBuf( S.idx, VkDeviceSize( t.idxBytes ), true, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, w )
-		|| !csmBuf( S.mats, VkDeviceSize( t.nMats ) * 64, false, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, w )
-		|| !csmBuf( S.cmds, VkDeviceSize( t.nCmds ) * kCsmCmdBytes, false, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, w ) )
+	if ( ( queue
+			 && ( !csmBuf( S.pos, VkDeviceSize( t.posBytes ), true, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, w )
+				 || !csmBuf( S.idx, VkDeviceSize( t.idxBytes ), true, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, w )
+				 || !csmBuf( S.cmds, VkDeviceSize( t.nCmds ) * kCsmCmdBytes, false, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, w ) ) )
+		|| !csmBuf( S.mats, VkDeviceSize( t.nMats ) * 64, false, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, w ) )
+		return breakOff( w );
+	if ( meshes && !csmPool( t, csmPoolRed(), w ) )
 		return breakOff( w );
 	std::memcpy( S.mats.ptr, t.mats, t.nMats * 64 );
-	std::memcpy( S.cmds.ptr, t.cmds, t.nCmds * kCsmCmdBytes );
+	if ( queue )
+		std::memcpy( S.cmds.ptr, t.cmds, t.nCmds * kCsmCmdBytes );
+	// lane VKSHADOW4: the mesh draws resolved against the pool (the worker reads S.mcmd)
+	S.mcmd.assign( meshes ? 5 * t.nMDraws : 0, 0 );
+	int mdrawn = 0;
+	for ( std::size_t k = 0; meshes && k < t.nMDraws; k++ ) {
+		const std::uint32_t * m = &t.mdraws[4 * k];
+		const CsmPlace & p = S.pool[t.meshes[m[0]].key];
+		std::uint32_t * c = &S.mcmd[5 * k];
+		c[0] = m[3];
+		c[1] = 1;
+		c[2] = p.firstIndex + m[2];
+		c[3] = std::uint32_t( p.baseVertex );
+		c[4] = m[1];
+	}
+	for ( const CsmDraw & D : t.d )
+		mdrawn += D.mesh ? int( D.n ) : 0;
 	// the pool into its twins (every run: GL appends and compacts it), then GL's pass so far -> the worker -> GL's readers
-	g.copyNamedBufferSubData( GLuint( t.pos ), S.pos.gl, 0, 0, std::intptr_t( t.posBytes ) );
-	g.copyNamedBufferSubData( GLuint( t.idx ), S.idx.gl, 0, 0, std::intptr_t( t.idxBytes ) );
+	if ( queue ) {
+		g.copyNamedBufferSubData( GLuint( t.pos ), S.pos.gl, 0, 0, std::intptr_t( t.posBytes ) );
+		g.copyNamedBufferSubData( GLuint( t.idx ), S.idx.gl, 0, 0, std::intptr_t( t.idxBytes ) );
+	}
 	GLuint bufs[2] = { S.pos.gl, S.idx.gl };
+	const GLuint nb = queue ? 2 : 0;  // a mesh-only run shares no buffer with GL
 	GLuint tex[2] = {};
 	GLenum lay[2] = { kLayoutGeneral, kLayoutGeneral };
 	GLuint nt = 0;
 	for ( int k = 0; k < 2; k++ )
 		if ( t.tex[k] )
 			tex[nt++] = GLuint( t.tex[k] );
-	g.signalSemaphore( S.glDoneGl, 2, bufs, nt, tex, lay );
+	g.signalSemaphore( S.glDoneGl, nb, bufs, nt, tex, lay );
 	g.flush();
 	Worker & W = wk();
 	std::uint64_t want = 0;
@@ -8414,12 +8554,13 @@ bool csmRun( const CsmRun & t, std::string & why )
 	}
 	if ( !ok )
 		return breakOff( w );  // nothing signals vkDone: GL does not wait it; GL draws the queues this pass
-	g.waitSemaphore( S.vkDoneGl, 2, bufs, nt, tex, lay );
+	g.waitSemaphore( S.vkDoneGl, nb, bufs, nt, tex, lay );
 	S.pending = true;
 	const double ms = nowMs() - t0;
 	S.st.runs++;
 	S.st.draws += int( t.d.size() );
-	S.st.cmds += int( t.nCmds );
+	S.st.cmds += queue ? int( t.nCmds ) : 0;
+	S.st.mdraws += mdrawn;
 	S.st.cpuMs += ms;
 	S.st.maxMs = std::max( S.st.maxMs, ms );
 	return true;
