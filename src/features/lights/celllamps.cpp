@@ -1691,11 +1691,12 @@ void wwCellShadowPass( Scene * scene )
 		std::string no = vkLampRed ? std::string( "WW_VKVIEW_LAMP_RED=1" ) : WwVkPresent::lampRefusal();
 		if ( no.empty() ) {
 			WwVkPresent::LampRun run;
-			std::vector<float> pos, mats( casters.size() * 16, 0.0f );
-			std::vector<std::uint16_t> idx;
-			std::vector<std::uint32_t> cmds;
-			std::vector<std::int64_t> first( casters.size(), -1 );
-			std::vector<std::int32_t> base( casters.size(), 0 );
+			// lane VKLAMP2: one pool mesh a shape (lampRun keeps it on the device while its key and gen match), draws {mesh, caster}
+			std::vector<float> mats( casters.size() * 16, 0.0f );
+			std::vector<WwVkPresent::LampMesh> meshes;
+			std::vector<std::uint32_t> draws;
+			std::map<const Shape *, std::uint32_t> meshOf;
+			std::vector<std::int64_t> mesh( casters.size(), -1 );
 			std::vector<char> isAt( casters.size() );
 			for ( std::size_t i = 0; i < casters.size(); i++ )
 				isAt[i] = casters[i].sh->wwDrawAlpha( "cube" ).test ? 1 : 0;
@@ -1711,7 +1712,7 @@ void wwCellShadowPass( Scene * scene )
 					WwVkPresent::lampFaceClip( fc, l.radius, op.clip );
 					op.rn[0] = l.radius;
 					op.rn[1] = l.nearClip;
-					op.first = std::uint32_t( cmds.size() / 5 );
+					op.first = std::uint32_t( draws.size() / 2 );
 					for ( std::size_t i = 0; ( coneF >> fc & 1 ) && i < casters.size(); i++ ) {
 						const ShCaster & c = casters[i];
 						const float dx = c.c[0] - l.pos[0], dy = c.c[1] - l.pos[1], dz = c.c[2] - l.pos[2];
@@ -1724,21 +1725,34 @@ void wwCellShadowPass( Scene * scene )
 						}
 						if ( !cubeFaceKeeps( fc, l.pos, c.c, c.rad ) )
 							continue;
-						if ( first[i] < 0 ) {
-							static_assert( sizeof( Vector3 ) == 12 && sizeof( Triangle ) == 6, "the pool copies verts / triangles as packed arrays" );
-							const float * v = reinterpret_cast<const float *>( c.sh->verts.constData() );
-							const std::uint16_t * t = reinterpret_cast<const std::uint16_t *>( c.sh->triangles.constData() );
-							base[i] = std::int32_t( pos.size() / 3 );
-							first[i] = std::int64_t( idx.size() );
-							pos.insert( pos.end(), v, v + std::size_t( c.sh->verts.size() ) * 3 );
-							idx.insert( idx.end(), t, t + std::size_t( c.sh->triangles.size() ) * 3 );
+						if ( c.sh->verts.isEmpty() || c.sh->triangles.isEmpty() )
+							continue;	// GL draws nothing of it either
+						if ( mesh[i] < 0 ) {
+							static_assert( sizeof( Vector3 ) == 12 && sizeof( Triangle ) == 6, "the pool reads verts / triangles as packed arrays" );
+							auto it = meshOf.find( c.sh );
+							if ( it == meshOf.end() ) {
+								const float * attrv[8] = { reinterpret_cast<const float *>( c.sh->verts.constData() ), nullptr, nullptr, nullptr,
+									nullptr, nullptr, nullptr, nullptr };
+								// gen = the hash GL's own draw of this shape takes (cubeDrawCaster, solid: mask 3), and its sizes
+								const NifSkopeOpenGLContext::ShapeDataHash h( std::uint32_t( c.sh->verts.size() ), 3,
+									std::size_t( c.sh->triangles.size() ) * 6, attrv, c.sh->triangles.constData() );
+								WwVkPresent::LampMesh m;
+								m.key = reinterpret_cast<std::uintptr_t>( c.sh );
+								m.gen = h.h[0] ^ ( h.h[1] * 0x9E3779B97F4A7C15ULL ) ^ ( std::uint64_t( h.numVerts ) << 32 | h.elementBytes );
+								m.pos = attrv[0];
+								m.verts = std::uint32_t( c.sh->verts.size() );
+								m.idx = reinterpret_cast<const std::uint16_t *>( c.sh->triangles.constData() );
+								m.indices = std::uint32_t( c.sh->triangles.size() * 3 );
+								it = meshOf.emplace( c.sh, std::uint32_t( meshes.size() ) ).first;
+								meshes.push_back( m );
+							}
+							mesh[i] = it->second;
 							std::memcpy( &mats[i * 16], c.mv.data(), 64 );
 						}
-						const std::uint32_t cmd[5] = { std::uint32_t( c.sh->triangles.size() * 3 ), 1u, std::uint32_t( first[i] ),
-							std::uint32_t( base[i] ), std::uint32_t( i ) };
-						cmds.insert( cmds.end(), cmd, cmd + 5 );
+						const std::uint32_t d[2] = { std::uint32_t( mesh[i] ), std::uint32_t( i ) };
+						draws.insert( draws.end(), d, d + 2 );
 					}
-					op.n = std::uint32_t( cmds.size() / 5 ) - op.first;
+					op.n = std::uint32_t( draws.size() / 2 ) - op.first;
 					run.ops.push_back( op );
 				}
 			}
@@ -1746,18 +1760,17 @@ void wwCellShadowPass( Scene * scene )
 			run.key = shadowShareKey( r );
 			run.face = face;
 			run.layers = 6 * kShadowSlots;
-			run.pos = pos.data();
-			run.posBytes = pos.size() * 4;
-			run.idx = idx.data();
-			run.idxBytes = idx.size() * 2;
+			run.meshes = meshes.data();
+			run.nMeshes = meshes.size();
 			run.mats = mats.data();
 			run.nMats = casters.size();
-			run.cmds = cmds.data();
-			run.nCmds = cmds.size() / 5;
+			run.draws = draws.data();
+			run.nDraws = draws.size() / 2;
 			onVk = WwVkPresent::lampRun( run, no );
 			if ( onVk ) {
-				vkDraws = qint64( cmds.size() / 5 );
-				vkLine = QStringLiteral( "on ops=%1 draws=%2 glAlpha=%3" ).arg( run.ops.size() ).arg( vkDraws ).arg( glAt ? 1 : 0 );
+				vkDraws = qint64( draws.size() / 2 );
+				vkLine = QStringLiteral( "on ops=%1 draws=%2 meshes=%3 glAlpha=%4" ).arg( run.ops.size() ).arg( vkDraws ).arg( meshes.size() )
+					.arg( glAt ? 1 : 0 );
 			}
 		}
 		if ( !onVk ) {
