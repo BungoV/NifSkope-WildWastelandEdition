@@ -14,6 +14,7 @@
 #include "../../src/features/vkframe/vkpresent.cpp"
 
 #include <GL/gl.h>
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -1030,7 +1031,8 @@ int main( int argc, char ** argv )
 		WwVkPresent::LampRect a;    // a blit's source rect
 	};
 	const int blk0[2] = { 0, 1 }, blk3 = 2;
-	auto steps = [&]( bool store ) {
+	const std::uint32_t kStill = 10, kMov = 4;  // lane VKSHADOW2, the mixed case: slot 1's still casters, then its movers
+	auto steps = [&]( bool store, bool mixed = false ) {
 		std::vector<SStep> v;
 		const WwVkPresent::LampRect full { 0, 0, F, F };
 		int sides[4], layer[4], member[4];
@@ -1058,7 +1060,13 @@ int main( int argc, char ** argv )
 		for ( int i = 0; i < 4; i++ )
 			v.push_back( { 2, false, 3, sides[i], kBase3 + sides[i], 0, 0, wall[i], true, 0, 0, 0, {} } );
 		for ( int fc = 0; fc < 6; fc++ )  // the mover over the restored map (LOAD)
-			v.push_back( { 0, false, 3, fc, kBase3 + fc, 0, 0, {}, false, moverCmd, 1u, 0, {} } );
+			v.push_back( { 0, false, 3, fc, kBase3 + fc, 0, 0, {}, false, moverCmd, mixed && fc == kBack ? 0u : 1u, 0, {} } );  // mixed: 4 off the cone
+		if ( mixed ) {  // slot 1 drawn direct in run B: its clears, then its movers (LOAD); face 5 off the cone (empty lists)
+			for ( int fc = 0; fc < 6; fc++ )
+				v.push_back( { 0, false, 1, fc, 6 + fc, 0, 0, {}, true, slotCmd[1], fc == 5 ? 0u : kStill, 0, {} } );
+			for ( int fc = 0; fc < 6; fc++ )
+				v.push_back( { 0, false, 1, fc, 6 + fc, 0, 0, {}, false, slotCmd[1] + kStill, fc == 5 ? 0u : kMov, 0, {} } );
+		}
 		return v;
 	};
 	auto glState = [&]() {
@@ -1074,7 +1082,9 @@ int main( int argc, char ** argv )
 		glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 	};
 	// one step as celllamps' GL code does it (drawFace: attach, viewport at the origin, scissor = cut, clear, draws; blit)
-	auto glRun = [&]( const SStep & s, GLuint cube, GLuint store, const std::vector<float> & mv ) {
+	// lane VKSHADOW2 at: 0 every caster untested; 1 the alpha-tested ones tested; 2 only those, no clear (aRed 1 clears, 2 drops
+	// the origin); 3 the solid ones only
+	auto glRun = [&]( const SStep & s, GLuint cube, GLuint store, const std::vector<float> & mv, int at = 0, int aRed = 0 ) {
 		const WwVkPresent::LampRect c = s.cut.w > 0 ? s.cut : WwVkPresent::LampRect { 0, 0, F, F };
 		if ( s.kind == 1 ) {
 			f.bindFramebuffer( 0x8CA8, fboR );  // GL_READ_FRAMEBUFFER
@@ -1092,7 +1102,7 @@ int main( int argc, char ** argv )
 		}
 		if ( !attach( s.store ? store : cube, s.layer ) )
 			return false;
-		glViewport( s.vx, s.vy, F, F );
+		glViewport( at == 2 && aRed == 2 ? 0 : s.vx, at == 2 && aRed == 2 ? 0 : s.vy, F, F );
 		glEnable( GL_SCISSOR_TEST );
 		glScissor( c.x, c.y, c.w, c.h );
 		float rel[16], clip[16];
@@ -1101,7 +1111,7 @@ int main( int argc, char ** argv )
 		f.uniformMatrix4fv( lRel, 1, GL_FALSE, rel );
 		f.uniform2f( lRn, lights[s.slot].radius, lights[s.slot].nearClip );
 		f.uniformMatrix4fv( lClip, 1, GL_FALSE, clip );
-		if ( s.clear ) {
+		if ( at == 2 ? aRed == 1 : s.clear ) {
 			glClearDepth( 1.0 );
 			glClear( GL_DEPTH_BUFFER_BIT );
 		}
@@ -1111,13 +1121,27 @@ int main( int argc, char ** argv )
 			glDrawElements( GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, nullptr );
 			f.bindVertexArray( vao );
 		} else {
+			if ( at ) {  // the alpha case's BaseMap and test uniforms (as glCasters)
+				glBindTexture( GL_TEXTURE_2D, baseT );
+				f.uniform1i( lBase, 0 );
+				f.uniform2f( lUvS, 1.0f, 1.0f );
+				f.uniform2f( lUvO, 0.0f, 0.0f );
+				f.uniform1f( lAlpha, 1.0f );
+				f.uniform1f( lThr, 0.5f );
+			}
 			for ( std::uint32_t k = s.first; k < s.first + s.n; k++ ) {
 				const std::uint32_t * cm = &cmds[std::size_t( k ) * 5];
+				const bool a = isAt[cm[4]] != 0;
+				if ( ( at == 2 && !a ) || ( at == 3 && a ) )
+					continue;
+				if ( at )
+					f.uniform1i( lAt, ( at == 1 || at == 2 ) && a ? 1 : 0 );
 				f.uniformMatrix4fv( lMv, 1, GL_FALSE, &mv[std::size_t( cm[4] ) * 16] );
 				f.drawElementsBaseVertex( GL_TRIANGLES, GLsizei( cm[0] ), GL_UNSIGNED_SHORT,
 					reinterpret_cast<const void *>( std::size_t( cm[2] ) * 2 ), GLint( cm[3] ) );
 			}
 		}
+		f.uniform1i( lAt, 0 );
 		glDisable( GL_SCISSOR_TEST );
 		return true;
 	};
@@ -1143,17 +1167,19 @@ int main( int argc, char ** argv )
 		}
 	};
 	// the reference: GL does every step (movers false: the stored-only picture)
-	auto refArm = [&]( bool store, bool movers, const std::vector<float> & mv ) {
+	auto refArm = [&]( bool store, bool movers, const std::vector<float> & mv, bool mixed = false, int at = 0 ) {
 		bool r = junk( refT, -1 ) && ( !store || junkS( refStore ) );
 		glState();
-		for ( const SStep & s : steps( store ) )
-			if ( movers || s.kind != 0 || s.store )
-				r = glRun( s, refT, refStore, mv ) && r;
+		for ( const SStep & s : steps( store, mixed ) )
+			if ( movers || s.kind != 0 || s.store || s.clear )
+				r = glRun( s, refT, refStore, mv, s.kind == 0 ? at : 0 ) && r;
 		f.bindVertexArray( 0 );
 		return r && glGetError() == GL_NO_ERROR;
 	};
-	enum SRed { kSNone, kSOrigin, kSWhole, kSMoverClear };
-	auto lampGo = [&]( GLuint tex, std::uintptr_t k, int layers, const std::vector<WwVkPresent::LampOp> & ops, const std::vector<float> & mv ) {
+	enum SRed { kSNone, kSOrigin, kSWhole, kSMoverClear, kSDirectClear, kSOrder, kSConeDrawn, kSConeClear, kSAlphaClear, kSAlphaOrigin };
+	auto lampGo = [&]( GLuint tex, std::uintptr_t k, int layers, const std::vector<WwVkPresent::LampOp> & ops, const std::vector<float> & mv,
+					  const std::vector<std::uint32_t> * cl = nullptr ) {
+		const std::vector<std::uint32_t> & cmds = cl ? *cl : lmvCmds;
 		WwVkPresent::LampRun run;
 		run.tex = tex;
 		run.key = k;
@@ -1191,16 +1217,18 @@ int main( int argc, char ** argv )
 		return true;
 	};
 	// the app's route: run A (the store's still casters), GL's blits and wall quads, run B (the movers): no read between
-	auto vkArm = [&]( bool store, SRed red, const std::vector<float> & mv ) {
+	auto vkArm = [&]( bool store, SRed red, const std::vector<float> & mv, bool mixed = false, bool alpha = false ) {
 		bool r = junk( shT, -1 ) && ( !store || junkS( shStore ) );
-		const std::vector<SStep> v = steps( store );
+		const std::vector<SStep> v = steps( store, mixed );
 		std::vector<WwVkPresent::LampOp> opsA, opsB;
+		std::vector<std::uint32_t> solid;  // alpha: the device's commands (the alpha-tested casters left to GL)
 		for ( const SStep & s : v ) {
 			if ( s.kind != 0 )
 				continue;
 			WwVkPresent::LampOp op;
 			op.layer = s.layer;
-			op.clear = s.clear || ( red == kSMoverClear && !s.store );
+			op.clear = s.clear || ( red == kSMoverClear && !s.store ) || ( red == kSDirectClear && s.slot == 1 && !s.clear )
+				|| ( red == kSConeClear && s.slot == 3 && !s.store && s.n == 0 );
 			op.vx = red == kSOrigin ? 0 : s.vx;
 			op.vy = red == kSOrigin ? 0 : s.vy;
 			op.cut = s.cut;
@@ -1212,35 +1240,62 @@ int main( int argc, char ** argv )
 			op.rn[1] = lights[s.slot].nearClip;
 			op.first = s.first;
 			op.n = s.n;
+			if ( red == kSConeDrawn && s.slot == 1 && s.face == 5 )
+				op.n = s.clear ? kStill : kMov;  // the cone face drawn
+			if ( alpha ) {
+				const std::uint32_t a0 = op.first, an = op.n;
+				op.first = std::uint32_t( solid.size() / 5 );
+				for ( std::uint32_t c = a0; c < a0 + an; c++ )
+					if ( !isAt[cmds[std::size_t( c ) * 5 + 4]] )
+						solid.insert( solid.end(), &cmds[std::size_t( c ) * 5], &cmds[std::size_t( c ) * 5] + 5 );
+				op.n = std::uint32_t( solid.size() / 5 ) - op.first;
+			}
 			( s.store ? opsA : opsB ).push_back( op );
 		}
+		if ( red == kSOrder )  // run B's LOAD ops before its clears
+			std::stable_partition( opsB.begin(), opsB.end(), []( const WwVkPresent::LampOp & o ) { return !o.clear; } );
+		const std::vector<std::uint32_t> * cl = alpha ? &solid : nullptr;
+		const int aRed = red == kSAlphaClear ? 1 : red == kSAlphaOrigin ? 2 : 0;
 		if ( store )
-			r = lampGo( shStore, storeKey, kStoreLayers, opsA, mv ) && r;
+			r = lampGo( shStore, storeKey, kStoreLayers, opsA, mv, cl ) && r;
 		glState();
+		for ( const SStep & s : v )  // alpha: GL's alpha-tested casters on the store steps, no clear, the step's origin and cut
+			if ( alpha && s.kind == 0 && s.store )
+				r = glRun( s, shT, shStore, mv, 2, aRed ) && r;
 		for ( const SStep & s : v )
 			if ( s.kind != 0 )
 				r = glRun( s, shT, shStore, mv ) && r;
 		f.bindVertexArray( 0 );
-		r = lampGo( shT, key, kLayers, opsB, mv ) && r;
+		r = lampGo( shT, key, kLayers, opsB, mv, cl ) && r;
+		if ( alpha ) {  // and on the cube steps after run B
+			glState();
+			for ( const SStep & s : v )
+				if ( s.kind == 0 && !s.store )
+					r = glRun( s, shT, shStore, mv, 2 ) && r;
+			f.bindVertexArray( 0 );
+		}
 		return r && glGetError() == GL_NO_ERROR;
 	};
 	// verdicts: slots 0 and 3's cube faces and every store layer (S2: each side's store EXACT against its own S1 bytes)
 	auto judgeS = [&]( int fr, const std::vector<std::uint16_t> & vc, const std::vector<std::uint16_t> & rc, const std::vector<std::uint16_t> & vs,
 						 const std::vector<std::uint16_t> & rs, const std::vector<std::uint16_t> * pvs, const std::vector<std::uint16_t> * prs,
-						 bool print, Diff * sum ) {
+						 bool print, Diff * sum, const char * tag = "stored", bool mixed = false ) {
 		bool good = true;
 		const std::size_t n = std::size_t( F ) * F;
-		for ( int k : { 0, 3 } )
+		for ( int k : { 0, 1, 3 } )
 			for ( int fc = 0; fc < 6; fc++ ) {
+				if ( k == 1 && !mixed )
+					continue;
 				const std::size_t l = std::size_t( 6 * k + fc );
 				const Diff v = compare( vc.data() + l * n, rc.data() + l * n, n );
 				if ( sum )
 					sum->add( v );
-				const bool lok = v.ok();
+				const bool cl = mixed && k == 1 && fc == 5;  // off the cone: CLEAR
+				const bool lok = cl ? v.clearOk() : v.ok();
 				good = good && lok;
 				if ( print )
-					std::printf( "LAMPVIEW stored S%d slot%d/face%d %s (%zu of %zu covered texels differ, %zu past 1 unit, max %d; set vk %zu gl %zu)\n", fr,
-						k, fc, !lok ? "FAIL" : v.diff ? "BOUND" : "EXACT", v.diff, v.covered, v.past1, v.maxu, v.vkSet, v.refSet );
+					std::printf( "LAMPVIEW %s S%d slot%d/face%d %s (%zu of %zu covered texels differ, %zu past 1 unit, max %d; set vk %zu gl %zu)\n", tag, fr,
+						k, fc, cl ? ( lok ? "CLEAR" : "FAIL" ) : !lok ? "FAIL" : v.diff ? "BOUND" : "EXACT", v.diff, v.covered, v.past1, v.maxu, v.vkSet, v.refSet );
 			}
 		for ( int l = 0; l < kStoreLayers; l++ ) {
 			Diff v = compare( vs.data() + std::size_t( l ) * n, rs.data() + std::size_t( l ) * n, n );
@@ -1255,7 +1310,7 @@ int main( int argc, char ** argv )
 			}
 			good = good && lok;
 			if ( print )
-				std::printf( "LAMPVIEW stored S%d store%d %s%s (%zu of %zu covered texels differ, %zu past 1 unit, max %d; set vk %zu gl %zu)\n", fr, l,
+				std::printf( "LAMPVIEW %s S%d store%d %s%s (%zu of %zu covered texels differ, %zu past 1 unit, max %d; set vk %zu gl %zu)\n", tag, fr, l,
 					!lok ? "FAIL" : v.diff ? "BOUND" : "EXACT", pvs ? " held" : "", v.diff, v.covered, v.past1, v.maxu, v.vkSet, v.refSet );
 		}
 		// each packed half covers texels on both sides
@@ -1274,7 +1329,7 @@ int main( int argc, char ** argv )
 				}
 			good = good && cv > 0 && cr > 0;
 			if ( print )
-				std::printf( "LAMPVIEW stored S%d half face%d (store%d member %d, %d,%d %dx%d) covers vk %zu gl %zu %s\n", fr, sides[i], 3 * blk3 + layer[i],
+				std::printf( "LAMPVIEW %s S%d half face%d (store%d member %d, %d,%d %dx%d) covers vk %zu gl %zu %s\n", tag, fr, sides[i], 3 * blk3 + layer[i],
 					member[i], p.x, p.y, p.w, p.h, cv, cr, cv && cr ? "ok" : "FAIL: proves nothing" );
 		}
 		return good;
@@ -1322,6 +1377,97 @@ int main( int argc, char ** argv )
 			std::printf( "LAMPVIEW RED %s %s (%zu of %zu covered texels differ, %zu past 1 unit, max %d; must FAIL)\n", passes ? "PASSES" : "FAIL", rd.name,
 				all.diff, all.covered, all.past1, all.maxu );
 			ok = ok && !passes;
+		}
+		// lane VKSHADOW2: the mixed run B (slot 1 drawn direct beside slot 3's mover; cone faces), S1's store steps
+		{
+			std::vector<std::uint16_t> nm, rc, rs, vc, vs;
+			bool r = refArm( true, false, mats[0], true );
+			readAll( refT, nm );
+			r = r && refArm( true, true, mats[0], true );
+			readAll( refT, rc );
+			readStore( refStore, rs );
+			r = r && vkArm( true, kSNone, mats[0], true );
+			readAll( shT, vc );
+			readStore( shStore, vs );
+			if ( !r ) {
+				std::printf( "LAMPVIEW mixed S1 FAIL (a run failed)\n" );
+				ok = false;
+			} else {
+				ok = judgeS( 1, vc, rc, vs, rs, nullptr, nullptr, true, nullptr, "mixed", true ) && ok;
+			}
+			std::size_t won = 0;
+			for ( std::size_t i = std::size_t( 6 ) * F * F; i < std::size_t( 12 ) * F * F; i++ )
+				won += nm[i] != rc[i];
+			std::printf( "LAMPVIEW mixed S1 direct movers win %zu texels over the still-only picture (%s)\n", won, won ? "ok" : "FAIL: proves nothing" );
+			ok = ok && won > 0;
+			const struct
+			{
+				const char * name;
+				SRed red;
+			} mReds[4] = { { "direct mover cleared (slot 1's LOAD ops clear)", kSDirectClear }, { "run B order (its LOAD ops before its clears)", kSOrder },
+				{ "cone face drawn (slot 1 face 5 gets its casters and movers)", kSConeDrawn },
+				{ "cone LOAD cleared (slot 3 face 4's empty LOAD op clears)", kSConeClear } };
+			for ( const auto & rd : mReds ) {
+				Diff all;
+				std::vector<std::uint16_t> c, s;
+				const bool ran = vkArm( true, rd.red, mats[0], true );
+				readAll( shT, c );
+				readStore( shStore, s );
+				const bool passes = ran && r && judgeS( 1, c, rc, s, rs, nullptr, nullptr, false, &all, "mixed", true );
+				std::printf( "LAMPVIEW RED %s %s (%zu of %zu covered texels differ, %zu past 1 unit, max %d; must FAIL)\n", passes ? "PASSES" : "FAIL", rd.name,
+					all.diff, all.covered, all.past1, all.maxu );
+				ok = ok && !passes;
+			}
+		}
+		// lane VKSHADOW2: GL's alpha-tested casters on the store's packed halves after run A (no clear), S1's steps
+		{
+			std::vector<std::uint16_t> rc, rs, ss, vc, vs;
+			bool r = refArm( true, true, mats[0], false, 3 );
+			readStore( refStore, ss );
+			r = r && refArm( true, true, mats[0], false, 1 );
+			readAll( refT, rc );
+			readStore( refStore, rs );
+			r = r && vkArm( true, kSNone, mats[0], false, true );
+			readAll( shT, vc );
+			readStore( shStore, vs );
+			if ( !r ) {
+				std::printf( "LAMPVIEW alpha S1 FAIL (a run failed)\n" );
+				ok = false;
+			} else {
+				ok = judgeS( 1, vc, rc, vs, rs, nullptr, nullptr, true, nullptr, "alpha" ) && ok;
+			}
+			int sides[4], layer[4], member[4];
+			WwVkPresent::lampSides( kBack, sides, layer, member );
+			std::size_t won = 0;
+			for ( int i = 0; i < 4; i++ ) {
+				WwVkPresent::LampRect room, wall;
+				WwVkPresent::lampSideHalves( sides[i], kBack, F, room, wall );
+				const WwVkPresent::LampRect p = WwVkPresent::lampPacked( room, member[i], F );
+				const std::size_t base = std::size_t( 3 * blk3 + layer[i] ) * F * F;
+				for ( int y = p.y; y < p.y + p.h; y++ )
+					for ( int x = p.x; x < p.x + p.w; x++ )
+						won += rs[base + std::size_t( y ) * F + x] != ss[base + std::size_t( y ) * F + x];
+			}
+			std::printf( "LAMPVIEW alpha S1 casters win %zu texels in the packed halves over the solid-only store (%s)\n", won,
+				won ? "ok" : "FAIL: proves nothing" );
+			ok = ok && won > 0;
+			const struct
+			{
+				const char * name;
+				SRed red;
+			} aReds[2] = { { "stored alpha clear (GL clears the cut before its alpha draw)", kSAlphaClear },
+				{ "stored alpha origin (GL's alpha draw at the unshifted viewport origin)", kSAlphaOrigin } };
+			for ( const auto & rd : aReds ) {
+				Diff all;
+				std::vector<std::uint16_t> c, s;
+				const bool ran = vkArm( true, rd.red, mats[0], false, true );
+				readAll( shT, c );
+				readStore( shStore, s );
+				const bool passes = ran && r && judgeS( 1, c, rc, s, rs, nullptr, nullptr, false, &all, "alpha" );
+				std::printf( "LAMPVIEW RED %s %s (%zu of %zu covered texels differ, %zu past 1 unit, max %d; must FAIL)\n", passes ? "PASSES" : "FAIL", rd.name,
+					all.diff, all.covered, all.past1, all.maxu );
+				ok = ok && !passes;
+			}
 		}
 		poolTake( "stored", -1, -1, -1, -1 );
 	}
