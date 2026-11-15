@@ -395,6 +395,15 @@
 // 1.5), a falloff red (cellLightPhysB.z non-zero). Census after: route default 0 / 0, route all-on 0 / 0 (the falloff refusal
 // gone; the census' own all-on values (1, 0, 0, 0) only switch the row). The all-on totals are printed, not judged: at 0 / 0
 // no red reads them, the old census red stays the closed-list red of lift 2.
+// The lit look (L8 route lift 5, VKFAR13 11-15; bar set before its first run, never widened): a lit run (cellHasDir or
+// cellInterior) through cell_precip_look.prog (pcLook in the program) reaches the app only by the hand-set switch
+// WW_CELL_PRECIP_LOOK (default off, not in WW_ALL_ON: no census route links the look). It stays a named refusal, no twin:
+// precipAdmits must refuse it with WwVkPresent::kPrecipLitLookWhy, so GL draws it. Checks (else the gate fails): a
+// PrecipRun with lit and look set is refused with exactly that string; the same run with look clear is not refused with it.
+// Red, must FAIL: 140737488355328 (2^47) the lit look's refusal skipped (precipAdmits goes on to the lit chain). Census
+// clause: each route program (default, all-on, all-on + WW_CELL_RESTIRGI; exterior and interior) as a lit run with t.look
+// from its own pcLook, through precipAdmits: the count of the look refusal is printed per route (0 / 0 today; a route that
+// starts linking the look shows 1 there). Its red: the same clause on pLook (the look program) must count 1, else FAIL.
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
