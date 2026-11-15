@@ -1858,6 +1858,12 @@ void wwCellShadowPass( Scene * scene )
 		.arg( waterCastsRed ? QStringLiteral( "casts(RED)" ) : QStringLiteral( "skipped %1" ).arg( waterSkipped ) )
 		.arg( g_cubeFaceSkip ).arg( g_cubeConeSkip )	// lane PERFFIX2 b: draws the per-face and the cone cull saved, since the start
 		+ QStringLiteral( " vk lamp: %1" ).arg( vkLine );	// lane VKLAMP1
+	{	// lane VKLAMP4: the pool's counts since the last pass (takeLampStat resets them)
+		const WwVkPresent::LampStat ls = WwVkPresent::takeLampStat();
+		s.shadowLast += QStringLiteral( " pool runs=%1 gl=%2 fails=%3 copies=%4 hits=%5 regen=%6 repacks=%7 redSkips=%8 copyKb=%9" )
+			.arg( ls.runs ).arg( ls.gl ).arg( ls.fails ).arg( ls.copies ).arg( ls.hits ).arg( ls.regen ).arg( ls.repacks ).arg( ls.redSkips )
+			.arg( ls.copyKb, 0, 'f', 1 );
+	}
 	shadowDump( scene );
 }
 
