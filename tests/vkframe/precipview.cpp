@@ -359,7 +359,9 @@
 // case, appended, element 33: rain_near_restir (rain_near_shadow's run, lamps, slots and cubes, volTerms 3) drawn through
 // pAllOn (the route all-on program) with cellRestirOn 1, cellRestirSize (w, h, 0, 0) of the gate's frame and a w x h RG32F
 // cellRestir whose depth is one D0 for every texel (the prep picks the in-view particles' median depth and prints the share
-// of in-view particles within its tolerance: want 0.1 - 0.8) and whose ratio is a smooth field in 0.1 - 0.9 (two low
+// of in-view particles within its tolerance: want 0.1 - 0.8; VKFAR12 11-15, the bar kept: one D0 read 0.070, so half the
+// in-view particles, seed 33, now stamp their own depth on 7 x 7 texels round their centre, far first, D0 elsewhere, and the
+// prep fails the job when any share it prints is outside its stated range) and whose ratio is a smooth field in 0.1 - 0.9 (two low
 // sines, no texel-sized steps). The same verdict (depth EXACT, colour inside the bar), reference checks, repeat clause, reds
 // 64 / 128 as the lit cases; the globals check and Vulkan's globals mirror as rain_near_shadow. The case must also show
 // (else the gate fails): GL with cellRestirOn 0 differs on >= 1000 covered samples (the ratio seen); cellRestirOn,
