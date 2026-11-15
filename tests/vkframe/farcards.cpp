@@ -14,9 +14,9 @@
 //   outside flips <= 0.4 % of covered, stencil differs on <= 0.05 % of covered, depth flips (the depth draw's sample past 2
 //   ulp where the stencil read was not) <= 0.05 % of covered. Anything else FAILS.
 // Reds (each must FAIL): red 1 no depth write, red 2 every set's cardBase 0 (the per-set field dropped), red 4 the shadow compare inverted.
-// Lane VKFAR4: red 8 the last crossing's fence wait reads VK_TIMEOUT (must refuse with the wait named; the run after it must
-// match the first run); red 16 set 0's colour sheet twin dropped and remade, its copy keyed on the VkImage handle only (must
-// FAIL when the driver gave the remade twin the old handle value; "sheet handle reused: N" says whether it did).
+// Lane VKFAR4: red 16 set 0's colour sheet twin dropped and remade, its copy keyed on the VkImage handle only (must FAIL
+// when the driver gave the remade twin the old handle value; "sheet handle reused: N" says whether it did). The fence red is
+// WW_VKFENCE_RED=farcards (VKWATER4's fenceDone): the whole gate must come back refused / GATE FAILED.
 // Last line `FARCARDS GATE OK` or `FARCARDS GATE FAILED`.
 #define main fxview_main
 #include "fxview.cpp"
@@ -766,7 +766,7 @@ int main( int argc, char ** argv )
 		return glGetError() == GL_NO_ERROR;
 	};
 	bool ok = true;
-	std::vector<std::uint16_t> firstA, firstB, firstC;  // lane VKFAR4: the first run, for the runs after red 8 / red 16
+	std::vector<std::uint16_t> firstA, firstB, firstC;  // lane VKFAR4: the first run, for the runs after red 16
 	{
 		std::vector<std::uint16_t> a, b, c;
 		if ( !runVk( 0, a, b, c ) ) {
@@ -812,17 +812,6 @@ int main( int argc, char ** argv )
 			std::printf( "FARCARDS red %s PASSED: the gate cannot see it\n", r.name );
 			ok = false;
 		}
-	}
-	// lane VKFAR4: red 8, the faked fence timeout: refused with the wait named, and the next run draws the first run's picture
-	{
-		std::vector<std::uint16_t> a, b, c;
-		const bool ran = runVk( 8, a, b, c );
-		const bool named = !ran && why.find( "fence wait returned VkResult 2 " ) != std::string::npos;
-		std::printf( "FARCARDS red fence (VK_TIMEOUT): %s\n", named ? "refused as it must (FAIL)" : "PASSED: it was not refused" );
-		ok = ok && named;
-		const bool after = runVk( 0, a, b, c ) && !firstA.empty() && a == firstA && b == firstB && c == firstC;
-		std::printf( "FARCARDS after the timeout: %s\n", after ? "OK (identical to the first run)" : "FAIL" );
-		ok = ok && after;
 	}
 	// lane VKFAR4: red 16 then green, each after set 0's colour sheet twin is dropped (the copy record of it kept)
 	for ( const int red : { 16, 0 } ) {

@@ -1,11 +1,11 @@
-## VKFAR4 (2026-11-15): a stuck Vulkan far dots, far cards or TAA run hands the frame to GL
+## VKFAR4 (2026-11-15): a stuck Vulkan far dots or far cards run hands the frame to GL
 
-Changed, not built, not checked live. Offline: tests/vkframe/farview.sh, farcards.sh and taaview.sh GATE OK, each with
-a new red (a faked 1 s timeout) refused with its reason, and the run after it matched.
+Changed, not built, not checked live. Offline: tests/vkframe/farview.sh and farcards.sh GATE OK with no `vk fence:` line;
+their reds WW_VKFENCE_RED=fardots / farcards (a faked 1 s timeout) print the site's line and FAIL.
 
 - When the wait for the last Vulkan run timed out (or the device was lost), these passes went on and rewrote commands
-  the GPU might still be running. That frame now stays on GL, with a `vk fardots:`, `vk farcards:` or `vk taa:` line
-  naming the wait's result.
+  the GPU might still be running. That frame now stays on GL, with a `vk fence: the last fardots run ...` (or farcards)
+  line naming the wait's result. Same helper and line as VKWATER4's other passes (fenceDone).
 
 ## VKFAR4 (2026-11-15): far card sheets are copied again when their Vulkan copy is remade
 

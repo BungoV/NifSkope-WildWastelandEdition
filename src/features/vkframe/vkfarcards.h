@@ -156,8 +156,7 @@ struct FarCardsRun
 	std::uint8_t global[kFxGlobalBytes] = {};
 	std::vector<FarCardsSet> sets;
 	int red = 0;  //!< gates only: 1 no depth write, 2 every set's cardBase 0, 4 the shadow compare inverted, lane VKFAR4:
-	              //!< 8 the last crossing's fence wait reads VK_TIMEOUT (must refuse), 16 a sheet's copy keyed on its
-	              //!< VkImage handle only (a twin remade at the old handle value keeps its empty image)
+	              //!< 16 a sheet's copy keyed on its VkImage handle only (a twin remade at the old handle value keeps its empty image)
 };
 /* GL current, the tone frame bound, impostor_cellinstez's uniforms set: the sets drawn on Vulkan, one crossing.
  * false: why; nothing drawn (GL draws them) */

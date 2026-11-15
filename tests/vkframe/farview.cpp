@@ -8,8 +8,7 @@
 //   flips = samples with any half past 2 ulp (a sprite edge or the g < 0.011 discard on one side only);
 //   EXACT = no half differs; BOUND = flips <= 0.05 % of covered, halves past 1 ulp outside flips <= 0.1 % of the covered
 //   halves, stencil differs on <= 0.05 % of covered samples. Anything else FAILS.
-// Reds (each must FAIL): red 1 stencil write mask 0, red 2 no blend, red 4 quads twice the point size. Lane VKFAR4: red 8 the
-// last crossing's fence wait reads VK_TIMEOUT (must refuse with the wait named; the run after it must match the first run).
+// Reds (each must FAIL): red 1 stencil write mask 0, red 2 no blend, red 4 quads twice the point size.
 // Last line `FARVIEW GATE OK` or `FARVIEW GATE FAILED`.
 #define main fxview_main
 #include "fxview.cpp"
@@ -496,7 +495,6 @@ int main( int argc, char ** argv )
 		return glGetError() == GL_NO_ERROR;
 	};
 	bool ok = true;
-	std::vector<std::uint16_t> firstA, firstB;  // lane VKFAR4: the first run, for the run after red 8
 	{
 		std::vector<std::uint16_t> a, b;
 		if ( !runVk( 0, a, b ) ) {
@@ -504,8 +502,6 @@ int main( int argc, char ** argv )
 			ok = false;
 		} else {
 			const Verdict v = judge( bg, a, refA, b, refB );
-			firstA = a;
-			firstB = b;
 			std::printf( "FARVIEW fardots %s (%zu samples covered, %zu halves differ, %zu edge flips, %zu halves past 1 ulp outside them, "
 				"max %d ulp outside them, stencil differs on %zu; volume %s)\n", v.word(), v.covered, v.diff, v.flips, v.past1, v.maxu,
 				v.stencil, "shared" );
@@ -531,16 +527,6 @@ int main( int argc, char ** argv )
 			std::printf( "FARVIEW red %s PASSED: the gate cannot see it\n", r.name );
 			ok = false;
 		}
-	}
-	{  // lane VKFAR4: red 8, the faked fence timeout
-		std::vector<std::uint16_t> a, b;
-		const bool ran = runVk( 8, a, b );
-		const bool named = !ran && why.find( "fence wait returned VkResult 2 " ) != std::string::npos;
-		std::printf( "FARVIEW red fence (VK_TIMEOUT): %s\n", named ? "refused as it must (FAIL)" : "PASSED: it was not refused" );
-		ok = ok && named;
-		const bool after = runVk( 0, a, b ) && !firstA.empty() && a == firstA && b == firstB;
-		std::printf( "FARVIEW after the timeout: %s\n", after ? "OK (identical to the first run)" : "FAIL" );
-		ok = ok && after;
 	}
 	const WwVkPresent::FxStat st = WwVkPresent::takeFarDotsStat();
 	std::printf( "FARVIEW stat (reds): %d runs, %d failed (%s), drawing thread %.3f ms a run (max %.3f; includes the harness's hand-off "

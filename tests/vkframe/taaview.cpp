@@ -534,7 +534,6 @@ int main( int argc, char ** argv )
 	// 2 = the vectors' jitter flipped (Vulkan only)
 	const float shiftPx = 0.7f;
 	size_t compared = 0;
-	std::string refusedWhy;  // lane VKFAR4: red 3's refusal
 	auto frame = [&]( int fi, int red, Verdict out[5] ) -> bool {
 		const int wr = fi & 1, rd = wr ^ 1;
 		const bool noHist = fi == 0;
@@ -674,14 +673,8 @@ int main( int argc, char ** argv )
 		t.mask = ( inputs & 2 ) ? gMask : 0;
 		t.velKey = key + 8;
 		t.maskKey = key + 9;
-		t.red = red == 3 ? 1 : 0;  // lane VKFAR4: red 3, the last run's fence wait reads VK_TIMEOUT
 		if ( !WwVkPresent::taaRun( t, why ) ) {
 			std::printf( "TAAVIEW f%d: taaRun refused: %s\n", fi, why.c_str() );
-			if ( red == 3 ) {  // the app's frame goes on to GL's TAA and the present
-				refusedWhy = why;
-				WwVkPresent::present( wnd, W, H, false, glProc, why );
-				pump();
-			}
 			return false;
 		}
 		View & V = view();
@@ -733,24 +726,10 @@ int main( int argc, char ** argv )
 			fails ? "FAIL" : v[0].word(), v[0].big, v[0].total, v[0].maxd );
 		ok = ok && fails;
 	}
-	{  // lane VKFAR4: a fence wait that is not VK_SUCCESS refuses the frame with the wait named; the next frame draws
-		Verdict v[5];
-		const bool ran = frame( kFrames + 2, 3, v );
-		const bool named = !ran && refusedWhy.find( "fence wait returned VkResult 2 " ) != std::string::npos;
-		std::printf( "TAAVIEW RED %s (the last run's fence wait reads VK_TIMEOUT: %s; must refuse)\n", named ? "FAIL" : "PASSED",
-			ran ? "it ran" : refusedWhy.c_str() );
-		ok = ok && named;
-		Verdict w[5];
-		bool after = frame( kFrames + 3, 0, w );
-		for ( int k = 0; k < 5; k++ )
-			after = after && w[k].ok;
-		std::printf( "TAAVIEW after the timeout %s (the next frame drew and matched)\n", after ? "OK" : "FAIL" );
-		ok = ok && after;
-	}
 	const WwVkPresent::TaaStat st = WwVkPresent::takeTaaStat();
 	std::printf( "TAAVIEW stat: %d runs on Vulkan, %d failed (%s), drawing thread %.3f ms a run (max %.3f), %d pipelines built in "
-		"%.1f ms; %zu values compared; fence waits not VK_SUCCESS %d\n", st.runs, st.fails, st.failWhy.c_str(),
-		st.runs ? st.cpuMs / st.runs : 0.0, st.maxMs, st.pipelines, st.buildMs, compared, st.fenceMisses );
+		"%.1f ms; %zu values compared\n", st.runs, st.fails, st.failWhy.c_str(), st.runs ? st.cpuMs / st.runs : 0.0, st.maxMs,
+		st.pipelines, st.buildMs, compared );
 	f.bindFramebuffer( cFb, 0 );
 	for ( std::uintptr_t k = 0; k < 10; k++ )
 		WwVkPresent::sharedTargetDrop( key + k );

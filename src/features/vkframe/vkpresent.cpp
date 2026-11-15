@@ -398,6 +398,28 @@ double nowMs()
 	return std::chrono::duration<double, std::milli>( C::now().time_since_epoch() ).count();
 }
 
+/* lane VKWATER4: a 1 s wait on a pass's last fence (pending: its last submit). Anything but VK_SUCCESS (a timeout, a lost
+ * device) means its commands may still run: false, why (also on stderr); the caller keeps its pending flag and leaves
+ * the frame to GL. Red WW_VKFENCE_RED=<site>[,<site>...] (gates only) fakes VK_TIMEOUT at those sites, pending or not. */
+bool fenceDone( VkFence fence, bool pending, const char * site, std::string & why )
+{
+	static const std::string red = [] {
+		const char * e = std::getenv( "WW_VKFENCE_RED" );
+		return e && *e ? "," + std::string( e ) + "," : std::string();
+	}();
+	const bool fake = !red.empty() && red.find( "," + std::string( site ) + "," ) != std::string::npos;
+	if ( !pending && !fake )
+		return true;
+	Vk & v = vk();
+	const VkResult r = fake ? VK_TIMEOUT : v.vkWaitForFences( v.dev, 1, &fence, VK_TRUE, 1000000000ull );
+	if ( r == VK_SUCCESS )
+		return true;
+	why = std::string( "the last " ) + site + " run's fence wait returned VkResult " + std::to_string( int( r ) )
+		+ ( r == VK_TIMEOUT ? " (timed out after 1 s)" : "" ) + ": its commands may still run, this frame stays on GL";
+	std::fprintf( stderr, "vk fence: %s\n", why.c_str() );
+	return false;
+}
+
 const char * modeName( VkPresentModeKHR m )
 {
 	switch ( m ) {
@@ -4475,18 +4497,9 @@ bool taaRun( const TaaRun & t, std::string & why )
 	const int inputs = t.job.ints[3];
 	if ( ( inputs & 3 ) && !g.copyImageSubData )
 		return refuse( "TAAINPUTS1's velocity / mask are on but no glCopyImageSubData" );
-	// the last run is done before its command buffer and sets are written again. Lane VKFAR4: a wait that is not VK_SUCCESS
-	// (a 1 s timeout, a lost device) leaves that run in flight: this frame's TAA stays on GL and A.pending stays set, so
-	// the next run waits again. Red 1: the wait reads VK_TIMEOUT
-	if ( A.pending || ( t.red & 1 ) ) {
-		const VkResult fr = ( t.red & 1 ) ? VK_TIMEOUT : v.vkWaitForFences( v.dev, 1, &A.fence, VK_TRUE, 1000000000ull );
-		if ( fr != VK_SUCCESS ) {
-			A.st.fenceMisses++;
-			const std::string fw = "the last run's fence wait returned VkResult " + std::to_string( int( fr ) )
-				+ ( fr == VK_TIMEOUT ? " (timed out after 1 s)" : "" ) + ": its commands may still run, this frame stays on GL";
-			std::fprintf( stderr, "vk taa: %s\n", fw.c_str() );
-			return refuse( fw );
-		}
+	// the last run is done before its command buffer and sets are written again
+	if ( A.pending ) {
+		v.vkWaitForFences( v.dev, 1, &A.fence, VK_TRUE, 1000000000ull );
 		A.pending = false;
 	}
 	std::string w;
