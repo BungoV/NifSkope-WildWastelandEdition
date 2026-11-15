@@ -2,6 +2,7 @@
 
 #include "features/near/cellbindlesspool.h"
 #include "features/near/cellbindlessreopen.h"
+#include "features/near/celltwinpick.h"	// lane VKOBJ5: the twin and its variant a GL program is drawn by
 #include "gl/celllooks.h"
 #include "gl/glshape.h"
 #include "wwswitch.h"
@@ -736,39 +737,38 @@ long long cellTried = 0, cellDrawn = 0, pbrmTried = 0, pbrmDrawn = 0;	// pbrm: p
 long long fxTried = 0, fxDrawn = 0;	// fx: fo4_effectcell / fo4_effectdecalcsm (twins 7-8, `vk objfx:`)
 int cellVar[4] = {}, pbrmVar[4] = {}, fxVar[4] = {};	// of the drawn: lit (the light buffer), skinned, blended, RT GI (per route)
 std::string cellWhy, pbrmWhy, fxWhy;
+
+// lane VKOBJ5: the route's switches the twin pick reads (cellTwinPick)
+CellTwinRoute cellTwinRoute( const NifSkopeOpenGLContext::Program * prog )
+{
+	CellTwinRoute r;
+	r.fogLeak = wwFogLeakShaderDefine();
+	r.frameUbo = prog->wwShadowFrame;
+	r.giMarch = wwCellGiVis() == 1;
+	r.prt = wwCellPrtOn();
+	r.rtddgi = rtddgiCellShaderDefine();
+	r.restir = rtddgiRestirShaderDefine();
+	r.restirGi = rtddgiRestirGiShaderDefine();
+	r.airZone = wwAirZoneShaderDefine();
+	return r;
+}
 }  // namespace
 
 bool vkCellDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * counts, const void * const * offs, GLsizei n, std::size_t verts )
 {
 	if ( !vkShadeOn() || !prog || n <= 0 || geo.on )
 		return false;
-	const std::string_view pn = prog->name;
-	const int twin = pn == "fo4_cellcsm.prog" ? 3 : pn == "fo4_cell.prog" ? 2 : pn == "pbrm_default.prog" ? 4 : pn == "pbrm_cell.prog" ? 5
-		: pn == "pbrm_cellcsm.prog" ? 6 : pn == "fo4_effectcell.prog" ? 7 : pn == "fo4_effectdecalcsm.prog" ? 8 : 0;
-	if ( !twin )
+	const int twin = cellTwinOf( prog->name );
+	if ( twin < 2 || twin > 8 )
 		return false;
 	const bool fx = twin >= 7;
 	const bool pbrm = twin >= 4 && !fx;
 	( fx ? fxTried : pbrm ? pbrmTried : cellTried )++;
 	std::string & lastWhy = fx ? fxWhy : pbrm ? pbrmWhy : cellWhy;
-	/* the effect twins are one variant each, matched on the pixel stage's loader key (Program::wwDefs): fo4_effectcell with
-	 * the air zones (they ship on), fo4_effectdecalcsm with or without them (the zones' read is not in its code) */
-	/* lane VKWATER3 G4: the all-on route's RT GI variant (WW_CELL_RTDDGI + RTDDGI_CASCADES + RESTIR, the same key on every twin;
-	 * fo4_effectcell's with the air zones) is the rt twin (objCellPs); its other mixes stay GL's */
-	static const std::string rtKey = "WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO";
-	static const std::string rtKeyAir = "WW_CELL_AIRZONE+" + rtKey;
-	const bool rt = twin == 7 ? prog->wwDefs == rtKeyAir : prog->wwDefs == rtKey || ( twin == 8 && prog->wwDefs == rtKeyAir );
-	const bool fxKey = !fx || rt || prog->wwDefs == "WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_FRAME_UBO"
-		|| ( twin == 8 && prog->wwDefs == "WW_CELL_FOGLEAK+WW_FRAME_UBO" );
-	// the twins are the base variant (fo4_cell.frag@WW_CELL_FOGLEAK+WW_FRAME_UBO): the loader's other defines make another program
-	const char * no = !wwFogLeakShaderDefine() ? "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan twin"
-		: !prog->wwShadowFrame ? "WW_FRAME_UBO off: GL's program is not the Vulkan twin"
-		: wwCellGiVis() == 1 ? "WW_CELL_GI_MARCH in GL's program: no Vulkan twin"
-		: wwCellPrtOn() ? "WW_CELL_PRT in GL's program: no Vulkan twin"
-		: !rt && rtddgiCellShaderDefine() ? "WW_CELL_RTDDGI in GL's program without WW_CELL_RTDDGI_CASCADES + WW_CELL_RESTIR: no Vulkan twin"
-		: !rt && rtddgiRestirShaderDefine() ? "WW_CELL_RESTIR in GL's program without WW_CELL_RTDDGI: no Vulkan twin"
-		: rtddgiRestirGiShaderDefine() ? "WW_CELL_RESTIRGI in GL's program: no Vulkan twin"
-		: !fxKey ? "GL's effect program is another variant (its pixel stage's loader defines): no Vulkan twin" : nullptr;
+	// the variant from the pixel stage's loader key (Program::wwDefs): the base, or the all-on route's RT GI (celltwinpick.h)
+	const CellTwinPick pick = cellTwinPick( prog->name, prog->wwDefs, cellTwinRoute( prog ) );
+	const bool rt = pick.rt;
+	const char * no = pick.no;
 	if ( no ) {
 		WwVkPresent::objBlOnGl( no );
 		lastWhy = no;
@@ -818,19 +818,13 @@ bool vkPfxDraw( const NifSkopeOpenGLContext::Program * prog, const float * pos, 
 	pfxTried++;
 	GLboolean mask[4] = {};
 	qc->functions()->glGetBooleanv( GL_COLOR_WRITEMASK, mask );
-	// the twin is particles_cell.frag@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_FRAME_UBO (vkframe_spirv.sh fxp); round 5: the all-on
-	// route's RT GI variant (+ WW_CELL_RESTIR + RTDDGI + RTDDGI_CASCADES, the cell twins' rtKeyAir) is the rt twin
-	static const std::string rtKeyAir = "WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO";
-	const bool rt = prog->wwDefs == rtKeyAir;
-	const char * no = !wwFogLeakShaderDefine() ? "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan twin"
-		: !wwAirZoneShaderDefine() ? "WW_CELL_AIRZONE off: GL's program is not the Vulkan twin"
-		: !prog->wwShadowFrame ? "WW_FRAME_UBO off: GL's program is not the Vulkan twin"
-		: wwCellGiVis() == 1 ? "WW_CELL_GI_MARCH in GL's program: no Vulkan twin"
-		: wwCellPrtOn() ? "WW_CELL_PRT in GL's program: no Vulkan twin"
-		: !rt && rtddgiCellShaderDefine() ? "WW_CELL_RTDDGI in GL's program without WW_CELL_RTDDGI_CASCADES + WW_CELL_RESTIR: no Vulkan twin"
-		: !rt && rtddgiRestirShaderDefine() ? "WW_CELL_RESTIR in GL's program without WW_CELL_RTDDGI: no Vulkan twin"
-		: rtddgiRestirGiShaderDefine() ? "WW_CELL_RESTIRGI in GL's program: no Vulkan twin"
-		: !( mask[0] && mask[1] && mask[2] && mask[3] ) ? "a colour write mask (the imagespace's measure pass)" : nullptr;
+	// the twin is particles_cell.frag@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_FRAME_UBO (vkframe_spirv.sh fxp), its RT GI variant the
+	// all-on route's air key (celltwinpick.h)
+	CellTwinRoute route = cellTwinRoute( prog );
+	route.colourMask = mask[0] && mask[1] && mask[2] && mask[3];
+	const CellTwinPick pick = cellTwinPick( prog->name, prog->wwDefs, route );
+	const bool rt = pick.rt;
+	const char * no = pick.no;
 	if ( no ) {
 		WwVkPresent::objBlOnGl( no );
 		pfxWhy = no;

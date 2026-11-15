@@ -103,6 +103,7 @@ struct OpDraw
 	std::uintptr_t poolKey = 0;
 	VkFramebuffer fb = VK_NULL_HANDLE;
 	std::vector<VkImageView> fbViews;
+	std::uint64_t fbGen = 0;  // lane VKOBJ5: sharedGen() when made (a target remade can hand back the same view handle)
 	int w = 0, h = 0;
 	VkRect2D scissor {};  // lane VKOBJ4 open item 3: GL's scissor box (objBlFrameRead), the whole frame when GL's test is off
 	std::vector<std::uintptr_t> keys;  // the shared targets it draws into or reads (the crossing hands them over)
@@ -143,6 +144,8 @@ struct OpTexel
 	VkBuffer viewBuf = VK_NULL_HANDLE;
 	VkFormat viewFmt = VK_FORMAT_UNDEFINED;
 	VkDeviceSize viewRange = 0, viewOff = 0;
+	std::uint64_t sig = 0;   // lane VKOBJ5: GL's view of the name when made (buffer, format, range, buffer size)
+	std::uint32_t gen = 0;   // lane VKOBJ5: one more each time the name's twin is made anew
 };
 
 // a light buffer GL writes straight into exported Vulkan memory (objBlTexelStore; the crossing reads it in place)
@@ -166,7 +169,8 @@ struct Op
 	std::map<std::uint32_t, OpStandIn> stand;  // key: view type * 4 + element type
 	CsmBuf zeroTexel;
 	VkBufferView texelView[3] = {};             // float / int / uint
-	std::map<unsigned, OpTexel> texTwins;       // GL's buffer texture -> its twin
+	std::map<unsigned, OpTexel> texTwins;       // GL's buffer texture -> its twin (the name's current generation)
+	std::vector<OpTexel> texRetired;            // lane VKOBJ5: older generations the prepared draws still read (objBlDrawsReset frees them)
 	std::map<unsigned, OpStore> stores;         // GL's buffer name -> the store under it
 	std::map<unsigned, std::uint64_t> copyMemo; // lane VKWATER3: GL's texture -> sharedGen() when copied this frame (objCellCopyTwin)
 	std::map<unsigned, std::uint64_t> texelMemo; // lane VKWATER3: GL's buffer texture -> its copy's key, copied this frame (objBlTexelCopy)
@@ -962,7 +966,7 @@ void objBlPipeFree()
 {
 	Op & O = opS();
 	if ( ( !O.made.empty() || !O.pools.empty() || !O.draws.empty() || !O.stand.empty() || O.zeroTexel.buf || O.fence || O.runFence || O.glDone
-		|| !O.smps.empty() || !O.texTwins.empty() || O.smpDsl || !O.stores.empty() || O.pfxDsl ) && vk().ok ) {
+		|| !O.smps.empty() || !O.texTwins.empty() || !O.texRetired.empty() || O.smpDsl || !O.stores.empty() || O.pfxDsl ) && vk().ok ) {
 		Vk & v = vk();
 		drain();
 		v.vkDeviceWaitIdle( v.dev );
@@ -1025,6 +1029,12 @@ void objBlPipeFree()
 			csmBufFree( t.second.buf, gl().ok && t.second.buf.glCtx == gl().ctx );
 		}
 		O.texTwins.clear();
+		for ( OpTexel & t : O.texRetired ) {
+			if ( t.view && destroyView )
+				destroyView( v.dev, t.view, nullptr );
+			csmBufFree( t.buf, gl().ok && t.buf.glCtx == gl().ctx );
+		}
+		O.texRetired.clear();
 		// the stores (their owners see objBlTexelStoreIs false and fill a GL buffer of their own again)
 		for ( auto & s : O.stores )
 			csmBufFree( s.second.buf, gl().ok && s.second.buf.glCtx == gl().ctx );
@@ -1971,8 +1981,7 @@ void opStoreUnview( VkBuffer b )
 {
 	Vk & v = vk();
 	const auto destroy = reinterpret_cast<PFN_vkDestroyBufferView>( v.vkGetDeviceProcAddr( v.dev, "vkDestroyBufferView" ) );
-	for ( auto & e : opS().texTwins ) {
-		OpTexel & t = e.second;
+	const auto unview = [&]( OpTexel & t ) {
 		if ( t.ext == b ) {
 			t.ext = VK_NULL_HANDLE;
 			t.range = 0;
@@ -1983,7 +1992,24 @@ void opStoreUnview( VkBuffer b )
 			t.view = VK_NULL_HANDLE;
 			t.viewBuf = VK_NULL_HANDLE;
 		}
+	};
+	for ( auto & e : opS().texTwins )
+		unview( e.second );
+	for ( OpTexel & t : opS().texRetired )
+		unview( t );
+}
+
+// a texel twin's view and buffer freed (Vulkan's last read of them done)
+void opTexelFree( OpTexel & t )
+{
+	Vk & v = vk();
+	if ( t.view && v.ok ) {
+		const auto destroy = reinterpret_cast<PFN_vkDestroyBufferView>( v.vkGetDeviceProcAddr( v.dev, "vkDestroyBufferView" ) );
+		if ( destroy )
+			destroy( v.dev, t.view, nullptr );
 	}
+	t.view = VK_NULL_HANDLE;
+	csmBufFree( t.buf, gl().ok && t.buf.glCtx == gl().ctx );
 }
 
 // the worker's half of objBlTexelRead: the view's bytes copied to the host, submitted after GL's signal, ours signalled back
@@ -2406,6 +2432,9 @@ void objBlDrawsReset()
 	opRunWait();
 	opS().live = 0;
 	opS().rowCount = 0;
+	for ( OpTexel & t : opS().texRetired )  // no prepared draw reads an older twin now
+		opTexelFree( t );
+	opS().texRetired.clear();
 }
 
 bool objBlRun( const std::vector<unsigned> & glBufs, int mode, std::string & why )
@@ -3353,6 +3382,26 @@ bool objBlTexelCopy( GlProc gp, unsigned tex, std::vector<unsigned> & glNames, s
 	if ( off < 0 || bytes < int( f->bytes ) )
 		return why = "the buffer texture's range holds no texel", false;
 	OpTexel & t = opS().texTwins[tex];
+	/* lane VKOBJ5: the twin is keyed on (name, generation). GL's view of the name changed (a deleted name handed to a new
+	 * texture, or its buffer re-specified): a new generation, never the old twin grown or read; the old one stays for the
+	 * prepared draws that read it. red 2: the name-only key */
+	std::uint64_t sig = 1469598103934665603ull;
+	for ( const int p : { buf, fmt, off, size, whole } )
+		sig = ( sig ^ std::uint64_t( unsigned( p ) ) ) * 1099511628211ull;
+	if ( red != 2 && t.sig != sig && ( t.buf.buf || t.view || t.ext ) ) {
+		if ( opS().live ) {
+			opS().texRetired.push_back( t );
+		} else {
+			opRunWait();
+			opTexelFree( t );
+		}
+		const std::uint32_t gen = t.gen + 1;
+		t = OpTexel();
+		t.gen = gen;
+		opS().texelMemo.erase( tex );
+		opS().storeSt.regen++;
+	}
+	t.sig = sig;
 	const VkDeviceSize need = VkDeviceSize( bytes );
 	// GL's buffer is a store: Vulkan reads its memory in place (GL's writes are ordered before the crossing's signal)
 	const auto st = opS().stores.find( unsigned( buf ) );
@@ -3536,6 +3585,7 @@ ObjBlStoreStat objBlTexelStoreStat( bool reset )
 	ObjBlStoreStat s = O.storeSt;
 	s.stores = int( O.stores.size() );
 	s.subData = O.storeSubData;
+	s.retired = int( O.texRetired.size() );
 	if ( reset )
 		O.storeSt = ObjBlStoreStat();
 	return s;
@@ -3553,14 +3603,12 @@ void objBlTexelForget( unsigned tex )
 	const auto it = O.texTwins.find( tex );
 	if ( it == O.texTwins.end() )
 		return;
-	opRunWait();
-	Vk & v = vk();
-	if ( it->second.view && v.ok ) {
-		const auto destroy = reinterpret_cast<PFN_vkDestroyBufferView>( v.vkGetDeviceProcAddr( v.dev, "vkDestroyBufferView" ) );
-		if ( destroy )
-			destroy( v.dev, it->second.view, nullptr );
+	if ( O.live ) {
+		O.texRetired.push_back( it->second );  // the prepared draws still read it
+	} else {
+		opRunWait();
+		opTexelFree( it->second );
 	}
-	csmBufFree( it->second.buf, gl().ok && it->second.buf.glCtx == gl().ctx );
 	O.texTwins.erase( it );
 	O.texelMemo.erase( tex );
 }
@@ -3875,7 +3923,7 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 			return why = std::string( "the depth target " ) + ( sh ? "is smaller than the frame" : "is not a shared target" ), false;
 		views.push_back( sh->attView ? sh->attView : sh->view );  // a stencil format: the depth and stencil aspects
 	}
-	if ( s.fb && ( s.fbViews != views || s.w != d.w || s.h != d.h ) ) {
+	if ( s.fb && ( s.fbGen != sharedGen() || s.fbViews != views || s.w != d.w || s.h != d.h ) ) {
 		drain();
 		v.vkDeviceWaitIdle( v.dev );
 		v.vkDestroyFramebuffer( v.dev, s.fb, nullptr );
@@ -3892,6 +3940,7 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 		if ( v.vkCreateFramebuffer( v.dev, &fci, nullptr, &s.fb ) != VK_SUCCESS )
 			return why = "the draw's framebuffer failed", false;
 		s.fbViews = views;
+		s.fbGen = sharedGen();
 	}
 	s.w = d.w;
 	s.h = d.h;

@@ -381,6 +381,17 @@ pass for both bindless twins (fo4_cellbl, fo4_cellcsmbl): depth EXACT, colour in
   twin would move under prepared draws`, already failing at 9772bc98). objBlTexelForget drops the twin; the pfx and cell
   gates call it before deleting their buffer textures. The app does not call it yet: a buffer texture recreated at a
   larger size under a reused name can be refused (GL draws it) until the next frame's first draw.
+- Round 6: texel twins are keyed on (GL name, generation). The generation moves when GL's view of the buffer texture
+  changed (its buffer, format, offset or size); the old twin is held for the prepared draws (freed by objBlDrawsReset)
+  or freed at once, and a fresh twin is made. A buffer recreated larger under the same name no longer refuses or reads a
+  stale twin. Offline: blview `texel reuse` (128 KiB re-specify under a live draw: 1 new generation, 1 held, 0 of 131072
+  bytes differ, 0 held after the reset); red texelreuse (the name-only key) FAILs.
+- Round 6: a bl twin draw's framebuffer is remade when sharedGen() moved, not only when its view handles changed (a
+  target remade can hand back the same VkImageView handle).
+- Round 6: the RT-twin pick (vkCellDraw, vkPfxDraw) moved into src/features/near/celltwinpick.h, unchanged in behaviour.
+  Offline table gate tests/vkframe/twinpick/run.sh: every twin 2-9, base and RT key, picks exactly its own twin and the
+  module that compiles its own pixel source with the key's defines; each key one RT define short refuses; red swap
+  (twins 2 and 3's RT modules swapped) and red noinert FAIL.
 
 ## VKFAR2 P7 (2026-11-14): depth of field, motion blur and object blur join the tone pass on Vulkan (WW_VKVIEW=1)
 
