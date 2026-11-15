@@ -4475,9 +4475,18 @@ bool taaRun( const TaaRun & t, std::string & why )
 	const int inputs = t.job.ints[3];
 	if ( ( inputs & 3 ) && !g.copyImageSubData )
 		return refuse( "TAAINPUTS1's velocity / mask are on but no glCopyImageSubData" );
-	// the last run is done before its command buffer and sets are written again
-	if ( A.pending ) {
-		v.vkWaitForFences( v.dev, 1, &A.fence, VK_TRUE, 1000000000ull );
+	// the last run is done before its command buffer and sets are written again. Lane VKFAR4: a wait that is not VK_SUCCESS
+	// (a 1 s timeout, a lost device) leaves that run in flight: this frame's TAA stays on GL and A.pending stays set, so
+	// the next run waits again. Red 1: the wait reads VK_TIMEOUT
+	if ( A.pending || ( t.red & 1 ) ) {
+		const VkResult fr = ( t.red & 1 ) ? VK_TIMEOUT : v.vkWaitForFences( v.dev, 1, &A.fence, VK_TRUE, 1000000000ull );
+		if ( fr != VK_SUCCESS ) {
+			A.st.fenceMisses++;
+			const std::string fw = "the last run's fence wait returned VkResult " + std::to_string( int( fr ) )
+				+ ( fr == VK_TIMEOUT ? " (timed out after 1 s)" : "" ) + ": its commands may still run, this frame stays on GL";
+			std::fprintf( stderr, "vk taa: %s\n", fw.c_str() );
+			return refuse( fw );
+		}
 		A.pending = false;
 	}
 	std::string w;

@@ -229,6 +229,7 @@ struct TaaRun
 	std::uintptr_t velKey = 0, maskKey = 0;
 	bool colorFromView = false;     //!< lane VKPOST2: GL skipped its colour blit; Vulkan resolves the view into cur behind
 	                                //!< the deferred tone pass (one crossing for both). Refused without a deferred pass.
+	int red = 0;                    //!< gates only (lane VKFAR4): 1 the last run's fence wait reads VK_TIMEOUT (must refuse)
 };
 /* GL current, the view bound, the frame's colour and depth already blitted into the shared cur / depth: the vectors,
  * resolve and copy-back run on Vulkan. false: why; nothing drawn (GL runs its passes). */
@@ -243,6 +244,7 @@ struct TaaStat
 	int pipelines = 0;
 	double buildMs = 0.0;
 	int merged = 0;                    //!< lane VKPOST2: runs that carried the deferred tone pass (one crossing)
+	int fenceMisses = 0;               //!< lane VKFAR4: waits on the last run's fence that did not return VK_SUCCESS
 };
 TaaStat takeTaaStat();
 
@@ -572,6 +574,8 @@ struct FxStat
 	int pipelines = 0;
 	double buildMs = 0.0;
 	int copies = 0;                 //!< texture copies into twins since the last take
+	int reusedHandles = 0;          //!< lane VKWATER4: water ray runs whose depth twin kept its VkImage handle over a sharedGen() move
+	int fenceMisses = 0;            //!< lane VKWATER4: waterRun's wait on the last crossing's fence that did not return VK_SUCCESS
 };
 FxStat takeVolSkyStat();
 struct CloudRun
@@ -619,7 +623,8 @@ struct FarDotsRun
 	int dotRed = 0;
 	FxTex tex[5];                   //!< t0 atApTex, t1 volAirTerr, t2 volAirRainMap, t3 volTex, t4 volTile
 	std::uint8_t loose[kT_fardotsBytes] = {};
-	int red = 0;                    //!< gates only: 1 stencil write mask 0, 2 no blend, 4 quads twice the point size
+	int red = 0;                    //!< gates only: 1 stencil write mask 0, 2 no blend, 4 quads twice the point size,
+	                                //!< 8 the last crossing's fence wait reads VK_TIMEOUT (must refuse; lane VKFAR4)
 };
 /* GL current, the tone frame bound, cell_fardots' uniforms set: the dots as instanced quads on Vulkan (depth LEQUAL no
  * write, blend ONE / ONE, stencil ALWAYS ref 1 REPLACE mask 0x03, as GL's). false: why; nothing drawn (GL draws its points) */

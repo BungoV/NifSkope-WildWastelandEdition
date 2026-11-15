@@ -93,6 +93,7 @@ VkDeviceSize fcLayerBytes( const FcFormat & f, int w, int h )
 struct FarCards
 {
 	std::map<std::uintptr_t, Shared> twins;
+	std::map<std::uintptr_t, std::uint64_t> twinGen;  // lane VKFAR4: sharedGen() at each key's last make (a cache of a twin keys on it)
 	std::map<std::uintptr_t, FcBuf> bufs;
 	FcDev d;
 	// 3. the far cards' set (farCardsSet)
@@ -517,6 +518,7 @@ bool farTwin( std::uintptr_t key, int type, int w, int h, int layers, unsigned g
 	C.st.mb += s.mb;
 	tex = s.tex;
 	C.twins[key] = s;
+	C.twinGen[key] = ++sharedGen();  // lane VKFAR4: what is kept of a twin (fcSheet's copy, the zero cube's clear) keys on it
 	return true;
 }
 
@@ -532,6 +534,7 @@ void farTwinDrop( std::uintptr_t key )
 	C.st.dropped++;
 	sharedFree( it->second, gl().ok && it->second.glCtx == gl().ctx );
 	C.twins.erase( it );
+	sharedGen()++;
 }
 
 // one level of one layer as the present device sees it (the gates compare it with what GL wrote; GL finished first)

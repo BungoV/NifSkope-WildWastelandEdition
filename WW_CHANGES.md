@@ -1,3 +1,20 @@
+## VKFAR4 (2026-11-15): a stuck Vulkan far dots, far cards or TAA run hands the frame to GL
+
+Changed, not built, not checked live. Offline: tests/vkframe/farview.sh, farcards.sh and taaview.sh GATE OK, each with
+a new red (a faked 1 s timeout) refused with its reason, and the run after it matched.
+
+- When the wait for the last Vulkan run timed out (or the device was lost), these passes went on and rewrote commands
+  the GPU might still be running. That frame now stays on GL, with a `vk fardots:`, `vk farcards:` or `vk taa:` line
+  naming the wait's result.
+
+## VKFAR4 (2026-11-15): far card sheets are copied again when their Vulkan copy is remade
+
+Changed, not built, not checked live. Offline: tests/vkframe/farcards.sh GATE OK; its new red (the old check) drew
+differently after a remade sheet came back at the same image handle.
+
+- A far card sheet's Vulkan copy remembered which image it had filled by the image handle alone. A copy remade at the
+  same handle was left empty and the cards read garbage. The same for the empty shadow cube's clear.
+
 ## VKFAR3 G3 (2026-11-14): the near far ground (ring 0's live terrain) draws on Vulkan (WW_VKVIEW=1)
 
 Changed, not built, not checked live.

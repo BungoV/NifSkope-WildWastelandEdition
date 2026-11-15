@@ -349,9 +349,18 @@ bool farDotsRun( const FarDotsRun & t, std::string & why )
 		return refuse( "the present device or GL's entry points are not ready in this context" );
 	if ( !g.copyImageSubData )
 		return refuse( "no glCopyImageSubData (the inputs' copies into their shared twins)" );
-	// the last crossing (any fx pass) is done before its command buffer, sets, framebuffer and buffers are written again
-	if ( F.pending ) {
-		v.vkWaitForFences( v.dev, 1, &F.fence, VK_TRUE, 1000000000ull );
+	// the last crossing (any fx pass) is done before its command buffer, sets, framebuffer and buffers are written again.
+	// lane VKFAR4: a wait that is not VK_SUCCESS (a 1 s timeout, a lost device) leaves that crossing in flight: this frame
+	// stays on GL and F.pending stays set, so the next run waits again. Red 8: the wait reads VK_TIMEOUT
+	if ( F.pending || ( t.red & 8 ) ) {
+		const VkResult fr = ( t.red & 8 ) ? VK_TIMEOUT : v.vkWaitForFences( v.dev, 1, &F.fence, VK_TRUE, 1000000000ull );
+		if ( fr != VK_SUCCESS ) {
+			S.fenceMisses++;
+			const std::string fw = "the last crossing's fence wait returned VkResult " + std::to_string( int( fr ) )
+				+ ( fr == VK_TIMEOUT ? " (timed out after 1 s)" : "" ) + ": its commands may still run, this frame stays on GL";
+			std::fprintf( stderr, "vk fardots: %s\n", fw.c_str() );
+			return refuse( fw );
+		}
 		F.pending = false;
 	}
 	std::string w;

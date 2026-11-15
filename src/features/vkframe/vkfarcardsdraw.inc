@@ -26,8 +26,18 @@ struct FcDraw
 	VkRenderPass pipePass = VK_NULL_HANDLE;
 	int pipeSamples = 0, pipelines = 0;
 	std::map<std::string, VkSampler> samplers;  // by GL's sampling state
-	std::map<std::uintptr_t, std::pair<unsigned, VkImage>> copied;  // a sheet twin -> the GL name / image copied into it
-	VkImage zeroCube = VK_NULL_HANDLE;  // the zero cube twin's image when it was cleared
+	// a sheet twin -> the GL name / image copied into it and the twin's make (farCards().twinGen, a sharedGen() value; lane
+	// VKFAR4: a twin remade at its key can come back at the freed image's handle value, and the handle alone would skip the
+	// copy into the new, empty image)
+	struct Copied
+	{
+		unsigned tex = 0;
+		VkImage img = VK_NULL_HANDLE;
+		std::uint64_t gen = 0;
+	};
+	std::map<std::uintptr_t, Copied> copied;
+	VkImage zeroCube = VK_NULL_HANDLE;  // the zero cube twin's image when it was cleared, and its make (twinGen)
+	std::uint64_t zeroGen = 0;
 	double buildMs = 0.0;
 	void * glCtx = nullptr;
 	void( WINAPI * copyBuffer )( GLuint, GLuint, std::intptr_t, std::intptr_t, std::intptr_t ) = nullptr;  // glCopyNamedBufferSubData
@@ -338,7 +348,7 @@ bool fcTexel( int slot, const WwVkPresent::FarCardTex & t, bool isInt, VkBufferV
 }
 
 // a sheet (any of the four): its twin, copied once a GL name (the sheets are written once, when their paint lands)
-bool fcSheet( const WwVkPresent::FarCardTex & t, VkImageView & view, FxNames & names, int & copies, std::string & why )
+bool fcSheet( const WwVkPresent::FarCardTex & t, int red, VkImageView & view, FxNames & names, int & copies, std::string & why )
 {
 	Gl & g = gl();
 	FcDraw & D = fcDraw();
@@ -356,10 +366,13 @@ bool fcSheet( const WwVkPresent::FarCardTex & t, VkImageView & view, FxNames & n
 		return false;
 	}
 	auto it = D.copied.find( key );
-	if ( it == D.copied.end() || it->second.first != t.tex || it->second.second != s->img ) {
+	const std::uint64_t made = farCards().twinGen[key];
+	const bool reused = it != D.copied.end() && it->second.img == s->img && it->second.gen != made;  // red 16: not seen
+	D.st.reusedHandles += reused;
+	if ( it == D.copied.end() || it->second.tex != t.tex || it->second.img != s->img || ( reused && !( red & 16 ) ) ) {
 		for ( int l = 0; l < s->levels; l++ )
 			g.copyImageSubData( t.tex, kTexture2D, l, 0, 0, 0, twin, kTexture2D, l, 0, 0, 0, std::max( t.w >> l, 1 ), std::max( t.h >> l, 1 ), 1 );
-		D.copied[key] = { t.tex, s->img };
+		D.copied[key] = { t.tex, s->img, made };
 		copies++;
 	}
 	view = s->view;
@@ -381,10 +394,12 @@ bool fcCube( const WwVkPresent::FarCardTex & t, VkImageView & view, FxNames & na
 			why = "the zero cube has no view";
 			return false;
 		}
-		if ( D.zeroCube != s->img ) {
+		const std::uint64_t made = farCards().twinGen[kFcCubeKey + 1];
+		if ( D.zeroCube != s->img || D.zeroGen != made ) {  // lane VKFAR4: a remade twin can keep the handle value
 			const float one = 1.0f;  // depth 1: nothing in the zero cube shadows
 			D.clearTex( twin, 0, 0x1902, 0x1406, &one );  // GL_DEPTH_COMPONENT, GL_FLOAT
 			D.zeroCube = s->img;
+			D.zeroGen = made;
 		}
 		view = s->view;
 		names.add( twin );
@@ -507,8 +522,17 @@ bool farCardsRun( const FarCardsRun & t, std::string & why )
 		return refuse( "the present device or GL's entry points are not ready in this context" );
 	if ( !g.copyImageSubData )
 		return refuse( "no glCopyImageSubData (the inputs' copies into their twins)" );
-	if ( F.pending ) {  // the last crossing is done before its command buffer, sets and buffers are written again
-		v.vkWaitForFences( v.dev, 1, &F.fence, VK_TRUE, 1000000000ull );
+	// the last crossing is done before its command buffer, sets and buffers are written again. Lane VKFAR4: a wait that is
+	// not VK_SUCCESS leaves that crossing in flight: this frame stays on GL, F.pending stays set. Red 8: it reads VK_TIMEOUT
+	if ( F.pending || ( t.red & 8 ) ) {
+		const VkResult fr = ( t.red & 8 ) ? VK_TIMEOUT : v.vkWaitForFences( v.dev, 1, &F.fence, VK_TRUE, 1000000000ull );
+		if ( fr != VK_SUCCESS ) {
+			S.fenceMisses++;
+			const std::string fw = "the last crossing's fence wait returned VkResult " + std::to_string( int( fr ) )
+				+ ( fr == VK_TIMEOUT ? " (timed out after 1 s)" : "" ) + ": its commands may still run, this frame stays on GL";
+			std::fprintf( stderr, "vk farcards: %s\n", fw.c_str() );
+			return refuse( fw );
+		}
 		F.pending = false;
 	}
 	std::string w;
@@ -578,7 +602,7 @@ bool farCardsRun( const FarCardsRun & t, std::string & why )
 			const int k = kSheetSlot[j];
 			if ( !bind.count( std::uint32_t( 64 + k ) ) )
 				continue;
-			if ( !fcSheet( cs.sheet[j], sv[k], names, S.copies, w ) )
+			if ( !fcSheet( cs.sheet[j], t.red, sv[k], names, S.copies, w ) )
 				return refuse( "a card set's sheet t" + std::to_string( k ) + ": " + w );
 			if ( bind.count( std::uint32_t( 128 + k ) ) && !fcSampler( cs.sheet[j], true, false, t.red, ss[k], w ) )
 				return refuse( "a card set's sheet sampler s" + std::to_string( k ) + ": " + w );
