@@ -1,3 +1,12 @@
+## VKWATER4 (2026-11-15): the ocean's arrays are shared in place, no copies per frame (WW_VKVIEW=1)
+
+Changed, not built, not checked live. Offline: oceanview arm 6, B / C / D at all 8 levels EXACT against the copy route
+(2 winds x 2 phases), lightRun copies 0 (copy route 146); waterdraw seed 3 EXACT against the copy route, ocean copies 0.
+
+- features/water/cellocean.cpp makes h0, q and the three arrays shared targets; ocean_vk.hlsl stages 7-10 write the
+  array levels in place, so the pass and the water draw copy nothing. The `vk ocean:` line counts copies per frame.
+- Red WW_VKVIEW_OCEAN_RED=prev: the water reads the other set (the frame before's) and must differ.
+
 ## VKWATER4 (2026-11-15): the ultra ocean builds on Vulkan compute (WW_VKVIEW=1)
 
 Changed, not built, not checked live. Offline: tests/vkframe/oceanview.sh, 96 greens EXACT against GL (spectrum, 14 FFT

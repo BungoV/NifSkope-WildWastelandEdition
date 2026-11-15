@@ -293,11 +293,13 @@ SkyStat takeSkyStat();
  * the worker records the dispatches (LightBindingsVk.hlsli's set, a 128-byte push block each), GL waits and copies the
  * `out` twins back into GL's textures, so every consumer reads what it read before. false: why; nothing changed (GL draws
  * its stages). Reds WW_VKVIEW_AO_RED / _CONTACT_RED / _SSGI_RED = 1 (or WW_VKVIEW off): GL. */
-/* Lane VKWATER4 (row G5): the ultra ocean (cellocean.cpp) is pass LightOcean, kernels ocean_vk.hlsl stages 1-6.
- * Red WW_VKVIEW_OCEAN_RED=1 (or WW_VKVIEW off): GL's draws. */
+/* Lane VKWATER4 (row G5): the ultra ocean (cellocean.cpp) is pass LightOcean, kernels ocean_vk.hlsl stages 1-6; 7-10
+ * (the *A kernels) write the water's shared arrays in place (LightImage::share), so nothing is copied. Red
+ * WW_VKVIEW_OCEAN_RED=1 (or WW_VKVIEW off): GL's draws; =prev: the water reads the arrays the frame before wrote. */
 enum LightPass { LightAo = 0, LightContact = 1, LightSsgi = 2, LightOcean = 3, LightPasses = 4 };
 enum LightKernel { LightAoGbuf = 0, LightAoMip, LightAoRaw, LightAoBlur, LightAoBlurF, LightContactK, LightSsgiK,
-	LightOceanSpecK, LightOceanFftK, LightOceanFinBcK, LightOceanFinDK, LightOceanMipBcK, LightOceanMipDK, LightKernels };
+	LightOceanSpecK, LightOceanFftK, LightOceanFinBcK, LightOceanFinDK, LightOceanMipBcK, LightOceanMipDK,
+	LightOceanFinBcAK, LightOceanFinDAK, LightOceanMipBcAK, LightOceanMipDAK, LightKernels };
 struct LightImage
 {
 	unsigned tex = 0;              //!< GL's texture (GL_TEXTURE_2D; 0 for a twin only the dispatches use)
@@ -306,6 +308,8 @@ struct LightImage
 	bool in = false, out = false;  //!< copied into the twin before / back into GL's texture after
 	int tiles = 0, outLevel = 0;   //!< tiles > 0 (an output): tex is a GL_TEXTURE_2D_ARRAY; the twin's `tiles` side-by-side
 	                               //!< w / tiles wide tiles go back into its layers 0.. at level outLevel
+	std::uintptr_t share = 0;      //!< lane VKWATER4: a sharedTarget key (2D or 2D array): the dispatches use that image's
+	                               //!< level outLevel itself (every layer; w = its width x layers, h its height), no twin, no copy
 };
 struct LightDispatch
 {
@@ -333,8 +337,15 @@ struct LightStat
 	std::string glWhy, failWhy;
 	int pipelines = 0;
 	double buildMs = 0.0;
+	int copies = 0, shared = 0;        //!< lane VKWATER4: glCopyImageSubData calls / shared-target entries, since the last take
 };
 LightStat takeLightStat( int pass );
+//! lane VKWATER4: the water draws' ocean inputs (waterOcean*) since the last take: copied into a twin / sampled in place
+struct OceanWaterStat
+{
+	int copies = 0, shared = 0;
+};
+OceanWaterStat takeOceanWaterStat();
 
 /* Lane VKLIGHT2 (row L4): the reflections' full-screen stages (cell_ssr.frag 5, 1-4) as Vulkan compute,
  * res/shaders/hlsl/vklight/ssr_vk.hlsl (SSR_LIVE). GL keeps stage 0, the scene pass and the water's rays; the pass's own
