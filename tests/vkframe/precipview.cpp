@@ -59,6 +59,20 @@
 // Pack-order check (11-15, bar set before its first run): after the stat line, a lit run with volTerms 2 (a refused term)
 // read and asked as precipDraw does (precipLitRead, precipAdmits, then the packs) must be refused with 0 packs on refused
 // runs. Red: the same run packed first and handed to precipRun must be refused with its 3 packs counted (> 0), or FAIL.
+// Fixture move (11-15, the bar kept): the probe's refused switch is volPartRed 1 (refused for good), not volTerms 2 (the
+// lamps, lifted below).
+// Lamps (L8 term 2a, 11-15; bar set before its first run, never widened): cases rain_near_lamps (rain_near_lit's run,
+// unfogged) and snow_far_lamps (snow_far_lit's run through the air), volTerms 3 (the sun + the lamps), a cellLights texture
+// buffer this harness uploads (RGBA32F, 8 texels a light, celllights.cpp's layout) with cellLightCount 5: an omni, a
+// spot, a hemisphere, a box and one out of reach; cellShadowOn 0, cellGoboOn 0, cellClusterOn 0 (the flat loop),
+// cellLightPhys 0 (the game's curve, the app's default), cellRed 0. Every lit case sets these switches (the sun cases
+// cellLightCount 0), so the case order cannot carry them. precipRun twins GL's data store (farTexelBuffer). The same
+// verdict, reference checks, repeat clause, reds 64 / 128 and globals check as the lit cases. Each lamp case must also
+// show (else the gate fails): GL with volTerms 3 vs 1 differs on >= 1000 covered samples (the lamps seen); GL with
+// cellLightCount k vs k - 1 differs on >= 1000 for k = 1..4 (each shape seen) and on 0 for k = 5 (out of reach); every
+// name the lamp branch reads is found in GL's program; cellLightCount packed non-zero. Red 256 the lights dropped (Vulkan
+// binds the zero texel buffer); must FAIL in every lamp case. Still refused (precipLitWhy): the lamps' shadow cubes,
+// gobos and cluster lists, the physical falloff, cellRed, a light count past GL's buffer.
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
