@@ -278,6 +278,12 @@ for st, ext in (('vert', 'vert'), ('geom', 'geom'), ('frag', 'frag')):
         if prog == 'prog':
             variants += [('_prt', base_defs + (['WW_CELL_PRT'] if '_CELL_PRT' in raw else [])),
                          ('_rtddgi', base_defs + (['WW_CELL_RTDDGI'] if '_CELL_RTDDGI' in raw else []))]
+            # the route census (VKFAR6): the loader's programs, each define only where the source names it
+            route = base_defs + [d for d, tok in (('WW_FRAME_UBO', 'WW_FRAME_UBO'), ('WW_CELL_AIRZONE', '_CELL_AIRZONE')) if tok in raw]
+            allon = route + [d for d, tok in (('WW_CELL_RTDDGI', '_CELL_RTDDGI'), ('WW_CELL_RTDDGI_CASCADES', '_CELL_RTDDGI'),
+                                              ('WW_CELL_RESTIR', '_CELL_RESTIR')) if tok in raw]
+            variants += [('_route', route), ('_allon', allon),
+                         ('_rgi', allon + (['WW_CELL_RESTIRGI'] if '_CELL_RESTIRGI' in raw else []))]
         for suf, defs in variants:
             with open(os.path.join(OUT, '%s%s.%s.glsl' % (prog, suf, st)), 'w', newline='\n', encoding='latin-1') as f:
                 f.write(S.inject(raw, defs))

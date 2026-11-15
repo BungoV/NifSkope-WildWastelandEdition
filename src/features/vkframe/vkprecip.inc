@@ -656,6 +656,10 @@ int precipLitWhys( const PrecipRun::LitIn & l, const char ** out, int max )
 		add( "the shadow set's composition on the particles (ussOn: a cascade / terrain / contact tier)" );
 	if ( l.csm > 0 && ( l.csmProbe > 0 || l.csmRed > 0 ) )  // (-1: not active in GL's program; csmProbe is the pixel stage's only)
 		add( "a cascade probe or red (csmProbe / csmRed) in a lit run" );
+	// the route census (VKFAR6): the app's default program reads the cascades from the frame block (WW_FRAME_UBO);
+	// fxPack reads loose uniforms only, so the packed csmMat would be zero
+	if ( l.csm > 0 && l.interior == 0 && l.csmBlock > 0 )
+		add( "GL's cascades from a block (WW_FRAME_UBO: wwShadowFrame, its csmMat not packed)" );
 	if ( l.partRed > 0 )
 		add( "a particle-light red (volPartRed) in a lit run" );
 	return n;

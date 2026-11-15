@@ -129,6 +129,7 @@ struct GlA
 	void( WINAPI * glGetTexLevelParameteriv )( GLenum, GLint, GLenum, GLint * ) = nullptr;
 	void( WINAPI * glGetTexParameteriv )( GLenum, GLenum, GLint * ) = nullptr;
 	void( WINAPI * glGetTexParameterfv )( GLenum, GLenum, GLfloat * ) = nullptr;  // L8 term 3: csmMap's border
+	GLuint( WINAPI * glGetUniformBlockIndex )( GLuint, const char * ) = nullptr;  // L8 route census: wwShadowFrame
 };
 GlA ga;
 
@@ -171,6 +172,7 @@ bool loadAll()
 	ga.glGetTexLevelParameteriv = &::glGetTexLevelParameteriv;
 	ga.glGetTexParameteriv = &::glGetTexParameteriv;
 	ga.glGetTexParameterfv = &::glGetTexParameterfv;
+	ga.glGetUniformBlockIndex = f.getUniformBlockIndex;
 	return ok;
 }
 
