@@ -636,8 +636,6 @@ int precipLitWhys( const PrecipRun::LitIn & l, const char ** out, int max )
 		add( "the sun's shadow map on the particles (refused in slice 2b)" );
 	if ( l.drift > 0.0f )
 		add( "the air's drift on the sun (refused in slice 2b)" );
-	if ( l.airTerr > 0 )
-		add( "the terrain air on the sun (refused in slice 2b)" );
 	if ( l.partRed > 0 )
 		add( "a particle-light red (volPartRed) in a lit run" );
 	return n;
@@ -792,12 +790,12 @@ bool precipRun( const PrecipRun & t, std::string & why )
 	FxNames names;
 	names.add( T.colorTex );
 	names.add( T.dsTex );
-	VkImageView views[8] = {};
-	int smp[8] = {};
-	const int slotType[8] = { 0, 0, 1, 1, 0, 2, 0, 0 };  // an empty slot binds the zero texture of the shader's type
-	for ( int k = 0; k < 8; k++ ) {
+	VkImageView views[9] = {};
+	int smp[9] = {};
+	const int slotType[9] = { 0, 0, 1, 1, 0, 2, 0, 0, 2 };  // an empty slot binds the zero texture of the shader's type
+	for ( int k = 0; k < 9; k++ ) {
 		FxTex x = t.tex[k];
-		if ( ( k == 1 || k == 7 ) && ( t.red & 32 ) ) {  // red: the atlas dropped (the zero texture)
+		if ( ( ( k == 1 || k == 7 ) && ( t.red & 32 ) ) || ( k == 8 && ( t.red & 4096 ) ) ) {  // red: the atlas / the terrain grid dropped (the zero texture)
 			x = FxTex();
 			x.sampler = t.tex[k].sampler;
 		}
@@ -901,14 +899,14 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		const VkDescriptorBufferInfo lb[3] = { { D.ubo, kPrecipGlobalAt, kPrecipGlobalBytes },
 			{ D.ubo, kPrecipLitCsAt, VkDeviceSize( kT_preciplitcsBytes ) }, { D.rec, 0, recBytes } };
 		VkDescriptorImageInfo li[14] = {};
-		const VkImageView liv[14] = { D.litCube, F.d2a, F.d3, views[2], views[3], views[4], views[5], views[6], F.d3, D.litD2a,
+		const VkImageView liv[14] = { D.litCube, views[8], F.d3, views[2], views[3], views[4], views[5], views[6], F.d3, D.litD2a,
 			F.d2, F.d2, F.d2, views[1] };  // kPrecipLitImg's order
 		for ( int k = 0; k < 14; k++ ) {
 			li[k].imageView = liv[k];
 			li[k].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 		}
 		VkDescriptorImageInfo ls[13] = {};
-		const VkSampler lsv[13] = { D.litCmp, F.smp[0], F.smp[smp[2]], F.smp[smp[3]], F.smp[smp[4]], F.smp[smp[5]], F.smp[smp[6]],
+		const VkSampler lsv[13] = { D.litCmp, F.smp[smp[8]], F.smp[smp[2]], F.smp[smp[3]], F.smp[smp[4]], F.smp[smp[5]], F.smp[smp[6]],
 			F.smp[0], D.litCmp, F.smp[0], F.smp[0], F.smp[0], F.smp[smp[1]] };  // kPrecipLitSmp's order
 		for ( int k = 0; k < 13; k++ )
 			ls[k].sampler = lsv[k];

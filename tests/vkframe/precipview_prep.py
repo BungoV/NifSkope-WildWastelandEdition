@@ -65,6 +65,9 @@ CASES = [
     # L8 term 3 (element 22 = the local sun law): rain_near_lit's run, the sun's colour from vpSun
     ('rain_near_sunlocal', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
      2.0, -0.08, 40000, 0, 0, 1, 0, 1),
+    # L8 terrain air (element 23 = airTerrOn): snow_far_lit's fogged run, the ground layer on the air's own grid
+    ('snow_far_terrair', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 1, 3.0, 0.5, 6.0, 1.0, 0.6, 1,
+     3.3, -0.01, 40000, 1, 0, 1, 0, 0, 1),
 ]
 SUN = np.array([0.4, 0.3, 0.35]) / np.linalg.norm([0.4, 0.3, 0.35])  # world, toward the sun (the air's fogSun too)
 # a lit case's own sun (cellDirTo), chosen by the GS's mix: N = the eye's axis, thick / thin = 4 vpWrap( N.to, pcTrans )
@@ -322,7 +325,7 @@ for ci, c in enumerate(CASES):
         U['vpSun'] = [0.5, 0.4, 0.3, 1.0] if len(c) > 22 and c[22] else [0.0] * 4
         # the lamps' switches in every lit case (GL keeps a program's uniforms: the order cannot carry them)
         U.update({'cellLightCount': [5 if lit & 2 else 0], 'cellShadowOn': [0], 'cellGoboOn': [0], 'cellClusterOn': [0],
-                  'cellLightPhys': [0.0] * 4, 'cellLightPhysB': [0.0] * 4, 'cellRed': [0]})
+                  'cellLightPhys': [0.0] * 4, 'cellLightPhysB': [0.0] * 4, 'cellRed': [0], 'airTerrOn': [0]})
         if lit & 2:
             lamps(v[inview], R, np.array(c[6])).tofile(os.path.join(d, 'buf_cellLights.bin'))
             with open(os.path.join(d, 'buf.txt'), 'w', newline='\n') as f:
@@ -350,6 +353,34 @@ for ci, c in enumerate(CASES):
         if fog:  # the veil on, the air's column on the sun: the light chain's own names for the air's medium
             U.update({'volVeil': [1], 'airMed': AU['volAirMed'], 'airLayer': AU['volAirLayer'],
                       'airGround': AU['volAirGround'], 'airSunLayer': [0]})
+            if len(c) > 23 and c[23]:
+                # L8 terrain air: airTerr = the air's volAirTerr (2 layers: coarse 400000 u, fine 40000 u round the eye),
+                # its world rows u = x X.x + X.y, v = y X.z + X.w; airTerrRef puts the anchor (airGround.x + terrH - ref)
+                # at the particles' median height where the ground is its median (nearest texels: the choice only)
+                eye = np.array(c[6], np.float64)
+                tz = A['textures']['volAirTerr'].data[..., 0]
+                Pw = v[inview] @ R + eye
+
+                # (names kept off the module's: rows / at / n / th / ref are the atlas', the dump's and the run's, used below)
+                def grid_rows(span):
+                    return [1.0 / span, -(eye[0] - span / 2) / span, 1.0 / span, -(eye[1] - span / 2) / span]
+
+                def grid_at(layer, xf):
+                    gu, gv = Pw[:, 0] * xf[0] + xf[1], Pw[:, 1] * xf[2] + xf[3]
+                    gn = tz.shape[1]
+                    return tz[layer, np.clip((gv * gn).astype(int), 0, gn - 1), np.clip((gu * gn).astype(int), 0, gn - 1)], gu, gv
+
+                xc, xfn = grid_rows(400000.0), grid_rows(40000.0)
+                hc, _, _ = grid_at(0, xc)
+                hf, uf, vf = grid_at(1, xfn)
+                wf = np.clip(np.minimum(np.minimum(uf, 1 - uf), np.minimum(vf, 1 - vf)) * 16.0, 0.0, 1.0)
+                gh = hc + (hf - hc) * wf  # (not th / ref: the atlas' height and the dump's records, used below)
+                gref = float(np.median(gh) - np.median(Pw[:, 2]) + AU['volAirGround'][0])
+                zg = AU['volAirGround'][0] + gh - gref
+                print('precipview case %s: terrain air ref %.1f, ground %.1f - %.1f, particles z %.1f - %.1f, share under the '
+                      'anchor %.3f (want 0.2 - 0.8)' % (c[0], gref, gh.min(), gh.max(), Pw[:, 2].min(), Pw[:, 2].max(),
+                                                        float(np.mean(Pw[:, 2] < zg))))
+                U.update({'airTerrOn': [1], 'airTerrXf': xc, 'airTerrFineXf': xfn, 'airTerrRef': [gref]})
     if hasN:
         nl = bc3_levels(normals(tw, th, 31 + ci), os.path.join(d, 'tex_pcTexN.bin'))
         with open(os.path.join(d, 'tex.txt'), 'a', newline='\n') as f:
