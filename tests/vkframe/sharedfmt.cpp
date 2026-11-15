@@ -338,7 +338,9 @@ int main( int argc, char ** argv )
 		const GLenum st = f.checkFramebufferStatus( fFb );
 		std::printf( "SHAREDFMT %s layer 7 as a framebuffer: 0x%04X %s\n", c.name, unsigned( st ), st == fComplete ? "complete" : "INCOMPLETE" );
 		ok = ok && st == fComplete;
-		const GLfloat col[4] = { 0.25f, 0.5f, 0.75f, 1.0f };
+		// RGBA8 clears to whole 8-bit steps: 0.5 is the tie 127.5, which NV GL stores as 127 (first run: 40 7F BF FF)
+		const GLfloat col[4] = { c.fmt == 0x8058 ? 64.0f / 255.0f : 0.25f, c.fmt == 0x8058 ? 102.0f / 255.0f : 0.5f,
+			c.fmt == 0x8058 ? 191.0f / 255.0f : 0.75f, 1.0f };
 		glViewport( 0, 0, c.w, c.h );
 		clearBuf( GL_COLOR, 0, col );
 		f.bindFramebuffer( fFb, 0 );
@@ -350,13 +352,22 @@ int main( int argc, char ** argv )
 		glFinish();
 		std::vector<std::uint8_t> texel;
 		if ( c.fmt == 0x8058 )
-			texel = { 64, 128, 191, 255 };  // 0.25 * 255 = 63.75, 0.5 * 255 = 127.5, 0.75 * 255 = 191.25: round to nearest
+			texel = { 64, 102, 191, 255 };
 		else
 			texel = { 0x00, 0x34, 0x00, 0x38, 0x00, 0x3A, 0x00, 0x3C };  // halves 0.25, 0.5, 0.75, 1.0
 		std::vector<std::uint8_t> got;
 		const bool r = readShared( key, 0, 7, c.bpt, got, why );
 		const size_t n = r ? notTexel( got, texel ) : size_t( 1 );
 		std::printf( "SHAREDFMT %s cleared layer 7: %zu of %zu texels differ: %s\n", c.name, n, got.size() / size_t( c.bpt ), n ? "FAIL" : "EXACT" );
+		if ( n && got.size() >= texel.size() ) {
+			std::printf( "SHAREDFMT   texel 0 read:" );
+			for ( size_t b = 0; b < texel.size(); b++ )
+				std::printf( " %02X", unsigned( got[b] ) );
+			std::printf( ", wanted:" );
+			for ( size_t b = 0; b < texel.size(); b++ )
+				std::printf( " %02X", unsigned( texel[b] ) );
+			std::printf( "\n" );
+		}
 		ok = ok && r && n == 0;
 		for ( int z : { 6, 8 } ) {
 			std::vector<std::uint8_t> g2;

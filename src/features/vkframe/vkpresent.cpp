@@ -4089,8 +4089,8 @@ bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned g
 	samples = std::max( samples, 1 );
 	if ( samples > 1 && type != 0 )
 		return fail( "a multisample shared target is 2D only" );
-	if ( type == 3 && !depth )
-		return fail( "a shared cube array is depth only" );  // L8 term 5: the lamps' D16 cubes
+	if ( type == 3 && d % 6 )  // L8 term 5: the lamps' D16 cubes; lane VKFAR17: colour too (the probe relight's rpAlb / rpNd)
+		return fail( "a shared cube array is six layers a cube (" + std::to_string( d ) + " layers)" );
 	levels = depth || samples > 1 ? 1 : std::max( levels, 1 );
 	auto it = shareds().find( key );
 	if ( it != shareds().end() ) {
