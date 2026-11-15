@@ -717,6 +717,79 @@ int main( int argc, char ** argv )
 		if ( bi != 0xFFFFFFFFu )
 			f.uniformBlockBinding( prog, bi, 0 );
 	}
+	// known start state (header): every program's loose uniforms as linked, written back at the top of every bindJob
+	struct UniSnap
+	{
+		GLint loc = -1;
+		bool isInt = false, isUint = false;
+		int comp = 0;
+		GLint iv[16] = {};
+		GLfloat fv[16] = {};
+	};
+	std::map<GLuint, std::vector<UniSnap>> linked;
+	bool restoreOn = true;  // false only in the restore check (header)
+	for ( const GLuint prog : { pPrecip, pLook, pTf, pNoFl, pLookNoFl, pPrt, pRt, pTfRt, pTfNew } ) {
+		std::vector<UniSnap> & out = linked[prog];
+		GLint n = 0;
+		f.getProgramiv( prog, fActiveUnis, &n );
+		for ( GLint i = 0; i < n; i++ ) {
+			char nm[256] = {};
+			GLint sz = 0;
+			GLenum ty = 0;
+			f.getActiveUniform( prog, GLuint( i ), 256, nullptr, &sz, &ty, nm );
+			const GLuint idx = GLuint( i );
+			GLint blk = -1;
+			f.getActiveUniformsiv( prog, 1, &idx, fBlockIndex, &blk );
+			if ( blk >= 0 )
+				continue;
+			UniSnap s;
+			switch ( ty ) {
+			case 0x1406: s.comp = 1; break;
+			case 0x8B50: s.comp = 2; break;
+			case 0x8B51: s.comp = 3; break;
+			case 0x8B52: s.comp = 4; break;
+			case 0x8B5B: s.comp = 9; break;
+			case 0x8B5C: s.comp = 16; break;
+			case 0x1405: s.isInt = true; s.isUint = true; s.comp = 1; break;
+			case 0x1404: case 0x8B56: s.isInt = true; s.comp = 1; break;
+			case 0x8B53: case 0x8B57: s.isInt = true; s.comp = 2; break;
+			case 0x8B54: case 0x8B58: s.isInt = true; s.comp = 3; break;
+			case 0x8B55: case 0x8B59: s.isInt = true; s.comp = 4; break;
+			default: continue;  // a sampler: its unit stays as set above
+			}
+			std::string base( nm );
+			if ( base.size() > 3 && base.compare( base.size() - 3, 3, "[0]" ) == 0 )
+				base.resize( base.size() - 3 );
+			for ( GLint e = 0; e < std::max( sz, 1 ); e++ ) {
+				const std::string el = sz > 1 ? base + "[" + std::to_string( e ) + "]" : std::string( nm );
+				s.loc = f.getUniformLocation( prog, el.c_str() );
+				if ( s.loc < 0 )
+					continue;
+				if ( s.isInt )
+					f.getUniformiv( prog, s.loc, s.iv );
+				else
+					f.getUniformfv( prog, s.loc, s.fv );
+				out.push_back( s );
+			}
+		}
+	}
+	auto restoreLinked = [&]( GLuint prog ) {
+		const auto it = linked.find( prog );
+		if ( it == linked.end() )
+			return;
+		for ( const UniSnap & s : it->second ) {
+			if ( s.isUint )
+				f.uniform1uiv( s.loc, 1, reinterpret_cast<const GLuint *>( s.iv ) );
+			else if ( s.isInt )
+				( s.comp == 1 ? f.uniform1iv : s.comp == 2 ? f.uniform2iv : s.comp == 3 ? f.uniform3iv : f.uniform4iv )( s.loc, 1, s.iv );
+			else if ( s.comp == 9 )
+				f.uniformMatrix3fv( s.loc, 1, GL_FALSE, s.fv );
+			else if ( s.comp == 16 )
+				f.uniformMatrix4fv( s.loc, 1, GL_FALSE, s.fv );
+			else
+				( s.comp == 1 ? f.uniform1fv : s.comp == 2 ? f.uniform2fv : s.comp == 3 ? f.uniform3fv : f.uniform4fv )( s.loc, 1, s.fv );
+		}
+	};
 	GLuint vao = 0;
 	genVertexArrays( 1, &vao );
 	constexpr int kCases = 19;
@@ -823,6 +896,8 @@ int main( int argc, char ** argv )
 		const void * vkGlobalOver = nullptr;  // the same bytes as Vulkan's b0 (the globals mirror)
 		auto bindJob = [&]( GLuint prog ) {
 			f.useProgram( prog );
+			if ( restoreOn )  // known start state (header)
+				restoreLinked( prog );
 			setUnis( prog, j.uni );
 			bindUnit( 0, GL_TEXTURE_2D, atlas );
 			u1i( prog, "pcTex", 0 );
@@ -976,6 +1051,7 @@ int main( int argc, char ** argv )
 					f.uniform3fv( f.getUniformLocation( pPrt, "cellGiAirOrigin" ), 1, org );
 					f.uniform3fv( f.getUniformLocation( pPrt, "cellGiAirDims" ), 1, dims );
 					f.uniform1fv( f.getUniformLocation( pPrt, "cellGiAirVoxel" ), 1, &vox );
+				} else if ( mode == 9 ) {  // the case as it is (the restore check)
 				} else if ( mode == 6 ) {  // L8 term 3: the local law off (vpSun.w 0)
 					const float off[4] = { 0.5f, 0.4f, 0.3f, 0.0f };
 					f.uniform4fv( f.getUniformLocation( pJob, "vpSun" ), 1, off );
@@ -1017,6 +1093,25 @@ int main( int argc, char ** argv )
 				"NaN / Inf halves in GL's lit frame %zu (want 0); sun-branch names missing from GL's program: %s\n", j.name.c_str(), dark.flips, dark.covered,
 				thick.flips, bad, missing.empty() ? "none" : missing.c_str() );
 			ok = ok && dark.flips >= 1000 && thick.flips >= 1000 && bad == 0 && missing.empty();
+			if ( j.name == "rain_near_lit" ) {  // the restore check (header): a fogged case's uniforms left on, the restore skipped
+				const Job * fogJob = nullptr;
+				for ( const Job & o : jobs )
+					if ( o.fog && o.lit && !fogJob )
+						fogJob = &o;
+				if ( fogJob ) {
+					setUnis( pJob, fogJob->uni );
+					restoreOn = false;
+					const Verdict left = judge( bg, drawGl( 9 ), refA, refB, refB );
+					restoreOn = true;
+					bindJob( pJob );
+					std::printf( "PRECIPVIEW %s restore check: GL with %s's uniforms left on and the restore skipped differs %zu of %zu covered "
+						"samples (want >= 1000)\n", j.name.c_str(), fogJob->name.c_str(), left.flips, left.covered );
+					ok = ok && left.flips >= 1000;
+				} else {
+					std::printf( "PRECIPVIEW %s restore check: no fogged lit case to take uniforms from\n", j.name.c_str() );
+					ok = false;
+				}
+			}
 			if ( j.localSun() ) {  // L8 term 3's seen-checks (header): the law seen, vpSun found
 				const Verdict noLaw = judge( bg, drawGl( 6 ), refA, refB, refB );
 				const bool found = f.getUniformLocation( pJob, "vpSun" ) >= 0;
