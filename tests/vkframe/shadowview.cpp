@@ -22,6 +22,16 @@
 // Pool reds, each its own process (shadowview.sh): WW_VKCSM_POOL_RED=1 (key only) a frame1 layer FAILs with redSkips >= 1,
 // =2 (grow without copying again) a frame2 layer FAILs with repacks >= 1. The 3-frame shape is what lets both reach their
 // branch: the re-specify (frame 1) and the growth (frame 2) are in different frames, else the repack hides red 1.
+// Lane VKSHADOW5 (2026-11-16, item 3 part 2 bar), lines `SHADOWVIEW ileave ...` after the mesh ones (those stay byte-equal):
+// the ground quad (sunshadow.cpp drawShape 3: 4 world-space vertices, indices 0 1 2 2 1 3, model-view vt, culled, in every
+// job's culled mesh draws) as one more pooled CsmMesh, and the run's draws in the app's order: per job its queue span, then
+// its mesh draws (sunshadow.cpp emits queue, mesh, queue, mesh), so csmWork's mesh -> queue rebind inside one render pass
+// runs. Two ground model-views: one the light sees from the front, one from below (GL culls it). The same BOUND as above.
+// Two frames: the ground moves in frame 1 (same key and sizes, new gen: gxy / ghalf / gz moved). Must hold: every layer
+// EXACT or BOUND, the ground wins > 0 texels in frame 0 against GL without it, requeues >= 1 each frame (CsmStat: a queue
+// draw after a mesh draw in one render pass: the rebind ran), regen >= 1 in frame 1. Red (must FAIL past 1 unit): the
+// ground drawn without cull (the from-below quad then lands). No red removes the rebind: a queue draw on the mesh pool's
+// buffers reads out of range on the GPU (a hang risk on the desktop), so the requeues count is the proof that it ran.
 #define WW_VKPRESENT_NO_QT
 #include "../../src/features/vkframe/vkpresent.cpp"
 
@@ -691,7 +701,7 @@ int main( int argc, char ** argv )
 		st.pipelines, st.buildMs );
 
 	// ---- lane VKSHADOW4 (item 3 part 1): the per-draw casters as pooled meshes (CsmMesh), see the header
-	bool meshOk = true;
+	bool meshOk = true, ilOk = true;
 	{
 		std::string vsM = readFile( root + "/res/shaders/features/shadows/lookdev_csmdepth.vert" );
 		const std::string inc = "#include \"uniforms.glsl\"";
@@ -1029,9 +1039,250 @@ int main( int argc, char ** argv )
 		const WwVkPresent::CsmStat ms = WwVkPresent::takeCsmStat();
 		std::printf( "SHADOWVIEW mesh stat: %d runs on Vulkan, %d failed (%s), %d draws, %d mesh draws\n", ms.runs, ms.fails,
 			ms.failWhy.c_str(), ms.draws, ms.mdraws );
+
+		// ---- lane VKSHADOW5 (item 3 part 2 bar): the ground quad as a pooled mesh, the draws interleaved as the app emits them
+		ilOk = meshOk;
+		HMesh gq;  // sunshadow.cpp: { x0, y0, gz, x1, y0, gz, x0, y1, gz, x1, y1, gz }, indices { 0, 1, 2, 2, 1, 3 }
+		auto quad = [&]( float gx, float gy, float half, float gz ) {
+			gq.p = { gx - half, gy - half, gz, gx + half, gy - half, gz, gx - half, gy + half, gz, gx + half, gy + half, gz };
+			gq.i = { 0, 1, 2, 2, 1, 3 };
+			gq.gen = gq.gen ? gq.gen + 1 : 7000;
+			f.bindVertexArray( vaoM );
+			upMesh( gq );
+		};
+		// the two ground model-views: the front one first (counter-clockwise in cascade 0's clip space), the one from below second
+		float gm[32];
+		double gFront = 0.0, gBack = 0.0;
+		{
+			auto ndc = [&]( const double * M, double x, double y, double * o ) {
+				double v[4], c[4];
+				for ( int r = 0; r < 4; r++ )
+					v[r] = M[r] * x + M[4 + r] * y + M[12 + r];
+				for ( int r = 0; r < 4; r++ )
+					c[r] = casc[0].clip[r] * v[0] + casc[0].clip[4 + r] * v[1] + casc[0].clip[8 + r] * v[2] + casc[0].clip[12 + r] * v[3];
+				o[0] = c[0] / c[3];
+				o[1] = c[1] / c[3];
+			};
+			auto area = [&]( const double * M ) {
+				double a[2], b[2], c[2];
+				ndc( M, -1.0, -1.0, a );
+				ndc( M, 1.0, -1.0, b );
+				ndc( M, -1.0, 1.0, c );
+				return ( b[0] - a[0] ) * ( c[1] - a[1] ) - ( b[1] - a[1] ) * ( c[0] - a[0] );
+			};
+			double A[16], B[16];
+			rotT( 1, 0, 0, 0.35, -6.0, 4.0, -135.0, 18.0, A );
+			rotT( 1, 0, 0, 0.35 + 3.14159265358979, 9.0, -7.0, -135.0, 18.0, B );
+			const bool swap = area( A ) < 0.0;
+			const double * F = swap ? B : A, * K = swap ? A : B;
+			gFront = area( F );
+			gBack = area( K );
+			for ( int k = 0; k < 16; k++ ) {
+				gm[k] = float( F[k] );
+				gm[16 + k] = float( K[k] );
+			}
+		}
+		std::printf( "SHADOWVIEW ileave ground facing: front area %.4f (must be > 0), from below %.4f (must be < 0)\n", gFront, gBack );
+		ilOk = ilOk && gFront > 0.0 && gBack < 0.0;
+		auto glGround = [&]( const GLuint * tex, const MRec & R ) {
+			if ( !attach( tex[R.target], R.layer ) )
+				return false;
+			const Casc & c = casc[R.cascade];
+			glViewport( 0, 0, c.vw, c.vh );
+			const bool sc = R.sc[2] > R.sc[0];
+			if ( sc ) {
+				glEnable( GL_SCISSOR_TEST );
+				glScissor( R.sc[0], R.sc[1], R.sc[2] - R.sc[0], R.sc[3] - R.sc[1] );
+			}
+			if ( f.polygonOffsetClamp )
+				f.polygonOffsetClamp( slopeBias, unitBias, c.clamp );
+			f.uniformMatrix4fv( mClip, 1, GL_FALSE, c.clip );
+			glEnable( GL_CULL_FACE );
+			for ( int g = 0; g < 2; g++ ) {
+				f.uniformMatrix4fv( mMv, 1, GL_FALSE, &gm[16 * g] );
+				f.bindBuffer( kArrayBuf, gq.vb );
+				f.enableVertexAttribArray( 0 );
+				f.vertexAttribPointer( 0, 3, GL_FLOAT, GL_FALSE, 12, nullptr );
+				f.bindBuffer( kElemBuf, gq.ib );
+				glDrawElements( GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, nullptr );
+			}
+			if ( sc )
+				glDisable( GL_SCISSOR_TEST );
+			return true;
+		};
+		const std::size_t nJ = std::max( recs.size(), mrecs.size() );
+		// GL: per job its queue span, its mesh casters, then the ground in a culled job (sunshadow.cpp drawJob's order)
+		auto runGlI = [&]( bool withGround, std::vector<std::uint16_t> out[2][3] ) {
+			bool ok2 = clearAll( refT );
+			glState();
+			ok2 = ok2 && ground( refT );
+			for ( std::size_t j = 0; j < nJ; j++ ) {
+				if ( j < recs.size() ) {
+					glState();
+					ok2 = ok2 && glDraw( refT, recs[j] );
+				}
+				if ( j >= mrecs.size() )
+					continue;
+				f.useProgram( progM );
+				f.bindVertexArray( vaoM );
+				ok2 = ok2 && glMesh( refT, mrecs[j], 2 );
+				if ( withGround && mrecs[j].cull )
+					ok2 = ok2 && glGround( refT, mrecs[j] );
+			}
+			readAll( refT, out );
+			return ok2 && glGetError() == GL_NO_ERROR;
+		};
+		// Vulkan: one csmRun, the draws in the same job order (queue, then the job's mesh draws with the ground in the culled ones)
+		auto runVkI = [&]( bool cullRed, std::vector<std::uint16_t> out[2][3] ) {
+			bool ok2 = clearAll( shT );
+			glState();
+			ok2 = ok2 && ground( shT );
+			WwVkPresent::CsmRun run;
+			run.map = map;
+			run.layers = 3;
+			for ( int t = 0; t < 2; t++ ) {
+				run.tex[t] = shT[t];
+				run.key[t] = reinterpret_cast<std::uintptr_t>( &keyHome[t] );
+			}
+			std::vector<float> allM( mats );
+			allM.insert( allM.end(), mm.begin(), mm.end() );
+			allM.insert( allM.end(), gm, gm + 32 );
+			run.mats = allM.data();
+			run.nMats = allM.size() / 16;
+			run.pos = bPos;
+			run.idx = bIdx;
+			run.posBytes = pos.size() * 4;
+			run.idxBytes = idx.size() * 2;
+			run.cmds = reinterpret_cast<const std::uint32_t *>( cmds.data() );
+			run.nCmds = cmds.size();
+			std::vector<WwVkPresent::CsmMesh> cm( hm.size() + 1 );
+			for ( std::size_t m = 0; m < hm.size(); m++ ) {
+				cm[m].key = reinterpret_cast<std::uintptr_t>( &hm[m] );
+				cm[m].gen = hm[m].gen;
+				cm[m].pos = hm[m].p.data();
+				cm[m].verts = std::uint32_t( hm[m].p.size() / 3 );
+				cm[m].idx = hm[m].i.data();
+				cm[m].indices = std::uint32_t( hm[m].i.size() );
+			}
+			const std::uint32_t gMesh = std::uint32_t( hm.size() ), gMat = std::uint32_t( kCasters + kMC );
+			cm[gMesh].key = reinterpret_cast<std::uintptr_t>( &gq );
+			cm[gMesh].gen = gq.gen;
+			cm[gMesh].pos = gq.p.data();
+			cm[gMesh].verts = 4;
+			cm[gMesh].idx = gq.i.data();
+			cm[gMesh].indices = 6;
+			auto put = [&]( int ci, int target, int layer, const int * scr, bool cull, std::uint32_t first, std::uint32_t n, bool mesh ) {
+				WwVkPresent::CsmDraw d;
+				d.target = target;
+				d.layer = layer;
+				d.vw = casc[ci].vw;
+				d.vh = casc[ci].vh;
+				std::memcpy( d.sc, scr, sizeof( d.sc ) );
+				std::memcpy( d.clip, casc[ci].clip, sizeof( d.clip ) );
+				d.unit = unitBias;
+				d.slope = slopeBias;
+				d.clamp = casc[ci].clamp;
+				d.cull = cull;
+				d.first = first;
+				d.n = n;
+				d.mesh = mesh;
+				run.d.push_back( d );
+			};
+			std::vector<std::uint32_t> md;
+			for ( std::size_t j = 0; j < nJ; j++ ) {
+				if ( j < recs.size() ) {
+					const Rec & R = recs[j];
+					put( R.cascade, R.target, R.layer, R.sc, R.cull, R.first, R.n, false );
+				}
+				if ( j >= mrecs.size() )
+					continue;
+				const MRec & R = mrecs[j];
+				std::uint32_t first = std::uint32_t( md.size() / 4 );
+				for ( const auto & d : drawsOf( R, false, 2 ) ) {
+					md.push_back( std::uint32_t( meshOfC[d[0]] ) );
+					md.push_back( std::uint32_t( kCasters ) + d[0] );
+					md.push_back( d[1] );
+					md.push_back( d[2] );
+				}
+				if ( R.cull && !cullRed )
+					for ( std::uint32_t g = 0; g < 2; g++ )
+						md.insert( md.end(), { gMesh, gMat + g, 0u, 6u } );
+				const std::uint32_t n = std::uint32_t( md.size() / 4 ) - first;
+				if ( n )
+					put( R.cascade, R.target, R.layer, R.sc, R.cull, first, n, true );
+				if ( R.cull && cullRed ) {  // the red: the ground in a draw of its own with cull off
+					first = std::uint32_t( md.size() / 4 );
+					for ( std::uint32_t g = 0; g < 2; g++ )
+						md.insert( md.end(), { gMesh, gMat + g, 0u, 6u } );
+					put( R.cascade, R.target, R.layer, R.sc, false, first, 2, true );
+				}
+			}
+			run.meshes = cm.data();
+			run.nMeshes = cm.size();
+			run.mdraws = md.data();
+			run.nMDraws = md.size() / 4;
+			std::string w;
+			if ( !WwVkPresent::csmRun( run, w ) ) {
+				std::printf( "SHADOWVIEW ileave csmRun refused: %s\n", w.c_str() );
+				return false;
+			}
+			readAll( shT, out );
+			return ok2 && glGetError() == GL_NO_ERROR;
+		};
+		std::vector<std::uint16_t> refI[2][3], vkI[2][3], bareI[2][3];
+		int requeues[2] = { 0, 0 }, regenI = 0;
+		upload( moves[1] );
+		setMM( 1.0 );
+		for ( int fr = 0; fr < 2 && ilOk; fr++ ) {
+			quad( fr ? 0.45f : 0.2f, fr ? 0.3f : -0.1f, fr ? 1.4f : 1.5f, fr ? 0.25f : 0.3f );
+			if ( !runGlI( true, refI ) || !runVkI( false, vkI ) ) {
+				std::printf( "SHADOWVIEW ileave frame%d FAIL (a run failed)\n", fr );
+				ilOk = false;
+				break;
+			}
+			const WwVkPresent::CsmStat ps = WwVkPresent::takeCsmStat();
+			std::printf( "SHADOWVIEW ileave pool frame%d copies=%d hits=%d regen=%d repacks=%d mdraws=%d requeues=%d\n", fr, ps.copies,
+				ps.hits, ps.regen, ps.repacks, ps.mdraws, ps.requeues );
+			requeues[fr] = ps.requeues;
+			regenI += fr == 1 ? ps.regen : 0;
+			for ( int t = 0; t < 2; t++ )
+				for ( int l = 0; l < 3; l++ ) {
+					const Diff v = compare( vkI[t][l], refI[t][l] );
+					std::printf( "SHADOWVIEW ileave frame%d %s/%d %s (%zu of %zu covered texels differ, %zu past 1 unit, max %d)\n", fr,
+						t ? "static" : "live", l, v.word(), v.diff, v.covered, v.past1, v.maxu );
+					ilOk = ilOk && v.ok();
+				}
+			if ( fr == 0 ) {  // the ground must win texels, or the case proves nothing
+				std::size_t won = 0;
+				if ( runGlI( false, bareI ) )
+					for ( int t = 0; t < 2; t++ )
+						for ( int l = 0; l < 3; l++ )
+							for ( std::size_t i = 0; i < bareI[t][l].size(); i++ )
+								won += bareI[t][l][i] != refI[t][l][i];
+				std::printf( "SHADOWVIEW ileave ground won %zu texels against GL without it (must be > 0)\n", won );
+				ilOk = ilOk && won > 0;
+			}
+		}
+		std::printf( "SHADOWVIEW ileave triggers: requeues frame0=%d frame1=%d (each >= 1), frame1 regen=%d (>= 1)\n", requeues[0],
+			requeues[1], regenI );
+		ilOk = ilOk && requeues[0] >= 1 && requeues[1] >= 1 && regenI >= 1;
+		if ( ilOk ) {  // the red on frame 1's content: must FAIL past 1 unit (over all six layers)
+			const bool ran = runVkI( true, vkI );
+			Diff all;
+			for ( int t = 0; t < 2; t++ )
+				for ( int l = 0; l < 3; l++ )
+					all.add( compare( vkI[t][l], refI[t][l] ) );
+			const bool redFails = !ran || all.past1 > 0;
+			std::printf( "SHADOWVIEW ileave RED %s cull (the ground drawn without cull: the quad seen from below lands) (%zu of %zu "
+				"covered texels differ, %zu past 1 unit, max %d; must FAIL)\n", redFails ? "FAIL" : "TESTS NOTHING", all.diff, all.covered,
+				all.past1, all.maxu );
+			ilOk = redFails;
+			WwVkPresent::takeCsmStat();
+		}
 	}
 	std::printf( "SHADOWVIEW mesh %s\n", meshOk ? "OK" : "FAILED" );
-	ok = ok && meshOk;
+	std::printf( "SHADOWVIEW ileave %s\n", ilOk ? "OK" : "FAILED" );
+	ok = ok && meshOk && ilOk;
 	f.bindFramebuffer( kFb, 0 );
 	for ( int t = 0; t < 2; t++ )
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &keyHome[t] ) );

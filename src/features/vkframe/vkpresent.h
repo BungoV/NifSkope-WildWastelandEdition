@@ -494,6 +494,8 @@ struct CsmStat
 	//! lane VKSHADOW4, the mesh pool: meshes copied / served kept, copies for a new generation, repacks, gates-only red skips
 	//! (WW_VKCSM_POOL_RED: 1 the key alone, 2 grow without copying the kept meshes again)
 	int copies = 0, hits = 0, regen = 0, repacks = 0, redSkips = 0, mdraws = 0;
+	//! lane VKSHADOW5: queue draws that follow a mesh draw inside one render pass (csmWork rebinds the queue's buffers there)
+	int requeues = 0;
 	double copyKb = 0.0;
 };
 CsmStat takeCsmStat();
