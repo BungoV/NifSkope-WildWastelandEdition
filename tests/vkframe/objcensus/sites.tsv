@@ -1,0 +1,188 @@
+# lane VKOBJ6: every GL draw site in src (objcensus.py). key<TAB>class<TAB>guard<TAB>note
+src/uvtools.cpp|UVEditorView::paintGL|glDrawArrays|1	other		editor: UV tools
+src/uvtools.cpp|UVEditorView::drawShapeLayers|glDrawArrays|1	other		editor: UV tools
+src/uvtools.cpp|UVEditorView::drawShapeLayers|glDrawElements|1	other		editor: UV tools
+src/uvtools.cpp|UVEditorView::drawShapeLayers|glDrawElements|2	other		editor: UV tools
+src/uvtools.cpp|UVEditorView::drawShapeLayers|glDrawElements|3	other		editor: UV tools
+src/uvtools.cpp|UVEditorView::drawShapeLayers|glDrawElements|4	other		editor: UV tools
+src/uvtools.cpp|UVEditorView::drawShapeLayers|glDrawElements|5	other		editor: UV tools
+src/uvtools.cpp|UVEditorView::drawShapeLayers|glDrawElements|6	other		editor: UV tools
+src/uvtools.cpp|UVEditorView::drawShapeLayers|glDrawElements|7	other		editor: UV tools
+src/uvtools.cpp|UVEditorView::drawShapeLayers|glDrawArrays|2	other		editor: UV tools
+src/uvtools.cpp|UVEditorView::drawShapeLayers|glDrawElements|8	other		editor: UV tools
+src/uvtools.cpp|UVEditorView::drawShapeLayers|glDrawArrays|3	other		editor: UV tools
+src/uvtools.cpp|UVEditorView::drawShapeLayers|glDrawArrays|4	other		editor: UV tools
+src/features/air/cellvolair.cpp|vaPassInner|drawShape|1	other		volumetric air: screen passes
+src/features/air/cellvolair.cpp|vaPassInner|drawShape|2	other		volumetric air: screen passes
+src/features/air/cellvolair.cpp|vaPassInner|drawShape|3	other		volumetric air: screen passes
+src/features/air/cellvolair.cpp|vaPassInner|drawShape|4	other		volumetric air: screen passes
+src/features/air/cellvolair.cpp|vaPassInner|drawShape|5	other		volumetric air: screen passes
+src/features/air/cellvolair.cpp|vaPassInner|drawShape|6	other		volumetric air: screen passes
+src/features/air/cellvolair.cpp|wwVolAirSkyDraw|drawShape|1	other		volumetric air: screen passes
+src/features/air/volpartdump.cpp|vpDumpSystem|glDrawArrays|1	other		gates only: volumetric particle dump
+src/features/ao/ao.cpp|giVolMaskPass|glDrawArraysInstanced|1	other		AO / GI-half screen passes, the GI volume mask
+src/features/ao/ao.cpp|giHalfPass|drawShape|1	other		AO / GI-half screen passes, the GI volume mask
+src/features/ao/ao.cpp|aoxPasses|drawShape|1	other		AO / GI-half screen passes, the GI volume mask
+src/features/ao/ao.cpp|wwCellAoPass|drawShape|1	other		AO / GI-half screen passes, the GI volume mask
+src/features/ao/ao.cpp|wwCellAoPass|drawShape|2	other		AO / GI-half screen passes, the GI volume mask
+src/features/ao/ao.cpp|wwCellAoPass|drawShape|3	other		AO / GI-half screen passes, the GI volume mask
+src/features/ao/cellaodecalgl.cpp|wwCellAoDecalRun|glDrawArrays|1	other		baked AO decals into the AO target (an AO input; cellAoDecal copy twin)
+src/features/ao/cellaodecalgl.cpp|wwCellAoDecalRun|glDrawArrays|2	other		baked AO decals into the AO target (an AO input; cellAoDecal copy twin)
+src/features/clouds/cloudfly.cpp|quad|drawShape|1	other		clouds: screen passes
+src/features/clouds/cloudmap.cpp|buildMap|drawShape|1	other		clouds: screen passes
+src/features/clouds/cloudmap.cpp|buildMap|drawShape|2	other		clouds: screen passes
+src/features/clouds/cloudmap.cpp|show|drawShape|1	other		clouds: screen passes
+src/features/clouds/cloudshadow.cpp|quad|drawShape|1	other		clouds: screen passes
+src/features/clouds/cloudvol.cpp|quad|drawShape|1	other		clouds: screen passes
+src/features/exposure/cellhdr.cpp|bloomBlur|drawShape|1	other		exposure / HDR: screen passes
+src/features/exposure/cellhdr.cpp|bloomBlur|drawShape|2	other		exposure / HDR: screen passes
+src/features/exposure/cellhdr.cpp|isMeasureFrame|drawShape|1	other		exposure / HDR: screen passes
+src/features/exposure/cellhdr.cpp|depthMaxMake|drawShape|1	other		exposure / HDR: screen passes
+src/features/exposure/cellhdr.cpp|wwCellHdrEnd|drawShape|1	other		exposure / HDR: screen passes
+src/features/exposure/cellhdr.cpp|wwCellHdrEnd|drawShape|2	other		exposure / HDR: screen passes
+src/features/exposure/cellhdr.cpp|wwCellHdrEnd|drawShape|3	other		exposure / HDR: screen passes
+src/features/exposure/cellhdr.cpp|wwCellHdrEnd|drawShape|4	other		exposure / HDR: screen passes
+src/features/exposure/cellhdr.cpp|wwCellHdrEnd|drawShape|5	other		exposure / HDR: screen passes
+src/features/far-ground/cellfarground.cpp|stamp|drawShape|1	other		far ground / terrain preview (the far lanes')
+src/features/far-ground/cellfarground.cpp|paintJobs|drawShape|1	other		far ground / terrain preview (the far lanes')
+src/features/far-ground/cellfarground.cpp|paintJobs|drawShape|2	other		far ground / terrain preview (the far lanes')
+src/features/far-ground/terrainpreview.cpp|terrainPreviewRun|glDrawElements|1	other		far ground / terrain preview (the far lanes')
+src/features/far-ground/terrainpreview.cpp|terrainPreviewRun|glDrawArraysInstanced|1	other		far ground / terrain preview (the far lanes')
+src/features/far-ground/terrainpreview.cpp|terrainPreviewRun|glDrawArrays|1	other		far ground / terrain preview (the far lanes')
+src/features/far-ground/terrainpreview.cpp|terrainPreviewRun|glDrawArraysInstanced|2	other		far ground / terrain preview (the far lanes')
+src/features/far-lod/cellfarinst.cpp|submit|mdi|1	other		far LOD cards / instances (the VKFAR lanes')
+src/features/far-lod/cellfarinst.cpp|submit|glDrawElementsInstancedBaseVertexBaseInstance|1	other		far LOD cards / instances (the VKFAR lanes')
+src/features/far-lod/impostordraw.cpp|ImpostorDraw::drawCard|drawShape|1	other		far LOD cards / instances (the VKFAR lanes')
+src/features/far-lod/impostordraw.cpp|ImpostorDraw::drawCardsInstanced|glDrawElementsInstanced|1	other		far LOD cards / instances (the VKFAR lanes')
+src/features/gi/cellssgi.cpp|wwCellSsgiPass|drawShape|1	other		SSGI screen pass / RT GI debug view
+src/features/gi/cellssgi.cpp|wwCellSsgiPass|drawShape|2	other		SSGI screen pass / RT GI debug view
+src/features/gi/rtddgicell.cpp|rtddgiCellViewDrawLinear|glDrawArraysInstanced|1	other		SSGI screen pass / RT GI debug view
+src/features/gi/rtddgicell.cpp|rtddgiCellViewDrawLinear|glDrawArraysInstanced|2	other		SSGI screen pass / RT GI debug view
+src/features/lights/celllamps.cpp|cubeDrawCaster|drawShape|1	other		lamp shadow casters (VKLAMP lanes; not touched by VKOBJ)
+src/features/lights/celllamps.cpp|cubeDrawCaster|glDrawElementsInstanced|1	other		lamp shadow casters (VKLAMP lanes; not touched by VKOBJ)
+src/features/lights/celllamps.cpp|lampShadowPass|drawShape|1	other		lamp shadow casters (VKLAMP lanes; not touched by VKOBJ)
+src/features/near/cellbindless.cpp|runIssue|mdi|1	twin	vkShade	a bindless run (WW_VKOBJ_SHADE): objBlShade; NOTE vkShade does not refuse the RT GI key as vkBlDraw does
+src/features/near/cellbindless.cpp|drawElements|glDrawElementsBaseVertex|1	other		wrapper body: WwBl::drawElements (its callers are the sites)
+src/features/near/cellbindless.cpp|drawElements|glDrawElements|1	other		wrapper body: WwBl::drawElements (its callers are the sites)
+src/features/near/cellbindless.cpp|multiDrawElements|glMultiDrawElements|1	other		wrapper body: WwBl::multiDrawElements (its callers are the sites)
+src/features/near/cellbindless.cpp|multiDrawElements|glMultiDrawElementsBaseVertex|1	other		wrapper body: WwBl::multiDrawElements (its callers are the sites)
+src/features/near/cellgpucull.cpp|prepare|GpuDriven::poolDraw|1	twin	WwVkPresent::objRun	step B occluder depth prepass (WW_VKVIEW_OBJ_RED is its GL red key)
+src/features/near/cellgpucull.cpp|prepare|GpuDriven::poolDraw|2	twin	WwVkPresent::objRun	step B occluder depth prepass (WW_VKVIEW_OBJ_RED is its GL red key)
+src/features/near/cellgpucull.cpp|draw|glMultiDrawElementsIndirect|1	glonly		GPU cull step B (WW_GPUDRIVEN_B, ships on): every learned opaque fo4_cell(csm)/bl/pbrm shape of the main walk; bsshape tries it BEFORE vkCellDraw / vkBlDraw
+src/features/near/cellgpucull.cpp|draw|WwBl::drawElements|1	glonly		GPU cull step B (WW_GPUDRIVEN_B, ships on): every learned opaque fo4_cell(csm)/bl/pbrm shape of the main walk; bsshape tries it BEFORE vkCellDraw / vkBlDraw
+src/features/near/cellgpucull.cpp|draw|WwBl::multiDrawElements|1	glonly		GPU cull step B (WW_GPUDRIVEN_B, ships on): every learned opaque fo4_cell(csm)/bl/pbrm shape of the main walk; bsshape tries it BEFORE vkCellDraw / vkBlDraw
+src/features/near/cellqueue.cpp|poolDraw|mdi|1	other		wrapper body: GpuDriven::poolDraw (its callers are the sites)
+src/features/near/cellqueue.cpp|poolDraw|glDrawElementsInstancedBaseVertexBaseInstance|1	other		wrapper body: GpuDriven::poolDraw (its callers are the sites)
+src/features/near/cellvrs.cpp|wwCellVrsBuild|drawShape|1	other		VRS rate image: screen pass
+src/features/particles/cellfxres.cpp|quad|drawShape|1	other		FXRES layer composite (WW_CELL_FXRES, off by default): screen pass
+src/features/particles/glparticles.cpp|Particles::drawShapes|glDrawArrays|1	twin	WwBl::vkPfxDraw	particles_cell.prog (twin 9, objpfx_cell(_rt)_ps); particles.prog / selection.prog stay GL (cellPfx false)
+src/features/post/cellbloom.cpp|wwCellBloomRun|drawShape|1	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/cellbloom.cpp|wwCellBloomRun|drawShape|2	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/cellbloom.cpp|wwCellBloomRun|drawShape|3	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/cellbloom.cpp|wwCellBloomRun|drawShape|4	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/cellbloom.cpp|wwCellBloomRun|drawShape|5	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/cellbloom.cpp|wwCellBloomRun|drawShape|6	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/cellfogbloom.cpp|wwCellFogBloomRun|drawShape|1	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/cellfogbloom.cpp|wwCellFogBloomRun|drawShape|2	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/celllensflare.cpp|wwCellLensFlareDraw|drawShape|1	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/cellpost.cpp|postApply|drawShape|1	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/cellpost.cpp|postApply|drawShape|2	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/cellpost.cpp|postApply|drawShape|3	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/cellpost.cpp|postApply|drawShape|4	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/cellpost.cpp|postApply|drawShape|5	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/cellpost.cpp|postApply|drawShape|6	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/cellpost.cpp|postApply|drawShape|7	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/cellpost.cpp|postApply|drawShape|8	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/cellpost.cpp|postApply|drawShape|9	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/cellpost.cpp|postApply|drawShape|10	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/cellpost.cpp|postApply|drawShape|11	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/cellpost.cpp|postApply|drawShape|12	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/cellpost.cpp|postApply|drawShape|13	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/gametaa.cpp|taaResolveImpl|drawShape|1	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/gametaa.cpp|taaResolveImpl|drawShape|2	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/gametaa.cpp|taaResolveImpl|drawShape|3	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/gametaa.cpp|taaResolveImpl|drawShape|4	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/gametaa.cpp|taaResolveImpl|drawShape|5	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/gametaa.cpp|taaResolveImpl|drawShape|6	other		post / bloom / TAA resolve / lens flare: screen passes
+src/features/post/taainputs.cpp|wwTaaInputsPass|drawShape|1	other		TAA inputs: the camera-motion screen quad (a screen pass, not an object)
+src/features/post/taainputs.cpp|wwTaaInputsPass|drawShape|2	glonly		TAA inputs: moving objects' velocity redraw and the blended composition redraw (taa_objvel.prog)
+src/features/post/taainputs.cpp|wwTaaInputsPass|glDrawElements|1	glonly		TAA inputs: moving objects' velocity redraw and the blended composition redraw (taa_objvel.prog)
+src/features/post/taainputs.cpp|wwTaaInputsPass|drawShape|3	glonly		TAA inputs: moving objects' velocity redraw and the blended composition redraw (taa_objvel.prog)
+src/features/post/taainputs.cpp|wwTaaInputsPass|glDrawElements|2	glonly		TAA inputs: moving objects' velocity redraw and the blended composition redraw (taa_objvel.prog)
+src/features/post/taainputs.cpp|wwTaaInputsView|drawShape|1	other		debug view of the TAA inputs
+src/features/reflections/cellreflprobe.cpp|wwCellReflProbePass|drawShape|1	other		SSR / reflection probe: screen passes
+src/features/reflections/cellreflprobe.cpp|wwCellReflProbePass|drawShape|2	other		SSR / reflection probe: screen passes
+src/features/reflections/cellssr.cpp|wwCellSsrPass|drawShape|1	other		SSR / reflection probe: screen passes
+src/features/reflections/cellssr.cpp|wwCellSsrPass|drawShape|2	other		SSR / reflection probe: screen passes
+src/features/reflections/cellssr.cpp|wwCellSsrPass|drawShape|3	other		SSR / reflection probe: screen passes
+src/features/shadows/shadowset.cpp|contactFarPass|drawShape|1	other		contact shadows: screen passes
+src/features/shadows/shadowset.cpp|contactFarPass|drawShape|2	other		contact shadows: screen passes
+src/features/shadows/shadowset.cpp|contactFarPass|drawShape|3	other		contact shadows: screen passes
+src/features/shadows/shadowset.cpp|wwContactShadowPass|drawShape|1	other		contact shadows: screen passes
+src/features/shadows/shadowset.cpp|wwContactShadowPass|drawShape|2	other		contact shadows: screen passes
+src/features/shadows/sunshadow.cpp|sunShadowPassImpl|GpuDriven::poolDraw|1	other		sun shadow map casters / cascades (csmRun, the CSM lanes')
+src/features/shadows/sunshadow.cpp|sunShadowPassImpl|GpuDriven::poolDraw|2	other		sun shadow map casters / cascades (csmRun, the CSM lanes')
+src/features/shadows/sunshadow.cpp|sunShadowPassImpl|drawShape|1	other		sun shadow map casters / cascades (csmRun, the CSM lanes')
+src/features/shadows/sunshadow.cpp|sunShadowPassImpl|drawShape|2	other		sun shadow map casters / cascades (csmRun, the CSM lanes')
+src/features/shadows/sunshadow.cpp|sunShadowPassImpl|drawShape|3	other		sun shadow map casters / cascades (csmRun, the CSM lanes')
+src/features/shadows/sunshadow.cpp|sunShadowPassImpl|glDrawArrays|1	other		sun shadow map casters / cascades (csmRun, the CSM lanes')
+src/features/shadows/sunshadow.cpp|sunShadowPassImpl|GpuDriven::poolDraw|3	other		sun shadow map casters / cascades (csmRun, the CSM lanes')
+src/features/sky/atmosphere.cpp|quad|drawShape|1	other		sky: screen pass
+src/features/water/cellocean.cpp|quad|drawShape|1	other		ocean FFT / underwater: screen passes (the water lanes')
+src/features/water/cellunderwater.cpp|wwCellUnderwaterPass|drawShape|1	other		ocean FFT / underwater: screen passes (the water lanes')
+src/features/water/cellunderwater.cpp|wwCellUnderwaterPass|drawShape|2	other		ocean FFT / underwater: screen passes (the water lanes')
+src/features/weather/cellprecip.cpp|wwCellPrecipDraw|glDrawArrays|1	glonly		precipitation points (cell_precip.prog), the weather's particles
+src/gl/BSMesh.cpp|BSMesh::drawShapes|glDrawElements|1	other		Starfield BSMesh (not an FO4 shape)
+src/gl/bsshape.cpp|BSShape::drawShapes|WwBl::multiDrawElements|1	glonly		decal-fade band (WwLook::DecalFade): a decal shape's near placements, one multi-draw; no Vulkan call in the branch
+src/gl/bsshape.cpp|BSShape::drawShapes|WwBl::drawElements|1	glonly		decal-fade band: one draw per fading placement with its alpha (blend colour or alpha uniform)
+src/gl/bsshape.cpp|BSShape::drawShapes|WwBl::multiDrawElements|2	twin	WwBl::vkCellDraw+WwBl::vkBlDraw	the CPU-culled ranges: twins 2-8 by program (celltwinpick.h), the bl twins (fo4_cellbl / fo4_cellcsmbl)
+src/gl/bsshape.cpp|BSShape::drawShapes|WwBl::drawElements|2	twin	WwBl::vkCellDraw+WwBl::vkBlDraw	the whole shape: the same twins; selection draws stay GL
+src/gl/bsshape.cpp|BSShape::drawShapes|glDrawElements|1	other		editor: runs between hidden triangles (the Hide triangles tool), never in a cell walk
+src/gl/bsshape.cpp|BSShape::drawShapes|glDrawElements|2	other		gates only: WW_CELL_VOLPART fx dump (wwVolPartFxDump)
+src/gl/bsshape.cpp|BSShape::drawSelection|glDrawElements|1	other		editor: selection
+src/gl/bsshape.cpp|BSShape::drawSelection|glDrawElements|2	other		editor: selection
+src/gl/bsshape.cpp|BSShape::drawSelection|glDrawElements|3	other		editor: selection
+src/gl/celllights.cpp|wwCellFarDotsDraw|drawShape|1	other		far light dots (vkfardots, the VKFAR lanes')
+src/gl/controllers.cpp|ProcLightningController::drawPreview|glDrawArrays|1	glonly		lightning bolt strips (boltstrip.prog)
+src/gl/glcontext.cpp|wwWarmPrograms|glDrawArrays|1	other		program warm-up: one point, nothing kept
+src/gl/glcontext.hpp|<file>|glDrawElements|1	other		wrapper body: NifSkopeOpenGLContext::drawShape (its callers are the sites)
+src/gl/glcontext.hpp|<file>|glDrawElements|2	other		wrapper body: NifSkopeOpenGLContext::drawShape (its callers are the sites)
+src/gl/glmarker.cpp|GLMarker::drawMarker|glDrawElements|1	other		editor: markers
+src/gl/glmesh.cpp|Mesh::drawShapes|glDrawElements|1	glonly		NiTriShape / NiTriStrips geometry (Mesh), older-format shapes
+src/gl/glmesh.cpp|Mesh::drawSelection|glDrawElements|1	other		editor: selection
+src/gl/glmesh.cpp|Mesh::drawSelection|glDrawArrays|1	other		editor: selection
+src/gl/glmesh.cpp|Mesh::drawSelection|glDrawElements|2	other		editor: selection
+src/gl/glmesh.cpp|Mesh::drawSelection|glDrawElements|3	other		editor: selection
+src/gl/glnode.cpp|Node::drawVertexSelection|glDrawArrays|1	other		editor: selection
+src/gl/glnode.cpp|Node::drawTriangleSelection|glDrawElements|1	other		editor: selection
+src/gl/glnode.cpp|Node::drawTriangleSelection|glDrawElements|2	other		editor: selection
+src/gl/glnode.cpp|Node::drawTriangleSelection|glDrawElements|3	other		editor: selection
+src/gl/glshape.cpp|Shape::drawVerts|glDrawArrays|1	other		editor: verts / normals / wireframe / weights overlays
+src/gl/glshape.cpp|Shape::drawVerts|glDrawArrays|2	other		editor: verts / normals / wireframe / weights overlays
+src/gl/glshape.cpp|Shape::drawNormals|glDrawArrays|1	other		editor: verts / normals / wireframe / weights overlays
+src/gl/glshape.cpp|Shape::drawNormals|glDrawArrays|2	other		editor: verts / normals / wireframe / weights overlays
+src/gl/glshape.cpp|Shape::drawNormals|glDrawArrays|3	other		editor: verts / normals / wireframe / weights overlays
+src/gl/glshape.cpp|Shape::drawWireframe|glDrawElements|1	other		editor: verts / normals / wireframe / weights overlays
+src/gl/glshape.cpp|Shape::drawTriangles|glDrawElements|1	other		editor: verts / normals / wireframe / weights overlays
+src/gl/glshape.cpp|Shape::drawWeights|glDrawElements|1	other		editor: verts / normals / wireframe / weights overlays
+src/gl/glshape.cpp|Shape::drawWeights|glDrawArrays|1	other		editor: verts / normals / wireframe / weights overlays
+src/gl/gltools.cpp|Scene::drawPoints|glDrawArrays|1	other		editor: Scene line / point / triangle / CMS helpers
+src/gl/gltools.cpp|Scene::drawLine|glDrawArrays|1	other		editor: Scene line / point / triangle / CMS helpers
+src/gl/gltools.cpp|Scene::drawLines|glDrawArrays|1	other		editor: Scene line / point / triangle / CMS helpers
+src/gl/gltools.cpp|Scene::drawTriangles|glDrawElements|1	other		editor: Scene line / point / triangle / CMS helpers
+src/gl/gltools.cpp|Scene::drawTriangles|glDrawArrays|1	other		editor: Scene line / point / triangle / CMS helpers
+src/gl/gltools.cpp|Scene::drawCMS|glDrawElements|1	other		editor: Scene line / point / triangle / CMS helpers
+src/gl/gltools.cpp|Scene::drawCMS|glDrawElements|2	other		editor: Scene line / point / triangle / CMS helpers
+src/gl/lookdevstage.cpp|drawDome|drawShape|1	other		lookdev stage: dome, sky, clouds, ground, billboards
+src/gl/lookdevstage.cpp|drawBill|drawShape|1	other		lookdev stage: dome, sky, clouds, ground, billboards
+src/gl/lookdevstage.cpp|drawMoonGlobe|drawShape|1	other		lookdev stage: dome, sky, clouds, ground, billboards
+src/gl/lookdevstage.cpp|drawClouds|drawShape|1	other		lookdev stage: dome, sky, clouds, ground, billboards
+src/gl/lookdevstage.cpp|drawClouds|drawShape|2	other		lookdev stage: dome, sky, clouds, ground, billboards
+src/gl/lookdevstage.cpp|drawStars|drawShape|1	other		lookdev stage: dome, sky, clouds, ground, billboards
+src/gl/lookdevstage.cpp|drawCube|drawShape|1	other		lookdev stage: dome, sky, clouds, ground, billboards
+src/gl/lookdevstage.cpp|wwLookdevDrawGround|drawShape|1	other		lookdev stage: dome, sky, clouds, ground, billboards
+src/ui/widgets/uvedit.cpp|UVWidget::paintGL|glDrawArrays|1	other		editor: UV editor
+src/ui/widgets/uvedit.cpp|UVWidget::paintGL|glDrawArrays|2	other		editor: UV editor
+src/ui/widgets/uvedit.cpp|UVWidget::paintGL|glDrawArrays|3	other		editor: UV editor
+src/ui/widgets/uvedit.cpp|UVWidget::drawTexCoords|glDrawElements|1	other		editor: UV editor
+src/ui/widgets/uvedit.cpp|UVWidget::drawTexCoords|glDrawArrays|1	other		editor: UV editor
