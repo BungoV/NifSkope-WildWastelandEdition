@@ -253,6 +253,24 @@
 // rain_near_gobo: 67108864 the gobos off (the packed cellGoboOn 0); 134217728 the table dropped (the packed cellGoboTbl
 // 0: the omni's and the hemisphere's patterns gone); 268435456 the uv flipped (the packed cellGoboRot 3). Lifted with
 // it: precipLitWhy's gobo refusal. Census after: exterior 1, interior 2 (the gobo line gone from both).
+// The roof map (L8 term 7, VKFAR6 11-15; bar set before its first run, never widened): pcRoofOn 1 drops a particle under
+// the map's roof (cell_precip_field's pcRoofOpen: the texel floor( pcRoofCam.xy + rel.xy pcRoofInv ), off the map open,
+// else open when the texel's z - pcRoofCam.z < rel.z), a cull: the particle set changes, no colour term. Three cases, one
+// a record pass: rain_near_roof (plain, rain_near_disc's run), snow_look_roof (the look, snow_look_near's run; the drop
+// look runs the same record pass, precip_look_view_cs), rain_near_roof_lit (lit, rain_near_lit's run, volTerms 1). Each
+// pcRoofOn 1 with one fixture, R32F 24 x 16 (nx != ny), NEAREST, clamp to edge (cellprecip.cpp's state), the texel a
+// sixteenth of the box side, the eye at texel (6.3, 11.7) so the map covers part of the box and the off-map branch is
+// read (low x, high y); a quarter of the texels open (-1e30), the rest a roof at the eye's z + uniform( -L / 2, L / 2 ) (roofs above and
+// below particles). The prep prints each case's in-view particles and how many its CPU particles put under a roof
+// (predicted before the run). The same verdict (depth EXACT, colour inside the bar), reference checks and repeat clause
+// as each case's run. The case must also show (else the gate fails): GL with pcRoofOn 0 differs on >= 1000 covered
+// samples (the roof seen); pcRoof, pcRoofOn, pcRoofCam and pcRoofInv found in GL's program; pcRoofOn packed non-zero.
+// Reds, each must FAIL in each roof case: 536870912 the map dropped (Vulkan's pcRoof the zero texture); 1073741824 the
+// roof off (the packed pcRoofOn 0); 2147483648 the map's axes swapped (the packed pcRoofCam x and y swapped). A mismatch
+// on a texel edge is a ruling or a Vulkan twin in GL's order, never a wider bar. Lifted with it: precipAdmits' roof
+// refusal (every run); the lit record pass reads pcRoof at its own register (t47: t0 is cellLights there); a run with
+// pcRoofOn and no pcRoof in GL's program is refused by name; the app's rain / snow draw twins GL's pcRoof (copied every
+// run: the map changes with the cell). Census after: exterior 0, interior 1 (the roof line gone from both).
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
