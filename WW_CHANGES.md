@@ -94,6 +94,8 @@ Changed, not built, not checked live.
   atlas lookup and all three reds pass; the 4-ulp bar does NOT (giStep 1: 1694 of 57377 texels; decoded at most 0.3 %
   of E, visibility codes within 1). The cause is float order (NV GL's choice for the world position, proven by a
   probe; the rest is inside the read). The bar is left as written.
+- VKFAR4: until that gate is green the Vulkan route is refused by default: GL draws the screen GI and the route line
+  says "its gate is red". The red WW_VKVIEW_GIHALF_RED=1 stays.
 
 ## VKFAR2 L8 slice 1 (2026-11-14): rain / snow pass for the Vulkan view, not wired in (gate red)
 
