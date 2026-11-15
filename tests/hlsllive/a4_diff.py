@@ -512,6 +512,30 @@ class Rig:
                 units.append(unit); unit += 1
             arr = np.array(units, dtype=np.int32)
             g('glUniform1iv', None, GLint, GLsizei, c_p)(lp, size, arr.ctypes.data)
+        # BATCH1117: a sampler only the SPIR-V program has (an HLSL-only path: FARSKYMAP1's farSkyMap) gets a texture of its own
+        # type on its own unit, as the app binds it (celllights.cpp). Left on unit 0 beside a sampler of another type, every
+        # draw of the program was GL_INVALID_OPERATION (84 FAILs `GL error glsl=0x0 spv=0x502`, the fo4_cell / pbrm_cell
+        # families). Its switch uniforms stay unset (0): the path is off, as on the GLSL side. NV refuses the draw only while a
+        # texture of the sampler's own type is bound on unit 0, which an earlier program of the same run left there (so an
+        # --only run read 0x0 and a full run 0x502). Red A4_SPVONLY_RED=1: the old route plus that texture on unit 0.
+        if pr is not ref:
+            have = set(n for n, _l, _t, _s in ref.samps)
+            for name, loc, ty, size in sorted(pr.samps):
+                if name in have:
+                    continue
+                if os.environ.get('A4_SPVONLY_RED') == '1':
+                    t, tgt = self.tex_for(ty, seed)
+                    g('glActiveTexture', None, GLenum)(0x84C0)
+                    g('glBindTexture', None, GLenum, GLuint)(tgt, t)
+                    continue
+                units = []
+                for k in range(size):
+                    t, tgt = self.tex_for(ty, seed)
+                    g('glActiveTexture', None, GLenum)(0x84C0 + unit)
+                    g('glBindTexture', None, GLenum, GLuint)(tgt, t)
+                    units.append(unit); unit += 1
+                arr = np.array(units, dtype=np.int32)
+                g('glUniform1iv', None, GLint, GLsizei, c_p)(loc, size, arr.ctypes.data)
         # blocks: one buffer per block name, bound at the program's own binding
         bu = g('glBindBufferBase', None, GLenum, GLuint, GLuint)
         for name, idx, size, bind in pr.blocks:
@@ -649,7 +673,7 @@ def main():
     # HLSLFIX2: the harness files' CODE (stamps.code_key: comments and docstrings dropped), not their bytes; a2_iface.py and
     # remap.py are read too (items, glsl_program, the source lookup); a code edit anywhere in them still re-renders every program
     atool = stamps.sha(stamps.code_key(['a4_diff.py', 'a2_iface.py', 'glctx.py', 'spirv_probe.py', 'remap.py', 'stamps.py']),
-                       units, seeds, os.environ.get('A4_BASEONLY', ''))
+                       units, seeds, os.environ.get('A4_BASEONLY', ''), os.environ.get('A4_SPVONLY_RED', ''))
     gfind = lambda n: os.path.join(tree, byn[n]) if n in byn else None
     newcache = dict(cache)
     fix = fixtures(tree)
