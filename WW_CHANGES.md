@@ -214,8 +214,16 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
   through the lists within the bar, and dropping the projection or the lists FAILs. A census line in the gate lists every
   light term the app's default turns on that Vulkan still refuses (2dce06fc).
 - The local sun law outdoors (d7233ec4 bar, a42d217b): exact on a new gate case; dropping it FAILs.
-- Still on GL (the census, exterior 7): the lamps' shadow cubes and gobos, GI, ambient, cascade shadows, air drift,
-  terrain air; interiors too. The app turns these on by default, so lit runs in the app still go to GL.
+- Terrain air outdoors (ebc028aa bar, aca755f0): the ground layer of the air on the grid. A new far-snow gate case is
+  exact (28114 samples); in GL, turning the grid off moves 24487 samples; a red that drops it FAILs (23472 flips).
+- GI (VKFAR5, e34a55d7 bar, e4335102): GL's default rain / snow program has no GI read at all (the GI switch is
+  compiled as off unless the old baked probe GI's red is on), so the GI term no longer sends a run to GL. A new near
+  rain case with the GI term on is exact (151278 samples). Turning the GI term on or off changes nothing in GL's particle
+  stage, and the ray-traced GI variant of GL's program reads no GI there either. A GL program that does read a GI
+  volume (the baked probe GI's red) is refused by name. Its GI moves 151219 samples in GL, and a red that skips the
+  refusal FAILs on it (150898 flips).
+- Still on GL (the census, exterior 6, interior 7): the lamps' shadow cubes and gobos, ambient, cascade shadows, air
+  drift, the roof map; interiors too. The app turns these on by default, so lit runs in the app still go to GL.
 
 ## VKWATER4 (2026-11-15): the ultra ocean builds on Vulkan compute (WW_VKVIEW=1)
 

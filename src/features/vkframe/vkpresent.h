@@ -799,6 +799,7 @@ struct PrecipRun
 		float drift = 0.0f, sunA = 0.0f;
 		int shadow = -1, gobo = -1, cluster = -1, cellRed = -1;  //!< the lamps' switches (L8 term 2a): cellShadowOn, cellGoboOn, cellClusterOn, cellRed
 		float phys = 0.0f;              //!< cellLightPhys.x (the physical falloff)
+		int gi = 0;                     //!< GI names active in GL's program (a WW_CELL_PRT / RT GI variant reads a GI volume; L8 term 1)
 	};
 	LitIn litIn;                    //!< a lit run's switches as precipLitRead reads them from GL (before any pack; -1 absent)
 	struct TexBuf { unsigned tex = 0, buf = 0, glFmt = 0; long long off = 0, bytes = 0; };
@@ -1143,6 +1144,10 @@ template <class Fn> void precipLitRead( Fn * fn, unsigned prog, PrecipRun & t )
 	t.litIn.cluster = geti( "cellClusterOn" );
 	t.litIn.cellRed = geti( "cellRed" );
 	t.litIn.phys = getf( "cellLightPhys", 0 );
+	// L8 term 1 (VKFAR5): the default program compiles the GI out (cellGiOn the constant false without WW_CELL_PRT)
+	t.litIn.gi = 0;
+	for ( const char * nm : { "cellGiOn", "cellGi", "cellGiSlots", "cellRooms", "cellGiAir", "cellGiAirOn", "cellDdgiOn", "cellDdgiAtlas" } )
+		t.litIn.gi += fn->glGetUniformLocation( prog, nm ) >= 0;
 }
 
 /* lane VKFAR2 (row L8 term 2a): a texture buffer the program samples (the lamps' cellLights / cellCluster): the name on
