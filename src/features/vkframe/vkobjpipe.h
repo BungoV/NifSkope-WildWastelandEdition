@@ -198,7 +198,7 @@ struct ObjBlSampler
 };
 //! GL's texture state reads (glGetTextureParameter*, GL 4.5)
 bool objBlSamplerRead( GlProc gp, unsigned tex, ObjBlSampler & s, std::string & why );
-/* twin ids: 0-1 ObjBlShade, 2-6 ObjCellShade (VKWATER3 7 fo4_effectcell, 8 fo4_effectdecalcsm). One id per twin across
+/* twin ids: 0-1 ObjBlShade, 2-6 ObjCellShade (VKWATER3 7 fo4_effectcell, 8 fo4_effectdecalcsm; VKOBJ8 10 fo4_effectdecal). One id per twin across
  * every lane branch: tests/vkframe/twin_ids.py fails on a duplicate */
 constexpr int kObjTwinPfx = 9;  //!< twin 9 particles_cell (objPfxShade)
 struct ObjBlDraw
@@ -407,7 +407,7 @@ int objBlVariant( const std::string & defs, const char *& why, int red = 0 );
  * (0,0,0,1)) and its index buffer (GL_UNSIGNED_SHORT, its size). false: why (nothing drawn; GL draws the shape) */
 struct ObjCellShade
 {
-	int twin = 2;                 //!< 2 fo4_cell, 3 fo4_cellcsm, 4 pbrm_default, 5 pbrm_cell, 6 pbrm_cellcsm, 7 fo4_effectcell, 8 fo4_effectdecalcsm
+	int twin = 2;                 //!< 2 fo4_cell, 3 fo4_cellcsm, 4 pbrm_default, 5 pbrm_cell, 6 pbrm_cellcsm, 7 fo4_effectcell, 8 fo4_effectdecalcsm, 10 fo4_effectdecal
 	unsigned prog = 0;            //!< GL's current program
 	std::uintptr_t poolKey = 0;   //!< one key per route (the shape's twins are rewritten each draw)
 	std::size_t verts = 0;        //!< the shape's vertex count

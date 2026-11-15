@@ -1203,6 +1203,11 @@ int main( int argc, char ** argv )
 		const bool c8s = cellGate( spvDir + "/cellset/spirv", 8, fxBc4, 1u << 2, "bc4" );
 		const bool c8rt = cellGate( spvDir + "/cellset/spirv", 8, fx, 0xFu << 9, "rt", 1u | 8u );
 		ok = c8 && c8s && c8rt && ok;
+		// lane VKOBJ8: twin 10 (fo4_effectdecal: twin 8's decal without the cascades), twin 8's fixture, rows and reds
+		const bool c10 = cellGate( spvDir + "/cellset/spirv", 10, fx, 0xBu | 1u << 4 | 1u << 8 );
+		const bool c10s = cellGate( spvDir + "/cellset/spirv", 10, fxBc4, 1u << 2, "bc4" );
+		const bool c10rt = cellGate( spvDir + "/cellset/spirv", 10, fx, 0xFu << 9, "rt", 1u | 8u );
+		ok = c10 && c10s && c10rt && ok;
 		/* lane VKWATER5: the cell route's screen terms (vars 32): GL-owned cellAo (and cellSsr on twins 2, 3, 5, 6) bound as the app binds
 		 * them; the copy red (reds bit 8) must FAIL on each. Twin 4's base variant has no cell lights (no cellAo read) */
 		const bool a2 = cellGate( spvDir + "/cellset/spirv", 2, maps, 1u << 8, "ao", 32u );
@@ -1210,7 +1215,8 @@ int main( int argc, char ** argv )
 		const bool a5 = cellGate( spvDir + "/cellset/spirv", 5, pbrm, 1u << 8, "ao", 32u );
 		const bool a6 = cellGate( spvDir + "/cellset/spirv", 6, pbrm, 1u << 8, "ao", 32u );
 		const bool a8 = cellGate( spvDir + "/cellset/spirv", 8, fx, 1u << 8, "ao", 32u );
-		ok = a2 && a3 && a5 && a6 && a8 && ok;
+		const bool a10 = cellGate( spvDir + "/cellset/spirv", 10, fx, 1u << 8, "ao", 32u );
+		ok = a2 && a3 && a5 && a6 && a8 && a10 && ok;
 		// lane VKOBJ7: GPU cull step B (vars 64): its kept ranges on Vulkan against GL's cluster commands; red droprange must FAIL
 		const bool sb2 = cellGate( spvDir + "/cellset/spirv", 2, maps, 0u, "stepb", 64u );
 		const bool sb3 = cellGate( spvDir + "/cellset/spirv", 3, maps, 0u, "stepb", 64u );

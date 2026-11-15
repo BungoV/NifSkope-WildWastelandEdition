@@ -135,7 +135,7 @@ src/features/weather/cellprecip.cpp|wwCellPrecipDraw|glDrawArrays|1	glonly		prec
 src/gl/BSMesh.cpp|BSMesh::drawShapes|glDrawElements|1	other		Starfield BSMesh (not an FO4 shape)
 src/gl/bsshape.cpp|BSShape::drawShapes|WwBl::multiDrawElements|1	glonly		decal-fade band (WwLook::DecalFade): a decal shape's near placements, one multi-draw; no Vulkan call in the branch
 src/gl/bsshape.cpp|BSShape::drawShapes|WwBl::drawElements|1	glonly		decal-fade band: one draw per fading placement with its alpha (blend colour or alpha uniform)
-src/gl/bsshape.cpp|BSShape::drawShapes|WwBl::multiDrawElements|2	twin	WwBl::vkCellDraw+WwBl::vkBlDraw	the CPU-culled ranges: twins 2-8 by program (celltwinpick.h), the bl twins (fo4_cellbl / fo4_cellcsmbl)
+src/gl/bsshape.cpp|BSShape::drawShapes|WwBl::multiDrawElements|2	twin	WwBl::vkCellDraw+WwBl::vkBlDraw	the CPU-culled ranges: twins 2-8 and 10 by program (celltwinpick.h), the bl twins (fo4_cellbl / fo4_cellcsmbl)
 src/gl/bsshape.cpp|BSShape::drawShapes|WwBl::drawElements|2	twin	WwBl::vkCellDraw+WwBl::vkBlDraw	the whole shape: the same twins; selection draws stay GL
 src/gl/bsshape.cpp|BSShape::drawShapes|glDrawElements|1	other		editor: runs between hidden triangles (the Hide triangles tool), never in a cell walk
 src/gl/bsshape.cpp|BSShape::drawShapes|glDrawElements|2	other		gates only: WW_CELL_VOLPART fx dump (wwVolPartFxDump)

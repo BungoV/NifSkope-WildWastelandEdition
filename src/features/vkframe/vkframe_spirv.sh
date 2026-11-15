@@ -183,6 +183,8 @@ fxc objcell_pbrmcellcsm_ps pbrm_cellcsm_ps ps_6_0 "$PS_SHIFT"
 # the air zones do not touch), fo4_default.vert's programs too
 fxc objcell_effectcell_ps fo4_effectcell_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_AIRZONE=1"
 fxc objcell_effectdecalcsm_ps fo4_effectdecalcsm_ps ps_6_0 "$PS_SHIFT"
+# lane VKOBJ8: fo4_effectdecal.prog (twin 10), the same decal without the cascades (the cell view's pick while no cascade map is built)
+fxc objcell_effectdecal_ps fo4_effectdecal_ps ps_6_0 "$PS_SHIFT"
 # the all-on route's RT GI variant (WW_CELL_RTDDGI + RTDDGI_CASCADES + RESTIR) of each twin (pbrm_default's code is the same)
 fxc objcell_cell_rt_ps fo4_cell_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1"
 fxc objcell_cellcsm_rt_ps fo4_cellcsm_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1"
@@ -190,6 +192,7 @@ fxc objcell_pbrmcell_rt_ps pbrm_cell_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_RTDDGI=1 
 fxc objcell_pbrmcellcsm_rt_ps pbrm_cellcsm_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1"
 fxc objcell_effectcell_rt_ps fo4_effectcell_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_AIRZONE=1 -D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1"
 fxc objcell_effectdecalcsm_rt_ps fo4_effectdecalcsm_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1"
+fxc objcell_effectdecal_rt_ps fo4_effectdecal_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1"
 # the cell frame's per-sample readback (objBlFrameSamples): its own bindings, no shift
 "$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main -Fo objbl_samples_cs.spv "$(cygpath -m "$ROOT/res/shaders/hlsl/near/objbl_samples_cs.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/near/objbl_samples_cs.hlsl")"
 python -I "$ROOT/tools/spv_header.py" objbl_samples_cs.spv vkframe_objbl_samples_cs_spv objbl_samples_cs.spv.h < /dev/null

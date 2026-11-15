@@ -735,7 +735,7 @@ namespace WwBl
 namespace
 {
 long long cellTried = 0, cellDrawn = 0, pbrmTried = 0, pbrmDrawn = 0;	// pbrm: pbrm_default / pbrm_cell / pbrm_cellcsm (twins 4-6, `vk objpbrm:`)
-long long fxTried = 0, fxDrawn = 0;	// fx: fo4_effectcell / fo4_effectdecalcsm (twins 7-8, `vk objfx:`)
+long long fxTried = 0, fxDrawn = 0;	// fx: fo4_effectcell / fo4_effectdecalcsm / fo4_effectdecal (twins 7, 8, 10, `vk objfx:`)
 int cellVar[4] = {}, pbrmVar[4] = {}, fxVar[4] = {};	// of the drawn: lit (the light buffer), skinned, blended, RT GI (per route)
 std::string cellWhy, pbrmWhy, fxWhy;
 
@@ -760,7 +760,7 @@ bool vkCellDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * co
 	if ( !vkShadeOn() || !prog || n <= 0 || geo.on )
 		return false;
 	const int twin = cellTwinOf( prog->name );
-	if ( twin < 2 || twin > 8 )
+	if ( twin < 2 || ( twin > 8 && twin != 10 ) )
 		return false;
 	const bool fx = twin >= 7;
 	const bool pbrm = twin >= 4 && !fx;

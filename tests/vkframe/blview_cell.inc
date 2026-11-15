@@ -102,10 +102,11 @@
 bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], unsigned reds = 15u, const char * label = nullptr, unsigned vars = 0u )
 {
 	using namespace WwVkPresent;
-	static const char * twinTag[9] = { "", "", "cell", "cellcsm", "pbrm", "pbrmcell", "pbrmcellcsm", "effectcell", "effectdecalcsm" };
-	static const char * twinFrag[9] = { "", "", "fo4_cell", "fo4_cellcsm", "pbrm_default", "pbrm_cell", "pbrm_cellcsm", "fo4_effectcell",
-		"fo4_effectdecalcsm" };
-	if ( twin < 2 || twin > 8 ) {
+	static const char * twinTag[11] = { "", "", "cell", "cellcsm", "pbrm", "pbrmcell", "pbrmcellcsm", "effectcell", "effectdecalcsm", "",
+		"effectdecal" };
+	static const char * twinFrag[11] = { "", "", "fo4_cell", "fo4_cellcsm", "pbrm_default", "pbrm_cell", "pbrm_cellcsm", "fo4_effectcell",
+		"fo4_effectdecalcsm", "", "fo4_effectdecal" };
+	if ( twin < 2 || ( twin > 8 && twin != 10 ) ) {
 		std::printf( "BLVIEW cell FAIL (no twin %d)\n", twin );
 		return false;
 	}
@@ -113,8 +114,9 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	/* twin 8: fo4_effectdecalcsm (lane VKWATER3 G4: an effect decal, or an exterior's room-lit effect, lit as the surface it
 	 * lies on, with the cascades): the effect's maps and state, outdoors (cellInterior 0, the sun and its shadow), draws 1, 4
 	 * room-lit (fxRoomLit: cellFxBase x the spot's open-air share), the rest the decal's surface light (fxDecalLin) */
-	const bool decT = twin == 8;
-	const bool fxT = twin == 7 || decT, pbrmT = twin >= 4 && !fxT, csmT = twin == 3 || twin == 6 || decT;
+	// twin 10 (lane VKOBJ8): fo4_effectdecal, twin 8's decal without the cascades
+	const bool decT = twin == 8 || twin == 10;
+	const bool fxT = twin == 7 || decT, pbrmT = twin >= 4 && !fxT, csmT = twin == 3 || twin == 6 || twin == 8;
 	// lights: vars 1, every twin from 5, and the RT variant but on twin 4 (pbrm_default's RT program has no lights)
 	const bool lightsV = ( vars & 1u ) != 0 || twin >= 5 || ( ( vars & 8u ) != 0 && twin != 4 );
 	const bool oneT = twin == 4 || fxT;  // writes target 0 only

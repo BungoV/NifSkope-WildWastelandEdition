@@ -116,7 +116,7 @@ int main( int argc, char ** argv )
 		const std::regex def( "default: words = vkframe_(\\w+)_spv;" );
 		if ( std::regex_search( basePart, m, def ) )
 			mod[{ 2, false }] = m[1];
-		for ( int t = 2; t <= 8; t++ )
+		for ( int t = 2; t <= 10; t++ )
 			if ( !mod.count( { t, true } ) )
 				mod[{ t, true }] = mod[{ t, false }];  // the rt switch's default: break falls to the base module
 	}
@@ -172,6 +172,7 @@ int main( int argc, char ** argv )
 		{ "pbrm_cellcsm.prog", 6, { B.c_str() }, { kCellTwinRtKey } },
 		{ "fo4_effectcell.prog", 7, { BA.c_str() }, { kCellTwinRtKeyAir } },
 		{ "fo4_effectdecalcsm.prog", 8, { B.c_str(), BA.c_str() }, { kCellTwinRtKey, kCellTwinRtKeyAir } },
+		{ "fo4_effectdecal.prog", 10, { B.c_str(), BA.c_str() }, { kCellTwinRtKey, kCellTwinRtKeyAir } },  // lane VKOBJ8
 		{ "particles_cell.prog", 9, { BA.c_str() }, { kCellTwinRtKeyAir } },
 	};
 	CellTwinRoute base, allOn;

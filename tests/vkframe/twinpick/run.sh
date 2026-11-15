@@ -37,6 +37,11 @@ if inert fo4_effectdecalcsm_ps WW_CELL_AIRZONE "" "-D WW_CELL_AIRZONE=1" \
 	&& inert fo4_effectdecalcsm_ps "WW_CELL_AIRZONE (RT variant)" "$RT" "$RT -D WW_CELL_AIRZONE=1"; then
 	INERT+=( --inert fo4_effectdecalcsm_ps:WW_CELL_AIRZONE )
 fi
+# lane VKOBJ8: twin 10 (fo4_effectdecal) takes the air-zone keys on the same proof
+if inert fo4_effectdecal_ps WW_CELL_AIRZONE "" "-D WW_CELL_AIRZONE=1" \
+	&& inert fo4_effectdecal_ps "WW_CELL_AIRZONE (RT variant)" "$RT" "$RT -D WW_CELL_AIRZONE=1"; then
+	INERT+=( --inert fo4_effectdecal_ps:WW_CELL_AIRZONE )
+fi
 "$CXX" -O1 -std=c++17 -Wall -I src "$SRC" -o "$OUT/green.exe" -static || { echo "BUILD FAIL green"; exit 2; }
 timeout 30 "$OUT/green.exe" . "${INERT[@]}" > "$OUT/green.txt"; rc=$?
 cat "$OUT/green.txt"

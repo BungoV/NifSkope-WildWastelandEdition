@@ -117,7 +117,8 @@ VKFRAME_FXC = {'objcell_vs': ('fo4_default_vs', 'vs_6_0', 'VS_SHIFT', ''), 'objc
 	'objcell_cellcsm_ps': ('fo4_cellcsm_ps', 'ps_6_0', 'PS_SHIFT', ''), 'objcell_pbrm_ps': ('pbrm_default_ps', 'ps_6_0', 'PS_SHIFT', ''),
 	'objcell_pbrmcell_ps': ('pbrm_cell_ps', 'ps_6_0', 'PS_SHIFT', ''), 'objcell_pbrmcellcsm_ps': ('pbrm_cellcsm_ps', 'ps_6_0', 'PS_SHIFT', ''),
 	'objcell_effectcell_ps': ('fo4_effectcell_ps', 'ps_6_0', 'PS_SHIFT', '-D WW_CELL_AIRZONE=1'),
-	'objcell_effectdecalcsm_ps': ('fo4_effectdecalcsm_ps', 'ps_6_0', 'PS_SHIFT', '')}
+	'objcell_effectdecalcsm_ps': ('fo4_effectdecalcsm_ps', 'ps_6_0', 'PS_SHIFT', ''),
+	'objcell_effectdecal_ps': ('fo4_effectdecal_ps', 'ps_6_0', 'PS_SHIFT', '')}
 # the all-on route's RT GI variant of each twin (pbrm_default's code is the same)
 VKFRAME_FXC_RT = '-D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1'
 VKFRAME_FXC.update({'objcell_cell_rt_ps': ('fo4_cell_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXC_RT),
@@ -125,7 +126,8 @@ VKFRAME_FXC.update({'objcell_cell_rt_ps': ('fo4_cell_ps', 'ps_6_0', 'PS_SHIFT', 
 	'objcell_pbrmcell_rt_ps': ('pbrm_cell_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXC_RT),
 	'objcell_pbrmcellcsm_rt_ps': ('pbrm_cellcsm_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXC_RT),
 	'objcell_effectcell_rt_ps': ('fo4_effectcell_ps', 'ps_6_0', 'PS_SHIFT', '-D WW_CELL_AIRZONE=1 ' + VKFRAME_FXC_RT),
-	'objcell_effectdecalcsm_rt_ps': ('fo4_effectdecalcsm_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXC_RT)})
+	'objcell_effectdecalcsm_rt_ps': ('fo4_effectdecalcsm_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXC_RT),
+	'objcell_effectdecal_rt_ps': ('fo4_effectdecal_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXC_RT)})
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXC]
 # lane VKOBJ5 (G4 round 3): the script's `fxp` lines, particles_cell.prog's record pass, expand stage and cell-lit pixel twin
 # (res/shaders/hlsl/particles) on the app's variant
