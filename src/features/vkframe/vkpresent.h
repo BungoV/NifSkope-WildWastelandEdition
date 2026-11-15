@@ -787,10 +787,10 @@ struct PrecipRun
 	bool lit = false, fogged = false, roofOn = false;  //!< lit: slice 2b (the sun alone; the rest refused); roofOn refused (GL draws); fogged: slice 2a
 	bool litBlock = false;          //!< cs holds kT_preciplitcs (a lit run without it is refused)
 	bool look = false;              //!< slice 3: cell_precip_look.prog's run (cs / ps also hold kT_preciplook*)
-	FxTex tex[9];                   //!< t0 pcRoof (none yet), t1 pcTex (the atlas; a BC one twinned by farTwin), the air's t25 atApTex, t26 volTex, t27 volTile, t28 volAirTerr, t29 volAirRainMap, the look's pcTexN, the lit pass's t17 airTerr (L8 terrain air)
+	FxTex tex[10];                  //!< t0 pcRoof (none yet), t1 pcTex (the atlas; a BC one twinned by farTwin), the air's t25 atApTex, t26 volTex, t27 volTile, t28 volAirTerr, t29 volAirRainMap, the look's pcTexN, the lit pass's t17 airTerr (L8 terrain air), the lit pass's t19 volEnvHist (L8 term 2, the ambient's keep)
 	std::uint8_t cs[kT_preciplitcsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipcs ) (+ kT_preciplookcs for a look run, kT_preciplitcs for a lit one)
 	std::uint8_t ps[kT_preciplookpsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipps ) (+ kT_preciplookps for a look run)
-	int red = 0;                    //!< gates only: 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade, 8 the air dropped, 16 the look dropped (the plain pipelines draw a look run), 32 the atlas dropped (t1 / t7 the zero texture), 128 the light dropped (lit = 1), 256 the lamps' lights dropped (the zero texel buffer), 512 b0 dropped (globalUniforms zero), 1024 the cluster's lists dropped (the zero texel buffer), 2048 the local sun law dropped (vpSun.w 0), 4096 the terrain air's grid dropped (t8 the zero texture)
+	int red = 0;                    //!< gates only: 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade, 8 the air dropped, 16 the look dropped (the plain pipelines draw a look run), 32 the atlas dropped (t1 / t7 the zero texture), 128 the light dropped (lit = 1), 256 the lamps' lights dropped (the zero texel buffer), 512 b0 dropped (globalUniforms zero), 1024 the cluster's lists dropped (the zero texel buffer), 2048 the local sun law dropped (vpSun.w 0), 4096 the terrain air's grid dropped (t8 the zero texture), 16384 the ambient's history dropped (t9 the zero texture), 32768 the ambient dropped (the packed volTerms' bit 8 cleared)
 	const void * global = nullptr;  //!< GL's globalUniforms (b0, 336 bytes; the cluster reads projectionMatrix); null: zeros (a cluster run refused)
 	std::uint8_t * recOut = nullptr;  //!< gates only: the run's records read back (n x 112 bytes, 192 a look run; host-visible records, a fence wait); null in the app
 	struct LitIn
@@ -799,6 +799,7 @@ struct PrecipRun
 		float drift = 0.0f, sunA = 0.0f;
 		int shadow = -1, gobo = -1, cluster = -1, cellRed = -1;  //!< the lamps' switches (L8 term 2a): cellShadowOn, cellGoboOn, cellClusterOn, cellRed
 		float phys = 0.0f;              //!< cellLightPhys.x (the physical falloff)
+		float envKeep = 0.0f;           //!< volEnvGrid.w: the ambient's keep on (L8 term 2; it reads b0's projection)
 		int gi = 0;                     //!< GI names active in GL's program (a WW_CELL_PRT / RT GI variant reads a GI volume; L8 term 1)
 	};
 	LitIn litIn;                    //!< a lit run's switches as precipLitRead reads them from GL (before any pack; -1 absent)
@@ -1144,6 +1145,7 @@ template <class Fn> void precipLitRead( Fn * fn, unsigned prog, PrecipRun & t )
 	t.litIn.cluster = geti( "cellClusterOn" );
 	t.litIn.cellRed = geti( "cellRed" );
 	t.litIn.phys = getf( "cellLightPhys", 0 );
+	t.litIn.envKeep = getf( "volEnvGrid", 3 );
 	// L8 term 1 (VKFAR5): the default program compiles the GI out (cellGiOn the constant false without WW_CELL_PRT)
 	t.litIn.gi = 0;
 	for ( const char * nm : { "cellGiOn", "cellGi", "cellGiSlots", "cellRooms", "cellGiAir", "cellGiAirOn", "cellDdgiOn", "cellDdgiAtlas" } )
@@ -1287,6 +1289,11 @@ template <class Fn> bool precipDraw( Fn * fn, unsigned prog, int first, int coun
 			static char terrKey;
 			ok = fxTexOf( fn, prog, "airTerr", 2, t.tex[8], why );
 			t.tex[8].twin = reinterpret_cast<std::uintptr_t>( &terrKey );
+		}
+		if ( ok && t.lit && ( t.litIn.terms & 8 ) ) {  // L8 term 2: GL's volEnvHist (the air's env history) into the lit set's t19
+			static char envKey;
+			ok = fxTexOf( fn, prog, "volEnvHist", 1, t.tex[9], why );
+			t.tex[9].twin = reinterpret_cast<std::uintptr_t>( &envKey );
 		}
 		if ( ok && t.look ) {
 			ok = fxTexOf( fn, prog, "pcTexN", 0, t.tex[7], why, true );

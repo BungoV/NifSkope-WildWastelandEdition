@@ -232,8 +232,16 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
   stage, and the ray-traced GI variant of GL's program reads no GI there either. A GL program that does read a GI
   volume (the baked probe GI's red) is refused by name. Its GI moves 151219 samples in GL, and a red that skips the
   refusal FAILs on it (150898 flips).
-- Still on GL (the census, exterior 6, interior 7): the lamps' shadow cubes and gobos, ambient, cascade shadows, air
-  drift, the roof map; interiors too. The app turns these on by default, so lit runs in the app still go to GL.
+- Ambient (VKFAR5, 4f51998b bar, then the lift): the weather's ambient, the Ambient Only volumes and the air's keep (the
+  air's env history, now shared into the Vulkan pass) light rain / snow on Vulkan. Two new gate cases within the bar:
+  near rain with a sphere and a box volume (151290 samples; the volumes move 63000 in GL, the box alone 30248, the
+  sphere alone 32843) and far fogged snow with the keep (28114; the keep moves 21014). Dropping the ambient, its history
+  or the frame's projection FAILs. A run with the keep on and no frame uniforms is refused.
+- Gate fixes on the way: every GL case now starts from its program's freshly linked uniforms (17324866; four verdicts
+  moved by 1 ulp, all inside the bar), and the lamps' out-of-reach check ignores pixels where NVIDIA's own 4x blend
+  merged differently between two draws (72f544a1; 8 flips there were GL's own draw-to-draw noise).
+- Still on GL (the census, exterior 5, interior 6): the lamps' shadow cubes and gobos, cascade shadows, air drift, the
+  roof map; interiors too. The app turns these on by default, so lit runs in the app still go to GL.
 
 ## VKWATER4 (2026-11-15): the ultra ocean builds on Vulkan compute (WW_VKVIEW=1)
 
