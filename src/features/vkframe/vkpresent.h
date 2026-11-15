@@ -57,6 +57,11 @@ struct Split
 Split takeSplit();
 //! the child window, the swapchain and the ring go (GL current: its textures and semaphores go too); the device stays
 void shutdown();
+/* lane VKWATER4: the fence waits' red and refusal, shared with vkframe.cpp. fenceRed: WW_VKFENCE_RED=<site>[,<site>...]
+ * (gates only) names this site (a faked VK_TIMEOUT, pending or not). fenceMiss: a wait that returned vkResult (not
+ * VK_SUCCESS): the why, also on stderr (`vk fence:`) */
+bool fenceRed( const char * site );
+std::string fenceMiss( const char * site, int vkResult );
 
 /* Round 10 (VKFRAME1, the view on Vulkan, WW_VKVIEW=1; red WW_VKVIEW_RED=1 = the old route): before the paint, GL binds
  * (GL_FRAMEBUFFER) a view the present device made, w x h at the back buffer's samples (RGBA8 + D24S8), and draws the

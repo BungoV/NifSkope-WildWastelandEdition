@@ -424,20 +424,14 @@ double nowMs()
  * the frame to GL. Red WW_VKFENCE_RED=<site>[,<site>...] (gates only) fakes VK_TIMEOUT at those sites, pending or not. */
 bool fenceDone( VkFence fence, bool pending, const char * site, std::string & why )
 {
-	static const std::string red = [] {
-		const char * e = std::getenv( "WW_VKFENCE_RED" );
-		return e && *e ? "," + std::string( e ) + "," : std::string();
-	}();
-	const bool fake = !red.empty() && red.find( "," + std::string( site ) + "," ) != std::string::npos;
+	const bool fake = WwVkPresent::fenceRed( site );
 	if ( !pending && !fake )
 		return true;
 	Vk & v = vk();
 	const VkResult r = fake ? VK_TIMEOUT : v.vkWaitForFences( v.dev, 1, &fence, VK_TRUE, 1000000000ull );
 	if ( r == VK_SUCCESS )
 		return true;
-	why = std::string( "the last " ) + site + " run's fence wait returned VkResult " + std::to_string( int( r ) )
-		+ ( r == VK_TIMEOUT ? " (timed out after 1 s)" : "" ) + ": its commands may still run, this frame stays on GL";
-	std::fprintf( stderr, "vk fence: %s\n", why.c_str() );
+	why = WwVkPresent::fenceMiss( site, int( r ) );
 	return false;
 }
 
@@ -3776,6 +3770,24 @@ bool glCurrent( WwVkPresent::GlProc gp, std::string & why )
 
 namespace WwVkPresent
 {
+
+bool fenceRed( const char * site )
+{
+	static const std::string red = [] {
+		const char * e = std::getenv( "WW_VKFENCE_RED" );
+		return e && *e ? "," + std::string( e ) + "," : std::string();
+	}();
+	return !red.empty() && red.find( "," + std::string( site ) + "," ) != std::string::npos;
+}
+
+std::string fenceMiss( const char * site, int vkResult )
+{
+	const std::string why = std::string( "the last " ) + site + " run's fence wait returned VkResult "
+		+ std::to_string( vkResult ) + ( vkResult == int( VK_TIMEOUT ) ? " (timed out after 1 s)" : "" )
+		+ ": its commands may still run, this frame stays on GL";
+	std::fprintf( stderr, "vk fence: %s\n", why.c_str() );
+	return why;
+}
 
 const Stat & last()
 {

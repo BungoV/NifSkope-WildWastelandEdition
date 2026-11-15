@@ -1,3 +1,12 @@
+## VKWATER4 (2026-11-15): the bloom chain's Vulkan frames also hand a stuck frame to GL
+
+Changed, not built, not checked live; no offline harness reaches these waits (reds: WW_VKFENCE_RED=frame cap,
+frame layout, chain layout).
+
+- The bloom / combine / exposure frames in flight, and the one-time layout step when their shared frame or chain is
+  made, went on when the wait for earlier Vulkan work timed out. That frame now stays on GL with a `vk fence:` line;
+  a frame or chain that is still in use when it is remade is left, not freed.
+
 ## VKWATER4 (2026-11-15): a stuck Vulkan pass hands its frame to GL instead of writing over it
 
 Changed, not built, not checked live. Offline: each pass's harness passes as before with no new line, and with its
