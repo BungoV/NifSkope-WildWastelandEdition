@@ -132,6 +132,13 @@
 // refusal's input dropped (precipLitRead's GI count forced 0, the run goes on to Vulkan): judged against the WW_CELL_PRT
 // variant's frame it must FAIL with >= 1000 flips. Lifted with it: precipLitWhy's volTerms 4 refusal, replaced by the
 // program refusal (a GL program with a GI read stays on GL).
+// Known start state (VKFAR5 11-15, coordinator ruling; set before its first run, never widened): every GL program's loose
+// uniforms are read right after it links (sampler units included in the snapshot's skip: those stay as set) and written
+// back at the top of every bindJob, so each case starts from the linked state and sets what it needs on top; before,
+// a program kept the uniforms an earlier case set and this case does not name (the fogged cases' air values on the
+// unfogged lit cases). Every case reruns; a changed verdict is reported with its numbers, never absorbed. Red (a check
+// on rain_near_lit, not a red bit): GL drawn with the restore skipped and a fogged case's uniforms left on the program
+// must differ from rain_near_lit's judged GL frame on >= 1000 covered samples (the restore matters), else the gate fails.
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
