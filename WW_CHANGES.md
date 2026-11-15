@@ -137,7 +137,12 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
   61991 in GL, forcing one cascade 47435, the clouds 20983). Dropping the shadow map, the shadow or the clouds' map, or
   swapping two cascades, FAILs. A cascade map that is not shared, has another border or filter, or sits on a GPU
   without linear D16 filtering is refused.
-- Still on GL (the census, exterior 4, interior 5): the lamps' shadow cubes and gobos, air drift, the roof map;
+- Air drift (VKFAR6, d837b3b6 bar, then 32fc79eb): the drifting air's 3D noise is shared into the Vulkan pass, so the
+  sun's column and the lamps' paths through the drift light rain / snow on Vulkan. New gate case: far snow with lamps in
+  fog with two noise octaves (28114 samples, EXACT; the drift moves 21759 in GL, zero octaves 25534). Dropping the
+  noise or the drift, or swapping the octaves, FAILs. The case's air is 150x the captured density: the captured air
+  moved the sun by less than one half-float step.
+- Still on GL (the census, exterior 3, interior 4): the lamps' shadow cubes and gobos, the roof map;
   interiors too. The app turns these on by default, so lit runs in the app still go to GL.
 
 ## VKFAR2 P7 (2026-11-14): depth of field, motion blur and object blur join the tone pass on Vulkan (WW_VKVIEW=1)
