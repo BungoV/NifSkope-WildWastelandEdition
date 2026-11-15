@@ -87,7 +87,16 @@
  * each range as the GPU cull's commands do: one command per 8-triangle cluster (the last one short), nothing occluded (the Hi-Z drops
  * only hidden clusters: tests/features/near/signdrop1's matter, not this row's). Vulkan draws rangeDraws' counts and offsets in
  * vkCellDraw's command form (count, 1, offset / 2, base vertex, 0). Bars: the twin's own (depth EXACT, colour within the bound, the
- * crossing counts, lit). Red droprange (rangeDraws red 1: the last kept range dropped from each draw that keeps more than one) must FAIL and move the Vulkan depth. */
+ * crossing counts, lit). Red droprange (rangeDraws red 1: the last kept range dropped from each draw that keeps more than one) must FAIL and move the Vulkan depth.
+ * Twin 10 (lane VKOBJ8 11-15, `BLVIEW effectdecal`, `effectdecal bc4`, `effectdecal rt`, `effectdecal ao`; stated before its first run,
+ * never widened): fo4_effectdecal.prog, the effect decal / room-lit effect program the cell view picks while no cascade map is built
+ * (renderer.cpp fogVariant: wwSunShadowWanted false), twin 8's program without WW_SUNSHADOW. Twin 8's fixture and rows as they are
+ * (outdoors, the sun on, draws 1 and 4 room-lit, the rest the decal's surface light; the effect's maps), the cascade inputs unread.
+ * Rows and reds as twin 8's: the main row reds offset, half, key, light, copy; bc4 (BC4 as GreyscaleMap) red swz; rt (GL's
+ * WW_CELL_RESTIR + RTDDGI + RTDDGI_CASCADES program against objcell_effectdecal_rt_ps) reds restir, atlas, gihalf, gikey; ao (vars 32)
+ * red copy. Bars: the twin's own (depth EXACT, colour within the bound, crossing counts, lit >= 0.9 of covered) and every red FAILs.
+ * The pick (celltwinpick.h) takes the air-zone keys for twin 10 only if tests/vkframe/twinpick proves WW_CELL_AIRZONE inert in
+ * fo4_effectdecal_ps (base and RT: the same SPIR-V bytes with and without), as for twin 8. */
 #include "../../src/features/near/cellgpucullvk.h"  // lane VKOBJ7: step B's ranges (the `stepb` rows)
 
 bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], unsigned reds = 15u, const char * label = nullptr, unsigned vars = 0u )
