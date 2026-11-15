@@ -69,6 +69,91 @@ bool farGroundRun( const WaterRun & r, std::string & why )
 	return twinRun( farGroundD(), kFargndSpec, r, why );
 }
 
+// lane VKFAR4 (batching): the frame's queued ring-0 tiles (GL's order) until the flush; off: a batch failed (sticky)
+struct FgQueue
+{
+	std::vector<WaterRun> runs;
+	int n = 0, lost = 0;
+	bool off = false;
+	std::string offWhy;
+};
+static FgQueue & fgQ()
+{
+	static FgQueue q;
+	return q;
+}
+
+bool farGroundRunN( const WaterRun * const * rs, int n, std::string & why )
+{
+	WaterDraw & D = farGroundD();
+	for ( int at = 0; at < n; ) {
+		int k = 1;
+		while ( at + k < n && k < kTwinBatchMax && twinSameInputs( *rs[at], *rs[at + k] ) )
+			k++;
+		if ( !twinRunN( D, kFargndSpec, rs + at, k, why ) )
+			return false;
+		at += k;
+	}
+	return true;
+}
+
+bool farGroundFlush( std::string & why )
+{
+	FgQueue & q = fgQ();
+	if ( !q.n )
+		return true;
+	std::vector<const WaterRun *> rs( size_t( q.n ) );
+	for ( int i = 0; i < q.n; i++ )
+		rs[size_t( i )] = &q.runs[size_t( i )];
+	const int n = q.n;
+	q.n = 0;
+	if ( farGroundRunN( rs.data(), n, why ) )
+		return true;
+	q.lost += n;
+	q.off = true;
+	q.offWhy = why;
+	return false;
+}
+
+bool farGroundQueue( const WaterRun & r, std::string & why )
+{
+	FgQueue & q = fgQ();
+	if ( q.off )
+		return farGroundRun( r, why );
+	if ( q.n && ( q.n >= kTwinBatchMax || !twinSameInputs( q.runs[0], r ) ) && !farGroundFlush( why ) )
+		return false;
+	if ( const std::string no = twinReadyN( farGroundD(), kFargndSpec, r, q.n == 0 ); !no.empty() ) {
+		why = no;
+		return false;
+	}
+	if ( q.runs.size() <= size_t( q.n ) )
+		q.runs.resize( size_t( q.n ) + 1 );
+	q.runs[size_t( q.n )] = r;
+	q.n++;
+	return true;
+}
+
+int farGroundQueued()
+{
+	return fgQ().n;
+}
+
+TwinBatchStat takeFarGroundBatchStat()
+{
+	WaterDraw & D = farGroundD();
+	FgQueue & q = fgQ();
+	TwinBatchStat s;
+	s.crossings = D.crossN;
+	s.draws = D.drawsN;
+	s.slips = D.slipN;
+	s.lost = q.lost;
+	s.off = q.off;
+	s.offWhy = q.offWhy;
+	D.crossN = D.drawsN = D.slipN = 0;
+	q.lost = 0;
+	return s;
+}
+
 FxStat takeFarGroundDrawStat()
 {
 	return takeTwinStat( farGroundD() );
@@ -97,12 +182,17 @@ void farGroundSay( bool wanted, const char * glWhy )
 	at = now;
 	const WaterStat st = takeFarGroundGlStat();
 	const FxStat ds = takeFarGroundDrawStat();
+	const TwinBatchStat bs = takeFarGroundBatchStat();
 	QString line = head + QStringLiteral( "wanted on Vulkan, %1 draws run (fo4_cellcsmfgl twins, ring-0 terrain, into the tone frame; "
 		"%2 ms CPU each, max %3, %4 copies, %5 fails%6); on GL %7 draws" )
 		.arg( ds.runs ).arg( ds.runs ? ds.cpuMs / ds.runs : 0.0, 0, 'f', 3 ).arg( ds.maxMs, 0, 'f', 3 ).arg( ds.copies ).arg( ds.fails )
 		.arg( ds.failWhy.empty() ? QString() : QStringLiteral( ": " ) + QString::fromStdString( ds.failWhy ) ).arg( st.gl );
 	if ( !st.glWhy.empty() )
 		line += QStringLiteral( " (refused: %1)" ).arg( QString::fromStdString( st.glWhy ) );
+	if ( bs.crossings || bs.lost || bs.off )  // lane VKFAR4: the tiles batched into crossings
+		line += QStringLiteral( "; batched: %1 crossings for %2 draws, %3 lost, %4 fence slips%5" ).arg( bs.crossings ).arg( bs.draws )
+			.arg( bs.lost ).arg( bs.slips )
+			.arg( bs.off ? QStringLiteral( ", off (one crossing a tile): " ) + QString::fromStdString( bs.offWhy ) : QString() );
 	said = line;
 	qInfo().noquote() << line;
 }

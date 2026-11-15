@@ -1578,6 +1578,7 @@ bool vkDraw( Scene * scene, NifSkopeOpenGLContext::Program * prog, int block, in
 			no = "another program at the shape's draw";
 	}
 	if ( no ) {
+		vkFlush();	// lane VKFAR4: the queued tiles first (GL's order)
 		WwVkPresent::farGroundOnGl( no );
 		WwVkPresent::farGroundSay( true, nullptr );
 		return false;
@@ -1596,13 +1597,29 @@ bool vkDraw( Scene * scene, NifSkopeOpenGLContext::Program * prog, int block, in
 	r.cmds.push_back( c );
 	r.key = reinterpret_cast<std::uintptr_t>( keys );
 	std::string why;
-	const bool ok = WwVkPresent::farGroundRun( r, why );
+	// lane VKFAR4 (batching): queued (checked, its pipeline made) and drawn with the frame's other tiles in one crossing at vkFlush
+	const bool ok = WwVkPresent::farGroundQueue( r, why );
 	if ( !ok )
 		WwVkPresent::farGroundOnGl( why.c_str() );
 	else
 		PassTime::countDraw( 1 );
 	WwVkPresent::farGroundSay( true, nullptr );
 	return ok;
+}
+
+void vkFlush()
+{
+	if ( !WwVkPresent::farGroundQueued() )
+		return;
+	std::string why;
+	if ( !WwVkPresent::farGroundFlush( why ) )
+		WwVkPresent::farGroundOnGl( why.c_str() );
+}
+
+void vkFlushBefore( Scene * scene, int block )
+{
+	if ( WwVkPresent::farGroundQueued() && !( scene && ring0( scene->nifModel, block ) ) )
+		vkFlush();
 }
 
 }

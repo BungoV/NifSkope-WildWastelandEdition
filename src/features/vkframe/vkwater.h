@@ -514,6 +514,21 @@ FxStat takeFarGroundDrawStat();
 //! one far-ground draw stayed on GL (why: the route's reason or farGroundRun's)
 void farGroundOnGl( const char * why );
 WaterStat takeFarGroundGlStat();
+/*! lane VKFAR4 (batching): the frame's ring-0 tiles in one crossing a batch (twinRunN: per-draw host slices and sets).
+ * farGroundQueue checks and readies r (false: why, GL draws it) and holds a copy; farGroundFlush draws the queue (before
+ * any other draw into the frame, before the bindless arena moves, at the end of the shapes). A failed flush loses its
+ * tiles this frame and turns batching off (one crossing a tile after). farGroundRunN: n draws now (gates). */
+struct TwinBatchStat
+{
+	int crossings = 0, draws = 0, lost = 0, slips = 0;
+	bool off = false;
+	std::string offWhy;
+};
+bool farGroundQueue( const WaterRun & r, std::string & why );
+bool farGroundFlush( std::string & why );
+int farGroundQueued();
+bool farGroundRunN( const WaterRun * const * rs, int n, std::string & why );
+TwinBatchStat takeFarGroundBatchStat();
 }
 
 #ifndef WW_VKPRESENT_NO_QT

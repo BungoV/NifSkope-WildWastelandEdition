@@ -50,6 +50,10 @@ void uniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog );
  * shader-decals twin (fo4_cellcsmfgl) into the shared tone frame, the shape's element range (idxOff bytes, baseVertex).
  * True: drawn on the present device; false: GL draws it, the reason in the `vk farground:` line. */
 bool vkDraw( Scene * scene, NifSkopeOpenGLContext::Program * prog, int block, int indexCount, long long idxOff, int baseVertex );
+/* lane VKFAR4 (batching): vkDraw queues the tile; vkFlush draws the queued tiles in one crossing (the end of the shapes'
+ * walk, before the queues' flush, before the bindless arena moves); vkFlushBefore: before any other shape's draw */
+void vkFlush();
+void vkFlushBefore( Scene * scene, int block );
 }
 
 #endif

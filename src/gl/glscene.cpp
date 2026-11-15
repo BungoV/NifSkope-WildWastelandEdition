@@ -61,6 +61,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/near/cellqueue.h"	// lane GPUDRIVEN1
 #include "features/near/cellgpucull.h"	// lane GPUDRIVEN1 step B
 #include "features/post/taainputs.h"	// lane TAAINPUTS1
+#include "features/far-ground/cellfarground.h"	// lane VKFAR4: the far-ground tiles' batch flush
 
 #include <QOpenGLFunctions>
 #include <QCoreApplication>
@@ -629,6 +630,7 @@ void Scene::collectShapes( NodeList & secondPass )
 		for ( Node * node : roots.list() ) {
 			node->drawShapes( &secondPass );
 		}
+		CellFarGround::vkFlush();	// lane VKFAR4: the far-ground tiles the walk queued, before the queues draw
 		if ( queues )
 			GpuDriven::mainFlush( this, &secondPass );
 	} else {
@@ -636,6 +638,7 @@ void Scene::collectShapes( NodeList & secondPass )
 			node->drawShapes();
 		}
 	}
+	CellFarGround::vkFlush();
 }
 
 bool Scene::grabEffectDepth()

@@ -90,6 +90,9 @@ const TwinSpec kFarlodSpec { "far LOD", vkframe_farlod_view_vs_spv, sizeof( vkfr
 	sizeof( vkframe_farlod_view_ps_spv ), kFarlodImg, sizeof( kFarlodImg ) / sizeof( kFarlodImg[0] ), kFarlodInts,
 	sizeof( kFarlodInts ) / sizeof( kFarlodInts[0] ), WwVkPresent::kT_farlodPsBytes, kFarlodConstAt, kFarlodHostBytes, true, 5 };
 
+// lane VKFAR4 (batching): the most draws one twinRunN crossing carries (its descriptor sets and host slices)
+constexpr int kTwinBatchMax = 32;
+
 struct WaterDraw
 {
 	bool made = false, broken = false;
@@ -128,6 +131,25 @@ struct WaterDraw
 	WwVkPresent::FxStat st;
 	int pipelines = 0;
 	double buildMs = 0.0;
+	// lane VKFAR4 (batching): twinRunN's draws while its crossing records (empty otherwise: twinRun's one draw above),
+	// kTwinBatchMax sets of the same layout, the crossings / draws / crossings that found the fence pending since the take
+	struct Rec
+	{
+		VkPipeline pipe = VK_NULL_HANDLE;
+		VkDescriptorSet set = VK_NULL_HANDLE;
+		VkBuffer vb[WwVkPresent::kWaterAttribs] = {};
+		VkDeviceSize vbOff[WwVkPresent::kWaterAttribs] = {};
+		VkDeviceSize ibOff = 0;
+		std::uint32_t count = 0, first = 0;
+		std::int32_t baseVertex = 0;
+		std::vector<WwVkPresent::WaterCmd> cmds;
+		int vp[4] = {};
+		VkRect2D sc {};
+	};
+	std::vector<Rec> recs;
+	VkDescriptorPool poolN = VK_NULL_HANDLE;
+	std::vector<VkDescriptorSet> setsN;
+	int crossN = 0, drawsN = 0, slipN = 0;
 };
 WaterDraw & waterD()
 {
@@ -578,7 +600,7 @@ bool waterRecord( std::string & why )
 	Vk & v = vk();
 	Fx & F = fx();
 	WaterDraw & D = F.kind == 5 ? farLodD() : F.kind == 9 ? farGroundD() : waterD();
-	if ( !F.fbAir || !D.pipe ) {
+	if ( !F.fbAir || ( D.recs.empty() && !D.pipe ) ) {
 		why = "no framebuffer / pipeline for the water draw";
 		return false;
 	}
@@ -587,6 +609,23 @@ bool waterRecord( std::string & why )
 	rbi.framebuffer = F.fbAir;
 	rbi.renderArea = { { 0, 0 }, { std::uint32_t( F.w ), std::uint32_t( F.h ) } };
 	v.vkCmdBeginRenderPass( F.cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE );
+	if ( !D.recs.empty() ) {  // lane VKFAR4: twinRunN's draws in GL's order, each with its own set and host slice
+		for ( const WaterDraw::Rec & e : D.recs ) {
+			const VkViewport ev { float( e.vp[0] ), float( e.vp[1] ), float( e.vp[2] ), float( e.vp[3] ), 0.0f, 1.0f };
+			v.vkCmdSetViewport( F.cmd, 0, 1, &ev );
+			v.vkCmdSetScissor( F.cmd, 0, 1, &e.sc );
+			v.vkCmdBindPipeline( F.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, e.pipe );
+			v.vkCmdBindDescriptorSets( F.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, D.layout, 0, 1, &e.set, 0, nullptr );
+			v.vkCmdBindVertexBuffers( F.cmd, 0, std::uint32_t( WwVkPresent::kWaterAttribs ), e.vb, e.vbOff );
+			v.vkCmdBindIndexBuffer( F.cmd, D.geo.buf, e.ibOff, VK_INDEX_TYPE_UINT16 );
+			if ( e.cmds.empty() )
+				D.drawIndexed( F.cmd, e.count, 1, e.first, e.baseVertex, 0 );
+			for ( const WwVkPresent::WaterCmd & c : e.cmds )
+				D.drawIndexed( F.cmd, c.count, c.instanceCount, c.firstIndex, c.baseVertex, c.baseInstance );
+		}
+		v.vkCmdEndRenderPass( F.cmd );
+		return true;
+	}
 	const VkViewport vpt { float( D.vp[0] ), float( D.vp[1] ), float( D.vp[2] ), float( D.vp[3] ), 0.0f, 1.0f };
 	v.vkCmdSetViewport( F.cmd, 0, 1, &vpt );
 	v.vkCmdSetScissor( F.cmd, 0, 1, &D.sc );
@@ -1067,6 +1106,503 @@ static bool twinRun( WaterDraw & D, const TwinSpec & P, const WaterRun & r, std:
 	S.runs++;
 	S.cpuMs += ms;
 	S.maxMs = std::max( S.maxMs, ms );
+	return true;
+}
+
+/* lane VKFAR4 (batching, option a): twinRun's refusals before its fence for one draw of a batch (twinRun's own lines,
+ * copied: twinRun is left as it was). "" queues; fmt: the vertex inputs' formats */
+static std::string twinCheckN( const TwinSpec & P, const WaterRun & r, VkFormat * fmt )
+{
+	Tone & T = tone();
+	Vk & v = vk();
+	Gl & g = gl();
+	if ( !toneFrameIs( r.color ) || !T.colorView || !T.dsView )
+		return "the draw target is not the shared tone frame";
+	if ( T.w != r.w || T.h != r.h )
+		return std::string( "the " ) + P.what + " draw's size is not the tone frame's";
+	if ( r.census.tess )
+		return std::string( "a tessellated " ) + P.what + " program (its own twin is not in yet)";
+	if ( r.psBytes != P.psLoose )
+		return "the pixel loose block was packed from another twin's table";
+	WaterCaps caps = waterCaps();
+	caps.shadedDraw = true;
+	if ( const std::string verdict = waterVerdict( r.census, caps ); !verdict.empty() )
+		return verdict;
+	if ( r.blend || r.stencil || ( r.polyOffset && !P.rings ) )
+		return std::string( "GL draws the " ) + P.what + " with blending / a stencil test / a polygon offset";
+	if ( P.rings ) {
+		if ( r.srgb )
+			return "GL_FRAMEBUFFER_SRGB is on";
+		if ( r.drawBuf1 != 0 )
+			return "a second draw buffer is bound (the tone frame has one colour)";
+		if ( r.cmds.empty() || r.vp[2] < 1 || r.vp[3] < 1 || !r.ebo )
+			return "no commands / viewport / element buffer";
+		for ( const WaterCmd & c : r.cmds )
+			if ( c.count < 3 || !c.instanceCount || 2LL * ( static_cast<long long>( c.firstIndex ) + c.count ) > r.eboBytes )
+				return "a command past its element buffer";
+	} else if ( r.count < 3 || r.vp[2] < 1 || r.vp[3] < 1 || ( r.idxOff & 1 ) || !r.ebo || r.idxOff + 2LL * r.count > r.eboBytes )
+		return "no triangles / viewport / element range";
+	for ( int i = 0; i < kWaterAttribs; i++ ) {
+		const WaterAttrib & a = r.attr[i];
+		if ( !a.on ) {
+			fmt[i] = VK_FORMAT_R32G32B32A32_SFLOAT;
+			continue;
+		}
+		fmt[i] = waterAttrFormat( a );
+		VkFormatProperties fp {};
+		if ( fmt[i] != VK_FORMAT_UNDEFINED )
+			v.vkGetPhysicalDeviceFormatProperties( v.phys, fmt[i], &fp );
+		const bool stepOk = !a.divisor || ( P.rings && a.divisor == 1 );
+		if ( a.integer || !stepOk || !a.buf || fmt[i] == VK_FORMAT_UNDEFINED || !( fp.bufferFeatures & VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT ) )
+			return "vertex input " + std::to_string( kWaterVsIn[i].gl ) + ": an integer / instanced / client / unsupported array";
+		if ( a.bufBytes <= 0 || std::int64_t( a.off ) >= a.bufBytes )
+			return "vertex input " + std::to_string( kWaterVsIn[i].gl ) + ": its offset is past its buffer";
+	}
+	if ( !g.copyImageSubData )
+		return "no glCopyImageSubData";
+	return std::string();
+}
+
+/* lane VKFAR4: two draws into the same frame read the same GL inputs the same way (one batch: every input's twin is
+ * written once a crossing, the twin key key + binding holds one GL name). A different name ends the batch */
+static bool twinSameInputs( const WaterRun & a, const WaterRun & b )
+{
+	if ( a.w != b.w || a.h != b.h || a.color != b.color || a.key != b.key || a.census.inputs.size() != b.census.inputs.size()
+		|| ( a.red & 34 ) != ( b.red & 34 ) )
+		return false;
+	for ( std::size_t k = 0; k < a.census.inputs.size(); k++ ) {
+		const WaterSlot & x = a.census.inputs[k];
+		const WaterSlot & y = b.census.inputs[k];
+		if ( x.name != y.name || x.tex != y.tex || x.kind != y.kind || x.glFmt != y.glFmt || x.w != y.w || x.h != y.h || x.d != y.d
+			|| x.levels != y.levels || x.baseLevel != y.baseLevel || x.dataBuf != y.dataBuf || x.bufBytes != y.bufBytes
+			|| x.magF != y.magF || x.minF != y.minF || x.cmpMode != y.cmpMode || x.cmpFunc != y.cmpFunc || x.aniso != y.aniso
+			|| x.samplerObj != y.samplerObj || x.wrap[0] != y.wrap[0] || x.wrap[1] != y.wrap[1] || x.wrap[2] != y.wrap[2] )
+			return false;
+	}
+	return true;
+}
+
+//! lane VKFAR4: kTwinBatchMax sets of the twin's layout for twinRunN (twinStatic's pool holds twinRun's one set)
+static bool twinPoolN( WaterDraw & D, std::string & why )
+{
+	if ( D.poolN )
+		return true;
+	Vk & v = vk();
+	static const VkDescriptorType kType[4] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+		VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, VK_DESCRIPTOR_TYPE_SAMPLER };
+	std::uint32_t n[4] = {};
+	for ( const FarSetSlot & b : D.binds )
+		n[b.kind]++;
+	std::vector<VkDescriptorPoolSize> ps;
+	for ( int k = 0; k < 4; k++ )
+		if ( n[k] )
+			ps.push_back( { kType[k], n[k] * std::uint32_t( kTwinBatchMax ) } );
+	VkDescriptorPoolCreateInfo pi { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+	pi.maxSets = std::uint32_t( kTwinBatchMax );
+	pi.poolSizeCount = std::uint32_t( ps.size() );
+	pi.pPoolSizes = ps.data();
+	VkDescriptorPool pool = VK_NULL_HANDLE;
+	if ( v.vkCreateDescriptorPool( v.dev, &pi, nullptr, &pool ) != VK_SUCCESS ) {
+		why = "the batched draws' descriptor pool failed";
+		return false;
+	}
+	const std::vector<VkDescriptorSetLayout> ls( size_t( kTwinBatchMax ), D.dsl );
+	std::vector<VkDescriptorSet> sets( size_t( kTwinBatchMax ), VK_NULL_HANDLE );
+	VkDescriptorSetAllocateInfo ai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+	ai.descriptorPool = pool;
+	ai.descriptorSetCount = std::uint32_t( kTwinBatchMax );
+	ai.pSetLayouts = ls.data();
+	if ( v.vkAllocateDescriptorSets( v.dev, &ai, sets.data() ) != VK_SUCCESS ) {
+		v.vkDestroyDescriptorPool( v.dev, pool, nullptr );
+		why = "the batched draws' descriptor sets failed";
+		return false;
+	}
+	D.poolN = pool;
+	D.setsN = sets;
+	return true;
+}
+
+/* lane VKFAR4: a draw's readiness at queue time: twinRun's refusals and, made here so a failure leaves the draw to GL,
+ * the statics, the batch's sets and the draw's pipeline; the batch's first draw also waits the last crossing's fence (the
+ * flush then finds it done unless another crossing ran between). "" queues */
+static std::string twinReadyN( WaterDraw & D, const TwinSpec & P, const WaterRun & r, bool first )
+{
+	Fx & F = fx();
+	Tone & T = tone();
+	Vk & v = vk();
+	Gl & g = gl();
+	if ( D.broken )
+		return D.brokenWhy;
+	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
+		return "the present device or GL's entry points are not ready in this context";
+	if ( const std::string no = twinDrawRefusal(); !no.empty() )
+		return no;
+	std::vector<VkFormat> fmt( static_cast<std::size_t>( kWaterAttribs ) );
+	if ( const std::string no = twinCheckN( P, r, fmt.data() ); !no.empty() )
+		return no;
+	if ( first ) {
+		if ( std::string fw; !fenceDone( F.fence, F.pending, "twinbatch", fw ) )
+			return fw;
+		F.pending = false;
+	}
+	std::string w;
+	const int samples = T.samples > 0 ? T.samples : std::max( F.airSamples, 1 );
+	if ( !fxStatic( w ) || !fxSems( w ) || !fxPasses( samples, w ) || !twinStatic( D, P, w ) || !twinPoolN( D, w ) )
+		return w;
+	if ( F.airSamples != T.samples )
+		return "the air's render pass is not at the frame's sample count";
+	if ( !waterPipe( D, P, r, fmt.data(), w ) )
+		return w;
+	return std::string();
+}
+
+/* lane VKFAR4 (batching, option a): n draws of one twin (GL's order, the same GL inputs: twinSameInputs) in ONE crossing.
+ * twinRun's steps, copied (twinRun is left as it was): one fence, one exported copy holding every draw's buffer ranges (a
+ * range two draws read placed once), each draw's own host slice (i * hostBytes: zeros, loose blocks, constant inputs) and
+ * descriptor set (poolN, the same layout), the inputs' twins written once, one render pass of n draw sets (D.recs), one
+ * hand-off. D.recs is emptied when the worker is back, so twinRun's next run records its own draw. Reds (gates only, on
+ * draw k >= 1): 1024 draw k records draw k - 1's set and host slice, 2048 draw k dropped. */
+static bool twinRunN( WaterDraw & D, const TwinSpec & P, const WaterRun * const * rs, int n, std::string & why )
+{
+	Fx & F = fx();
+	Tone & T = tone();
+	Vk & v = vk();
+	Gl & g = gl();
+	FxStat & S = D.st;
+	const double t0 = nowMs();
+	auto refuse = [&]( const std::string & w ) {
+		why = w;
+		S.fails++;
+		S.failWhy = w;
+		return false;
+	};
+	auto breakOff = [&]( const std::string & w ) {
+		D.broken = true;
+		D.brokenWhy = std::string( "the " ) + P.what + " draw on Vulkan broke: " + w;
+		return refuse( D.brokenWhy );
+	};
+	if ( n < 1 || n > kTwinBatchMax )
+		return refuse( std::to_string( n ) + " draws in one " + P.what + " crossing (1 to " + std::to_string( kTwinBatchMax ) + ")" );
+	if ( D.broken )
+		return refuse( D.brokenWhy );
+	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
+		return refuse( "the present device or GL's entry points are not ready in this context" );
+	if ( const std::string no = twinDrawRefusal(); !no.empty() )
+		return refuse( no );
+	std::vector<VkFormat> fmt( size_t( n ) * kWaterAttribs );
+	for ( int d = 0; d < n; d++ ) {
+		if ( d && !twinSameInputs( *rs[0], *rs[d] ) )
+			return refuse( "draw " + std::to_string( d ) + " of the batch reads other GL inputs than draw 0 (a batch ends there)" );
+		if ( const std::string no = twinCheckN( P, *rs[d], fmt.data() + size_t( d ) * kWaterAttribs ); !no.empty() )
+			return refuse( "draw " + std::to_string( d ) + ": " + no );
+	}
+	// the last crossing (any fx pass) is done before its command buffer, sets, framebuffer and buffers are written again;
+	// queued draws waited it at their first queue (twinReadyN): pending here means a crossing ran between queue and flush
+	if ( F.pending )
+		D.slipN++;
+	if ( std::string fw; !fenceDone( F.fence, F.pending, "twinbatch", fw ) )
+		return refuse( fw );
+	F.pending = false;
+	std::string w;
+	const int samples = T.samples > 0 ? T.samples : std::max( F.airSamples, 1 );
+	if ( !fxStatic( w ) || !fxSems( w ) || !fxPasses( samples, w ) || !twinStatic( D, P, w ) || !twinPoolN( D, w ) )
+		return breakOff( w );
+	if ( F.airSamples != T.samples )
+		return breakOff( "the air's render pass is not at the frame's sample count" );
+	// the exported buffer: every draw's distinct vertex buffers, elements and GL blocks (a range two draws read: once)
+	struct Part
+	{
+		unsigned buf;
+		long long src, bytes;
+		VkDeviceSize at;
+	};
+	std::vector<Part> parts;
+	VkDeviceSize total = 0;
+	auto place = [&]( unsigned buf, long long src, long long bytes, long long room ) -> VkDeviceSize {
+		for ( const Part & p : parts )
+			if ( p.buf == buf && p.src == src && p.bytes == bytes )
+				return p.at;
+		const VkDeviceSize at = total;
+		parts.push_back( { buf, src, bytes, at } );
+		total += ( VkDeviceSize( std::max( bytes, room ) ) + kWaterAlign - 1 ) / kWaterAlign * kWaterAlign;
+		return at;
+	};
+	struct At
+	{
+		VkDeviceSize vb[kWaterAttribs] = {};
+		VkDeviceSize ib = 0, ubo[3] = {};
+		bool uboHost[3] = {};
+	};
+	std::vector<At> at( static_cast<std::size_t>( n ) );
+	const VkDeviceSize uboNeed[3] = { 336, 248, 12288 };
+	for ( int d = 0; d < n; d++ ) {
+		const WaterRun & r = *rs[d];
+		At & a = at[size_t( d )];
+		for ( int i = 0; i < kWaterAttribs; i++ )
+			if ( r.attr[i].on )
+				a.vb[i] = place( r.attr[i].buf, 0, r.attr[i].bufBytes, 0 ) + VkDeviceSize( r.attr[i].off );
+		a.ib = place( r.ebo, 0, r.eboBytes, 0 );
+		const WaterUbo * ubos[3] = { &r.global, &r.shadow, &r.skin };
+		for ( int k = 0; k < 3; k++ ) {
+			const WaterUbo & u = *ubos[k];
+			if ( !u.buf || u.size <= 0 || u.off < 0 || u.off + u.size > u.bufBytes || ( u.off % 4 ) ) {
+				a.uboHost[k] = true;  // no buffer: GL reads zeros there too
+				continue;
+			}
+			const long long need = static_cast<long long>( uboNeed[k] );
+			a.ubo[k] = place( u.buf, u.off, std::min( u.size, need ), need );
+		}
+	}
+	if ( !csmBuf( D.geo, total, true, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, w )
+		|| !csmBuf( D.host, P.hostBytes * VkDeviceSize( n ), false, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, w ) )
+		return breakOff( w );
+	std::uint8_t * host = static_cast<std::uint8_t *>( D.host.ptr );
+	for ( int d = 0; d < n; d++ ) {
+		const WaterRun & r = *rs[d];
+		std::uint8_t * h = host + P.hostBytes * VkDeviceSize( d );
+		std::memset( h + kWaterZeroAt, 0, size_t( kWaterVsLooseAt - kWaterZeroAt ) );
+		std::memcpy( h + kWaterVsLooseAt, r.vsLoose, size_t( kT_waterVsBytes ) );
+		std::memcpy( h + kWaterPsLooseAt, r.psLoose, size_t( P.psLoose ) );
+		if ( r.red & 1 ) {  // red: the ps's loose block one vec4 off (a table offset wrong by a row)
+			std::memmove( h + kWaterPsLooseAt + 16, r.psLoose, size_t( P.psLoose - 16 ) );
+			std::memset( h + kWaterPsLooseAt, 0, 16 );
+		}
+		for ( int i = 0; i < kWaterAttribs; i++ )
+			std::memcpy( h + P.constAt + 16 * i, r.attr[i].cur, 16 );
+	}
+	// the inputs (the same GL names for every draw): their twins written once from draw 0's census, then every draw's set
+	const WaterRun & r0 = *rs[0];
+	std::vector<GLuint> texNames { T.colorTex, T.dsTex };
+	std::vector<GLuint> bufNames { D.geo.gl };
+	const std::size_t nb = D.binds.size();
+	std::vector<VkDescriptorImageInfo> ii( nb );
+	std::vector<VkBufferView> tv( nb );
+	std::vector<VkDescriptorType> ty( nb, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER );
+	std::vector<VkDescriptorBufferInfo> bi( nb * size_t( n ) );
+	std::vector<VkWriteDescriptorSet> ws;
+	auto slotOf = [&]( std::uint32_t binding, const char ** nameOut ) -> const WaterSlot * {
+		for ( std::size_t k = 0; k < P.nImg; k++ )
+			if ( const WaterImgName & nm = P.img[k]; nm.binding == binding ) {
+				*nameOut = nm.name;
+				for ( const WaterSlot & s : r0.census.inputs )
+					if ( s.name == nm.name )
+						return &s;
+				return nullptr;
+			}
+		*nameOut = nullptr;
+		return nullptr;
+	};
+	const std::uint32_t psGlobal = P.psGlobalB0 ? 0 : 1, psShadow = P.psGlobalB0 ? 1 : 0;
+	auto blockOf = [&]( std::uint32_t binding ) {  // twinRun's block map: 0 global, 1 shadow, 2 skin, -1 the loose blocks / none
+		return ( binding == 257 || binding == psGlobal ) ? 0 : binding == psShadow ? 1 : binding == 256 ? 2 : -1;
+	};
+	for ( std::size_t i = 0; i < nb; i++ ) {
+		const FarSetSlot & b = D.binds[i];
+		if ( b.kind == 0 ) {
+			if ( blockOf( b.binding ) < 0 && b.binding != 256 + 31 && b.binding != 31 )
+				return breakOff( "the twins read a block at b" + std::to_string( b.binding ) + " the draw does not fill" );
+			continue;
+		}
+		if ( b.kind == 3 ) {
+			const char * nm = nullptr;
+			const WaterSlot * s = slotOf( b.binding - 64, &nm );
+			WaterSlot plain;
+			VkSampler sm = waterSampler( D, s ? *s : plain, b.compare, ( r0.red & 2 ) != 0 || !s, w );
+			if ( !sm )
+				return breakOff( w );
+			if ( b.compare && s && s->tex && s->cmpMode != 0x884E )
+				return refuse( std::string( nm ? nm : "?" ) + ": the twin compares, GL's texture does not" );
+			ty[i] = VK_DESCRIPTOR_TYPE_SAMPLER;
+			ii[i].sampler = sm;
+			continue;
+		}
+		const char * nm = nullptr;
+		const WaterSlot * s = slotOf( b.binding, &nm );
+		if ( !nm )
+			return breakOff( "the twins read an image at b" + std::to_string( b.binding ) + " no census name maps" );
+		const std::uintptr_t key = r0.key + b.binding;
+		if ( b.kind == 2 ) {  // a texel buffer (farStream): GL's data store into the twin, or a zero one
+			const bool bound = s && s->tex && s->dataBuf && s->bufBytes > 0;
+			unsigned tb = 0, tt = 0;
+			const unsigned zeroFmt = std::strcmp( nm, "cellCluster" ) == 0 ? 0x8D82u : 0x8814u;  // Buffer<int4>: RGBA32I
+			if ( !farTexelBuffer( key, bound ? s->glFmt : zeroFmt, bound ? std::size_t( s->bufBytes ) : 16u, tb, tt, w ) )
+				return refuse( std::string( nm ) + ": " + w );
+			if ( bound ) {  // red 32: the data store copied 64 bytes late (the objects' sky / AO stream shifted)
+				const std::intptr_t skip = ( r0.red & 32 ) && s->bufBytes > 64 ? 64 : 0;
+				g.copyNamedBufferSubData( s->dataBuf, tb, skip, 0, std::intptr_t( s->bufBytes ) - skip );
+			}
+			bufNames.push_back( tb );
+			tv[i] = farCards().bufs[key].view;
+			ty[i] = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
+			continue;
+		}
+		VkImageView view = VK_NULL_HANDLE;
+		if ( !s || !s->tex ) {
+			const bool colCube = P.rings && b.dim == 3 && !b.arrayed;  // the rings' CubeMap: the zero RGBA8 cube
+			if ( b.dim == 3 && !colCube && !( b.arrayed && D.zeroCubeView ) )
+				return refuse( std::string( nm ) + ": an unbound cube input (no zero cube view)" );
+			if ( colCube )
+				view = D.zeroColView;
+			else if ( b.dim == 3 )
+				view = D.zeroCubeView;
+			else if ( b.dim == 2 )
+				view = F.d3;
+			else if ( b.arrayed )
+				view = F.d2a;
+			else
+				view = F.d2;
+			// an integer image reads GL's unbound zero only through an integer view: the rings' zero R32UI, else refuse
+			for ( std::size_t k = 0; k < P.nInts; k++ )
+				if ( P.ints[k] == b.binding ) {
+					if ( !P.rings || b.dim != 1 || b.arrayed )
+						return refuse( std::string( nm ) + ": an unbound integer input" );
+					view = D.zeroUView;
+				}
+		} else if ( s->tex == T.colorTex || s->tex == T.dsTex ) {
+			return refuse( std::string( nm ) + ": samples the frame it draws into" );
+		} else if ( s->baseLevel != 0 ) {
+			return refuse( std::string( nm ) + ": a base level above 0" );
+		} else if ( const std::uintptr_t sk = farSharedOf( s->tex ) ) {
+			view = sharedFind( sk )->view;  // already on the present device (another pass's target)
+			texNames.push_back( s->tex );
+		} else {
+			unsigned twin = 0;
+			if ( !waterTwin( key, *s, twin, w ) )
+				return refuse( std::string( nm ) + ": " + w );
+			const bool viaFar = s->kind == 4 || waterBcFormat( s->glFmt );
+			const Shared * sh = viaFar ? farTwinFind( key ) : sharedFind( key );
+			if ( !sh || !sh->view )
+				return refuse( std::string( nm ) + ": its twin has no view" );
+			view = sh->view;
+			static const GLenum kTarget[5] = { 0x0DE1, 0x806F, 0x8C1A, 0x8513, 0x9009 };
+			const GLenum target = kTarget[std::clamp( s->kind, 0, 4 )];
+			for ( int l = 0; l < std::max( s->levels, 1 ); l++ ) {
+				const int lw = std::max( s->w >> l, 1 ), lh = std::max( s->h >> l, 1 );
+				const int ld = s->kind == 1 ? std::max( s->d >> l, 1 ) : ( s->kind == 2 || s->kind == 4 ) ? s->d : 1;
+				g.copyImageSubData( s->tex, target, l, 0, 0, 0, twin, target, l, 0, 0, 0, lw, lh, ld );
+			}
+			S.copies++;
+			texNames.push_back( twin );
+		}
+		ty[i] = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+		ii[i].imageView = view;
+		ii[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+	}
+	for ( int d = 0; d < n; d++ ) {
+		const VkDeviceSize hb = P.hostBytes * VkDeviceSize( d );
+		const At & a = at[size_t( d )];
+		for ( std::size_t i = 0; i < nb; i++ ) {
+			const FarSetSlot & b = D.binds[i];
+			VkWriteDescriptorSet x { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+			x.dstSet = D.setsN[size_t( d )];
+			x.dstBinding = b.binding;
+			x.descriptorCount = 1;
+			x.descriptorType = ty[i];
+			if ( b.kind == 0 ) {
+				// vs blocks at 256 + n (fxw's b-shift), ps blocks at n (twinRun's map); the host ones in this draw's slice
+				VkDescriptorBufferInfo & o = bi[size_t( d ) * nb + i];
+				const int k = blockOf( b.binding );
+				if ( k >= 0 )
+					o = a.uboHost[k] ? VkDescriptorBufferInfo { D.host.buf, hb + kWaterZeroAt, uboNeed[k] }
+						: VkDescriptorBufferInfo { D.geo.buf, a.ubo[k], uboNeed[k] };
+				else if ( b.binding == 256 + 31 )
+					o = { D.host.buf, hb + kWaterVsLooseAt, VkDeviceSize( kT_waterVsBytes ) };
+				else
+					o = { D.host.buf, hb + kWaterPsLooseAt, VkDeviceSize( P.psLoose ) };
+				x.pBufferInfo = &o;
+			} else if ( b.kind == 2 ) {
+				x.pTexelBufferView = &tv[i];
+			} else {
+				x.pImageInfo = &ii[i];
+			}
+			ws.push_back( x );
+		}
+	}
+	const VkImageView att[2] = { T.colorView, T.dsView };
+	if ( !fxFb( F.fbAir, F.airPass, att, 2, T.w, T.h ) )
+		return breakOff( "the water draw's framebuffer over the tone frame failed" );
+	v.vkUpdateDescriptorSets( v.dev, std::uint32_t( ws.size() ), ws.data(), 0, nullptr );
+	// the draws' records (waterRecord: one render pass, in GL's order)
+	D.recs.clear();
+	for ( int d = 0; d < n; d++ ) {
+		const WaterRun & r = *rs[d];
+		WaterDraw::Rec e;
+		e.pipe = waterPipe( D, P, r, fmt.data() + size_t( d ) * kWaterAttribs, w );
+		if ( !e.pipe ) {
+			D.recs.clear();
+			return breakOff( w );
+		}
+		const bool prev = d > 0 && ( r.red & 1024 );  // red: draw d - 1's set and host slice
+		const int ds = prev ? d - 1 : d;
+		e.set = D.setsN[size_t( ds )];
+		for ( int i = 0; i < kWaterAttribs; i++ ) {
+			e.vb[i] = r.attr[i].on ? D.geo.buf : D.host.buf;
+			e.vbOff[i] = r.attr[i].on ? at[size_t( d )].vb[i] : P.hostBytes * VkDeviceSize( ds ) + P.constAt + 16 * VkDeviceSize( i );
+		}
+		e.ibOff = at[size_t( d )].ib;
+		e.count = std::uint32_t( r.count );
+		e.first = std::uint32_t( r.idxOff / 2 );
+		e.baseVertex = r.baseVertex;
+		e.cmds = P.rings ? r.cmds : std::vector<WaterCmd>();
+		std::memcpy( e.vp, r.vp, sizeof( e.vp ) );
+		int x0 = r.vp[0], y0 = r.vp[1], x1 = r.vp[0] + r.vp[2], y1 = r.vp[1] + r.vp[3];
+		if ( r.scissorOn ) {
+			x0 = std::max( x0, r.scissor[0] );
+			y0 = std::max( y0, r.scissor[1] );
+			x1 = std::min( x1, r.scissor[0] + r.scissor[2] );
+			y1 = std::min( y1, r.scissor[1] + r.scissor[3] );
+		}
+		x0 = std::clamp( x0, 0, T.w );
+		y0 = std::clamp( y0, 0, T.h );
+		x1 = std::clamp( x1, 0, T.w );
+		y1 = std::clamp( y1, 0, T.h );
+		e.sc = { { x0, y0 }, { std::uint32_t( std::max( x1 - x0, 0 ) ), std::uint32_t( std::max( y1 - y0, 0 ) ) } };
+		if ( d > 0 && ( r.red & 2048 ) )  // red: this draw dropped
+			continue;
+		D.recs.push_back( std::move( e ) );
+	}
+	// every draw's buffers and GL's blocks into the exported copy (every run: GL may have written them this frame)
+	for ( const Part & p : parts )
+		g.copyNamedBufferSubData( GLuint( p.buf ), D.geo.gl, std::intptr_t( p.src ), std::intptr_t( p.at ), std::intptr_t( p.bytes ) );
+	F.kind = P.kind;
+	F.w = r0.w;
+	F.h = r0.h;
+	// GL's work so far signalled (the frame, every twin, the copies; each name once) -> the worker's job -> GL waits
+	std::sort( texNames.begin(), texNames.end() );
+	texNames.erase( std::unique( texNames.begin(), texNames.end() ), texNames.end() );
+	std::sort( bufNames.begin(), bufNames.end() );
+	bufNames.erase( std::unique( bufNames.begin(), bufNames.end() ), bufNames.end() );
+	std::vector<GLenum> lay( texNames.size(), kLayoutGeneral );
+	g.signalSemaphore( F.glDoneGl, GLuint( bufNames.size() ), bufNames.data(), GLuint( texNames.size() ), texNames.data(), lay.data() );
+	g.flush();
+	Worker & W = wk();
+	std::uint64_t want = 0;
+	{
+		std::lock_guard<std::mutex> lk( W.m );
+		want = W.toneDone + 1;
+	}
+	Work j;
+	j.k = -1;
+	j.fx = true;
+	hand( j );
+	bool ok = false;
+	{
+		std::unique_lock<std::mutex> lk( W.m );
+		W.idle.wait( lk, [&W, want]() { return W.toneDone >= want; } );
+		ok = W.toneOk;
+		w = W.toneWhy;
+	}
+	D.recs.clear();  // recorded: twinRun's next run records its own draw
+	if ( !ok )
+		return breakOff( w );  // nothing signals vkDone: GL does not wait it; these draws are lost this frame
+	g.waitSemaphore( F.vkDoneGl, GLuint( bufNames.size() ), bufNames.data(), GLuint( texNames.size() ), texNames.data(), lay.data() );
+	F.pending = true;
+	const double ms = nowMs() - t0;
+	S.runs += n;
+	S.cpuMs += ms;
+	S.maxMs = std::max( S.maxMs, ms );
+	D.crossN++;
+	D.drawsN += n;
 	return true;
 }
 

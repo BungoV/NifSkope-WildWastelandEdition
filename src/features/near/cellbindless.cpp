@@ -8,6 +8,7 @@
 #include "wwsyncwait.h"	// lane EMPTY240 R4-2: the ring's wrap wait by name
 #include "gl/gpustage.h"	// MODULES1: the pool is filled by a GPU copy (no driver RAM copy)
 #include "gl/wwuploadcap.h"	// lane EMPTY240 R5-1: the pool's intake counts in the paint's upload budget
+#include "features/far-ground/cellfarground.h"	// lane VKFAR4: queued far-ground tiles drawn before the arena moves
 
 #include <QObject>
 #include <QOpenGLContext>
@@ -657,6 +658,7 @@ void setupVao( NifSkopeOpenGLContext::GLFunctions * f, Class & k )
 //! a bigger (packed) arena for `k`, its live spans copied over on the GPU
 void rebuild( Ctx & c, NifSkopeOpenGLContext::GLFunctions * f, Class & k, std::uint32_t verts, std::uint32_t idx )
 {
+	CellFarGround::vkFlush();	// lane VKFAR4: the queued tiles read the old buffers' names and offsets
 	std::uint32_t nv = 0, ni = 0;
 	k.a.plan( verts, idx, nv, ni );
 	std::vector<Entry *> live;

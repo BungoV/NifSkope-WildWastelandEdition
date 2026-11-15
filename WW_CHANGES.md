@@ -1,3 +1,17 @@
+## VKFAR4 (2026-11-15): the far ground's ring-0 tiles go to Vulkan in one hand-off a frame
+
+Changed, not built, not checked live. Offline: tests/vkframe/fargrounddraw.sh passes, with new batch checks added.
+
+- With the view on Vulkan (WW_VKVIEW=1), the ring-0 ground tiles used to cross to Vulkan one tile at a time (about 16
+  hand-offs a frame). They are now queued and drawn together in one hand-off. Each tile keeps its own uniforms and
+  descriptor set. The queue is drawn before any other shape, at the end of the shape walk, and before the bindless
+  buffer pool moves, so the draw order matches GL's.
+- If a batch fails, its tiles are missing for that one frame. After that the view falls back to one hand-off per tile,
+  and the `vk farground:` line says why.
+- Gate: three tiles drawn as one batch match GL, with depth exact. They are identical to three single runs. Two reds on
+  one tile (it reads the previous tile's data, or it is dropped) must FAIL, and both do. The water, far LOD, waterview
+  and farview gates print byte-identical results.
+
 ## VKFAR4 (2026-11-15): the screen GI's Vulkan twin rounds closer to GL's (still refused)
 
 Changed, not built, not checked live. Offline: tests/vkframe/gihalfview.sh still FAILS (13 of 15 checks), so the view

@@ -307,6 +307,7 @@ void BSShape::drawShapes( NodeList * secondPass )
 {
 	if ( isHidden() )
 		return;
+	CellFarGround::vkFlushBefore( scene, id() );	// lane VKFAR4: the queued far-ground tiles before any other shape
 
 	// TODO: Only run this if BSXFlags has "EditorMarkers present" flag
 	if ( !scene->hasOption(Scene::ShowMarkers) && name.contains( QLatin1StringView("EditorMarker") ) )
