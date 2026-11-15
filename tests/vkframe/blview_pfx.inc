@@ -24,14 +24,15 @@
  * case hard only). A refused red is "not judged" with its reason, never a pass.
  * Round 4, the maps (a .bgem's, glparticles.cpp binds each with its flag): 5 `normal` (hasNormalMap 1, useFalloff 1,
  * NormalMap = a DXT1 twin on its own unit), 6 `grey` (greyscaleColor 1, hasGreyscaleMap 1, GreyscaleMap = a DXT1 twin),
- * 7 `cube` (hasCubeMap 1, envReflection 1: there is no cube twin, so Vulkan must REFUSE naming CubeMap and GL draws),
+ * 7 `cube` (hasCubeMap 1, envReflection 1; round 5: CubeMap = the .bgem's env cube, 8x8 DXT1 with 4 levels, drawn on Vulkan
+ * through its plain-cube copy twin under the same bar, 0 refused, >= 1 copy twin),
  * 8 `elem` (textures[0].textureUnit 3: textureUnits[2] a DXT1 twin on its own unit). Seen-check 4: the case's map off
  * (its flag 0, textureUnit 1). Reds 4 `nmap`, 5 `grey` (the map a stand-in with its flag 1), 6 `cubeoff` (CubeMap a
- * stand-in with hasCubeMap 1: draws and must FAIL against GL), 7 `elem0` (only element 0 of an array resolved, round 3's
- * rule), each on its own case.
+ * stand-in with hasCubeMap 1), 7 `elem0` (only element 0 of an array resolved, round 3's rule), each on its own case;
+ * round 5: 8 `cubegrey` on `cube` (the gate binds the grey stand-in cube where GL drew the env cube: must FAIL).
  * Not judged here: stencil (off at the app's draw: StencilProperty::glProperty( nullptr ) runs after glparticles.cpp's
  * write setup, and FO4 particles carry no NiStencilProperty), the air's textures (off by uniform), the probe passes. */
-bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuint greyTex, unsigned reds = 0x7Fu )
+bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuint greyTex, unsigned reds = 0xFFu )
 {
 	using namespace WwVkPresent;
 	struct PfxGl
@@ -52,6 +53,7 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 		void( WINAPI * texBuffer )( GLenum, GLenum, GLuint ) = nullptr;
 		void( WINAPI * disableAttr )( GLuint ) = nullptr;
 		void( WINAPI * attrib4f )( GLuint, GLfloat, GLfloat, GLfloat, GLfloat ) = nullptr;
+		void( WINAPI * compressed2D )( GLenum, GLint, GLenum, GLsizei, GLsizei, GLint, GLsizei, const void * ) = nullptr;
 		GLint( WINAPI * loc )( GLuint, const char * ) = nullptr;
 	} u;
 	const char * n4 = "1234";
@@ -60,7 +62,7 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 		&& load( u.um4, "glUniformMatrix4fv" ) && load( u.bindTextures, "glBindTextures" ) && load( u.bindSamplers, "glBindSamplers" )
 		&& load( u.bufSub, "glNamedBufferSubData" ) && load( u.clearTexSub, "glClearTexSubImage" ) && load( u.texParami, "glTextureParameteri" )
 		&& load( u.texBuffer, "glTexBuffer" ) && load( u.disableAttr, "glDisableVertexAttribArray" ) && load( u.attrib4f, "glVertexAttrib4f" )
-		&& load( u.loc, "glGetUniformLocation" );
+		&& load( u.loc, "glGetUniformLocation" ) && load( u.compressed2D, "glCompressedTexImage2D" );
 	for ( int i = 0; i < 4; i++ )
 		okLoad = okLoad && load( u.uf[i], ( std::string( "glUniform" ) + n4[i] + "fv" ).c_str() );
 	if ( !okLoad || !sx.fbo ) {
@@ -169,7 +171,37 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 		glTexImage2D( 0x8515 + fc, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, &greyTexel );
 	glTexParameteri( 0x8513, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
 	glTexParameteri( 0x8513, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+	// round 5: the .bgem's env cube (glparticles.cpp's bindCube( cubeName ) with hasCubeMap 1): 8x8 DXT1, 4 levels, mipmapped,
+	// each face its own two end colours, the indices seeded mt19937( 37 ) (every level and texel its own value)
+	GLuint envCube = 0;
+	glGenTextures( 1, &envCube );
+	glBindTexture( 0x8513, envCube );
+	{
+		std::mt19937 cr( 37 );
+		static const std::uint16_t ends[6][2] = { { 0xF800, 0x2104 }, { 0x07E0, 0x0841 }, { 0x001F, 0x4208 }, { 0xFFE0, 0x18C3 }, { 0xF81F, 0x0000 },
+			{ 0x07FF, 0x3186 } };
+		for ( int l = 0; l < 4; l++ ) {
+			const int lw = 8 >> l, nb = ( ( lw + 3 ) / 4 ) * ( ( lw + 3 ) / 4 );
+			for ( GLenum fc = 0; fc < 6; fc++ ) {
+				std::vector<std::uint8_t> blk( std::size_t( nb ) * 8 );
+				for ( int b = 0; b < nb; b++ ) {
+					const std::uint32_t idx = std::uint32_t( cr() );
+					std::memcpy( &blk[std::size_t( b ) * 8], &ends[fc][0], 2 );
+					std::memcpy( &blk[std::size_t( b ) * 8 + 2], &ends[fc][1], 2 );
+					std::memcpy( &blk[std::size_t( b ) * 8 + 4], &idx, 4 );
+				}
+				u.compressed2D( 0x8515 + fc, l, 0x83F0, lw, lw, 0, GLsizei( blk.size() ), blk.data() );
+			}
+		}
+	}
+	glTexParameteri( 0x8513, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
+	glTexParameteri( 0x8513, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
 	glBindTexture( 0x8513, 0 );
+	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
+		std::printf( "BLVIEW pfx FAIL (GL error 0x%x making the env cube)\n", unsigned( e ) );
+		return false;
+	}
+	bool greyCube = false;  // red 8 `cubegrey`: the Vulkan draw finds the grey stand-in where GL bound the env cube
 	// the named blocks at the twins' layout, on GL's bindings (build_spv.py BLOCKS)
 	struct Blk
 	{
@@ -442,7 +474,7 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 		u.bindTextures( GLuint( baseUnit ), 1, &baseTex );
 		u.bindTextures( GLuint( lightUnit ), 1, &lightTex );
 		u.bindTextures( GLuint( depthUnit ), 1, &depthTex );
-		u.bindTextures( GLuint( cubeUnit ), 1, &cubeTex );
+		u.bindTextures( GLuint( cubeUnit ), 1, c.map == 3 && mapOn && !greyCube ? &envCube : &cubeTex );
 		if ( c.map == 1 )
 			u.bindTextures( GLuint( nrmUnit ), 1, &nrmTex );
 		if ( c.map == 2 )
@@ -491,7 +523,9 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 	};
 	auto vkDraw = [&]( const PfxCase & c, int red, PfxOut & out, std::string & w ) {
 		clearSlab();
+		greyCube = red == 8;
 		frameState( c );
+		greyCube = false;
 		ObjPfxShade s;
 		s.prog = prog;
 		s.pos = arr[0].data();
@@ -500,7 +534,7 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 		s.angle = arr[3].data();
 		s.size = arr[4].data();
 		s.n = std::size_t( np );
-		s.red = red;
+		s.red = red == 8 ? 0 : red;  // red 8 is the gate's own (the binding), objPfxShade runs as shipped
 		bool ran = objPfxShade( glProc, s, w );
 		frameOff();
 		if ( ran )
@@ -604,25 +638,12 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 		const ObjBlRunStat rs = takeObjBlRunStat();
 		bool caseOk = seen && glRep == 0;
 		if ( c.map == 3 ) {
-			// no cube twin: Vulkan refuses by name and GL draws; the red draws with a stand-in cube and must FAIL
-			const bool named = !ran && w.find( "CubeMap" ) != std::string::npos;
-			std::printf( "BLVIEW %s refusal %s (%s)\n", tag.c_str(), named ? "OK" : "FAIL", ran ? "it drew" : w.c_str() );
-			caseOk = caseOk && named;
-			if ( reds >> 5 & 1u ) {
-				PfxOut o;
-				std::string rw;
-				if ( !vkDraw( c, 6, o, rw ) ) {
-					std::printf( "BLVIEW RED %s cubeoff NOT JUDGED (refused: %s)\n", tag.c_str(), rw.c_str() );
-					caseOk = false;
-				} else {
-					const PfxCmp rc = colCmp( gl, o );
-					const bool passes = depthCmp( o.depth, gl.depth ).exact() && rc.over == 0;
-					std::printf( "BLVIEW RED %s cubeoff (CubeMap a stand-in with hasCubeMap 1) %s (%zu values over the bound, %zu pixels written)\n",
-						tag.c_str(), passes ? "PASSED" : rc.cov >= 2000 ? "FAIL" : "TESTS NOTHING", rc.over, rc.cov );
-					caseOk = caseOk && !passes && rc.cov >= 2000;
-				}
-			}
-		} else if ( !ran ) {
+			// round 5: the env cube through its plain-cube copy twin; the app's `vk pfx:` refusal count for this system must be 0
+			std::printf( "BLVIEW %s vk pfx: 1 system, %d drawn, %d refused (%s); %d copy twins, %llu bytes\n", tag.c_str(), ran ? 1 : 0, ran ? 0 : 1,
+				ran ? "CubeMap through its cube twin" : w.c_str(), rs.copies, static_cast<unsigned long long>( rs.copyBytes ) );
+			caseOk = caseOk && ran && rs.copies >= 1;
+		}
+		if ( !ran ) {
 			std::printf( "BLVIEW %s FAIL (objPfxShade refused: %s)\n", tag.c_str(), w.c_str() );
 			caseOk = false;
 		} else {
@@ -649,12 +670,13 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 			}
 			caseOk = caseOk && crossOk && covOk && dc.exact() && cc.over == 0 && vkRep == 0;
 			// the reds: offset and light on every case, depth on `hard`
-			static const char * redName[8] = { "", "offset (the strip stage reads its records 16 bytes on)", "light (the light buffer copied from one texel on)",
+			static const char * redName[9] = { "", "offset (the strip stage reads its records 16 bytes on)", "light (the light buffer copied from one texel on)",
 				"depth (ALWAYS read as LEQUAL)", "nmap (NormalMap a stand-in with hasNormalMap 1)", "grey (GreyscaleMap a stand-in with hasGreyscaleMap 1)",
-				"cubeoff", "elem0 (only element 0 of textureUnits resolved)" };
-			for ( int rd = 1; rd <= 7; rd++ ) {
+				"cubeoff (CubeMap a stand-in with hasCubeMap 1)", "elem0 (only element 0 of textureUnits resolved)",
+				"cubegrey (the grey stand-in cube bound in place of the env cube)" };
+			for ( int rd = 1; rd <= 8; rd++ ) {
 				if ( !( reds >> ( rd - 1 ) & 1u ) || ( rd == 3 && ( c.func != GL_ALWAYS || c.soft ) ) || ( c.noCol && rd != 1 )
-					|| ( c.map ? rd != 3 + c.map : rd > 3 ) )
+					|| ( c.map ? rd != 3 + c.map && !( c.map == 3 && rd == 8 ) : rd > 3 ) )
 					continue;
 				PfxOut o;
 				std::string rw;
@@ -678,6 +700,7 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 	f.bindVertexArray( 0 );
 	glDeleteTextures( 1, &lightTex );
 	glDeleteTextures( 1, &cubeTex );
+	glDeleteTextures( 1, &envCube );
 	sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &depthKeyAt ) );
 	objBlLocsLoad( spirvDir + "/no_locs.txt", why );
 	std::printf( "BLVIEW pfx %s\n", ok ? "OK" : "FAILED" );

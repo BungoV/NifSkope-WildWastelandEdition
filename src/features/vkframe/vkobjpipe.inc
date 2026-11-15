@@ -1523,6 +1523,64 @@ std::uintptr_t objCellCopyTwin( GlProc gp, const ObjBlTexUnit & u, int red, std:
 	return key;
 }
 
+/* lane VKOBJ5 round 5: a plain GL_TEXTURE_CUBE_MAP (the particles' CubeMap with hasCubeMap 1: the .bgem's env cube, BC or
+ * RGBA) as a plain-cube twin (farTwin type 4: a CUBE view of 6 layers, GL's own format and levels), GL's 6 faces of every
+ * level copied in (glCopyImageSubData) once a frame like objCellCopyTwin; GL's sampler state is read for it as for any unit */
+std::uintptr_t objCubeCopyTwin( GlProc gp, const ObjBlTexUnit & u, std::string & why )
+{
+	Gl & g = gl();
+	using LevelIv = void( WINAPI * )( unsigned, int, unsigned, int * );
+	using TexIv = void( WINAPI * )( unsigned, unsigned, int * );
+	const auto lv = gp ? reinterpret_cast<LevelIv>( gp( "glGetTextureLevelParameteriv" ) ) : nullptr;
+	const auto tv = gp ? reinterpret_cast<TexIv>( gp( "glGetTextureParameteriv" ) ) : nullptr;
+	if ( !lv || !tv || !g.copyImageSubData )
+		return why = "no glGetTextureLevelParameteriv / glCopyImageSubData", 0;
+	if ( u.glTarget != kFcCube )
+		return why = "GL target " + std::to_string( u.glTarget ) + " is no plain cube", 0;
+	int w = 0, h = 0, fmt = 0, minF = 0, immLevels = 0, decode = 0;
+	lv( u.glTex, 0, 0x1000, &w );       // TEXTURE_WIDTH
+	lv( u.glTex, 0, 0x1001, &h );       // TEXTURE_HEIGHT
+	lv( u.glTex, 0, 0x1003, &fmt );     // TEXTURE_INTERNAL_FORMAT
+	tv( u.glTex, 0x2801, &minF );       // TEXTURE_MIN_FILTER
+	tv( u.glTex, 0x82DF, &immLevels );  // TEXTURE_IMMUTABLE_LEVELS
+	tv( u.glTex, 0x8A48, &decode );     // TEXTURE_SRGB_DECODE_EXT
+	if ( w < 1 || w != h )
+		return why = "an empty or non-square GL cube", 0;
+	int levels = 1;
+	if ( minF != 0x2600 && minF != 0x2601 ) {  // a mip filter: every level GL holds
+		levels = immLevels > 0 ? immLevels : 0;
+		for ( int l = 0, lw = 0; !immLevels && l < 16 && ( lv( u.glTex, l, 0x1000, &lw ), lw > 0 ); l++ )
+			levels = l + 1;
+	}
+	const FcFormat f = fcFormat( GLenum( fmt ) );
+	if ( f.fmt == VK_FORMAT_UNDEFINED || f.depth )
+		return why = "GL format " + std::to_string( fmt ) + " has no cube twin", 0;
+	if ( blIsSrgb( f.fmt ) && decode == 0x8A4A )
+		return why = "an sRGB cube with its decode skipped", 0;
+	const std::uintptr_t key = ( std::uintptr_t( 0xC0B ) << 40 ) | std::uintptr_t( u.glTex );
+	unsigned twin = 0;
+	if ( !farTwin( key, 4, w, w, 6, unsigned( fmt ), twin, why, levels ) || !twin )
+		return 0;
+	const std::uint64_t gen = sharedGen();
+	auto it = opS().copyMemo.find( u.glTex );
+	if ( it != opS().copyMemo.end() && it->second == gen )
+		return key;  // copied this frame
+	const double t0 = nowMs();
+	std::uint64_t bytes = 0;
+	for ( int l = 0; l < levels; l++ ) {
+		const int lw = std::max( w >> l, 1 );
+		g.copyImageSubData( u.glTex, kFcCube, l, 0, 0, 0, twin, kFcCube, l, 0, 0, 0, lw, lw, 6 );
+		bytes += 6ull * ( f.block ? std::uint64_t( ( lw + 3 ) / 4 ) * std::uint64_t( ( lw + 3 ) / 4 ) * std::uint64_t( f.block )
+			: std::uint64_t( lw ) * std::uint64_t( lw ) * std::uint64_t( f.texel ) );
+	}
+	opS().copyMemo[u.glTex] = gen;
+	ObjBlRunStat & rs = opS().st;
+	rs.copies++;
+	rs.copyBytes += bytes;
+	rs.copyMs += nowMs() - t0;
+	return key;
+}
+
 bool objBlBindUnits(GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st, std::string & why )
 {
 	const std::uint32_t * words[2] = { d.vs, d.ps };
@@ -1613,6 +1671,20 @@ bool objBlBindUnits(GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st,
 					continue;
 				}
 				st.copied++;
+			}
+			// lane VKOBJ5 round 5: the particles' CubeMap (a plain cube) through its plain-cube copy twin
+			if ( !key && d.twin == kObjTwinPfx && u.dim == 3 && !u.arrayed ) {
+				key = objCubeCopyTwin( gp, u, w );
+				if ( !key ) {
+					st.misfit++;
+					if ( st.misfitWhy.empty() )
+						st.misfitWhy = u.name + ": " + w;
+					continue;
+				}
+				st.copied++;
+				d.images.emplace_back( u.binding, key );
+				st.shared++;
+				continue;
 			}
 			if ( !key ) {
 				st.glOwn++;
@@ -3156,7 +3228,7 @@ bool objPfxShade( GlProc gp, const ObjPfxShade & s, std::string & why )
 		return fail( "GL names none of the loose uniforms" );
 	// round 4: textureUnits[10] element by element; the maps by their flags (glparticles.cpp binds a .bgem's map with its
 	// flag, CubeMap always holds a grey cube): a map whose flag is 0 is never sampled and stays a stand-in, a map whose flag
-	// is 1 must resolve (a cube has no twin: refused by name, GL draws)
+	// is 1 must resolve (round 5: the cube through its plain-cube copy twin, objCubeCopyTwin)
 	d.unitElems = s.red != 7;  // red `elem0`: element 0 alone, round 3's rule
 	{
 		SpvModule pm;
@@ -3650,7 +3722,12 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 				for ( std::size_t i = 0; i < d.images.size(); i++ )
 					if ( d.images[i].first == b.binding + a ) {
 						const std::uintptr_t key = d.images[i].second;
-						if ( !sharedFind( key ) && farTwinFind( key ) ) {  // lane VKWATER3: a texture cache twin (2D, its swizzle)
+						const Shared * ft = sharedFind( key ) ? nullptr : farTwinFind( key );
+						if ( ft && ft->type == 4 ) {  // lane VKOBJ5: a plain-cube copy twin (objCubeCopyTwin)
+							if ( b.dim != 3 || b.arrayed || !( view = ft->view ) )
+								return why = where + ": the cube twin is no cube view of this binding", false;
+							st.twins++;
+						} else if ( ft ) {  // lane VKWATER3: a texture cache twin (2D, its swizzle)
 							VkFormat fmt = VK_FORMAT_UNDEFINED;
 							const std::uint32_t swz = i < d.imageSwz.size() ? d.imageSwz[i] : 0;
 							if ( b.dim != 1 || b.arrayed || !( view = blView( key, fmt, swz ) ) )
