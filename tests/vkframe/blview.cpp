@@ -1211,6 +1211,10 @@ int main( int argc, char ** argv )
 		const bool a6 = cellGate( spvDir + "/cellset/spirv", 6, pbrm, 1u << 8, "ao", 32u );
 		const bool a8 = cellGate( spvDir + "/cellset/spirv", 8, fx, 1u << 8, "ao", 32u );
 		ok = a2 && a3 && a5 && a6 && a8 && ok;
+		// lane VKOBJ7: GPU cull step B (vars 64): its kept ranges on Vulkan against GL's cluster commands; red droprange must FAIL
+		const bool sb2 = cellGate( spvDir + "/cellset/spirv", 2, maps, 0u, "stepb", 64u );
+		const bool sb3 = cellGate( spvDir + "/cellset/spirv", 3, maps, 0u, "stepb", 64u );
+		ok = sb2 && sb3 && ok;
 	} else
 		std::printf( "BLVIEW cell not run (the cell twins read the texture cache's twins: MODE=bc)\n" );
 	vk().vkWaitForFences( vk().dev, 1, &gv.fence, VK_TRUE, 1000000000ull );

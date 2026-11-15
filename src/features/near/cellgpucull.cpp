@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 #include "gl/wwshadertext.h"	// lane VKCOMPUTE1: the cull kernels are files
 #include "features/near/cellbindless.h"	// lane BINDLESS2
 #include "features/near/cellgpucullgate.h"	// lane SIGNDROP1: the occluder gate (tests/signdrop1 compiles it too)
+#include "features/near/cellgpucullvk.h"	// lane VKOBJ7: step B's shapes on Vulkan (tests/vkframe/blview compiles it too)
 
 #include "features/near/cellcull.h"
 #include "gl/cellgrass.h"
@@ -51,6 +52,8 @@ struct Switches
 	bool on = true, cone = true, occ = true, frustum = true, hard = false, nocull = false, atocc = false;
 	// lane PERFFIX4: timer = the census read back BEFORE the closing timestamp, in the same frame (the old order)
 	bool timer = false;
+	// lane VKOBJ7: vkkeep = step B's shapes stay GL's under WW_VKOBJ_SHADE (the old rule; the census line says RED vkkeep)
+	bool vkKeep = false;
 	// MODULES1 part 19: aopass = the obscurance pass's walk sits out (the old rule: no frustum / cone / Hi-Z cull there)
 	bool aoRed = false;
 	Switches()
@@ -66,6 +69,7 @@ struct Switches
 			atocc = atocc || r.trimmed() == QLatin1String( "atocc" );
 			timer = timer || r.trimmed() == QLatin1String( "timer" );
 			aoRed = aoRed || r.trimmed() == QLatin1String( "aopass" );
+			vkKeep = vkKeep || r.trimmed() == QLatin1String( "vkkeep" );
 		}
 	}
 };
@@ -143,6 +147,7 @@ struct Frame
 	qint64 shapes = 0, candidates = 0, occluders = 0, items = 0, fallback = 0, mdi = 0, mdiCmds = 0, rangeDraws = 0;
 	qint64 trisKept = 0;
 	qint64 atRefused = 0;	// lane SIGNDROP1: occluders refused for their alpha test
+	qint64 vkDraws = 0;	// lane VKOBJ7: shapes the twins drew (vkCellDraw / vkBlDraw)
 	std::uint32_t counts[8] = {};
 	double cpuMs = 0.0, gpuMs[3] = { -1.0, -1.0, -1.0 };
 	QString why;
@@ -759,7 +764,7 @@ void prepare( Scene * scene )
 	std::vector<Occluder> occluders;
 	f.shapes = qint64( f.notes.size() );
 	f.candidates = f.occluders = f.fallback = f.trisKept = f.atRefused = 0;
-	f.mdi = f.mdiCmds = f.rangeDraws = 0;
+	f.mdi = f.mdiCmds = f.rangeDraws = f.vkDraws = 0;
 	static std::vector<std::uint32_t> ranges;
 	for ( const auto & nn : f.notes ) {
 		Shape * sh = nn.first;
@@ -1186,6 +1191,20 @@ bool draw( Scene * scene, Shape * sh, qsizetype numTriangles )
 	const Rec & rec = *it;
 	auto fn = scene->renderer->fn;
 	const GLenum mode = GLenum( scene->renderer->triMode() );	// lane WATERLOOK1 step 2: patches under the displaced water
+	/* lane VKOBJ7 (F1): under WW_VKOBJ_SHADE a twin's shape draws on Vulkan with the CPU cull's kept ranges, as bsshape's cull
+	 * branch (cellgpucullvk.h: Vulkan keeps the frustum cull, not the Hi-Z one); refused, GL draws it below as before */
+	if ( mode == GL_TRIANGLES && !sw().vkKeep && WwBl::vkShadeOn() ) {
+		static std::vector<GLsizei> vkCounts;
+		static std::vector<const void *> vkOffs;
+		GpuDrivenBVk::rangeDraws( rec.whole, rec.ranges.data(), rec.ranges.size(), numTriangles, rec.numTris, vkCounts, vkOffs );
+		const NifSkopeOpenGLContext::Program * prog = scene->renderer->getCurrentProgram();
+		const GLsizei n = GLsizei( vkCounts.size() );
+		if ( n > 0 && ( WwBl::vkCellDraw( prog, vkCounts.data(), vkOffs.data(), n, std::size_t( sh->verts.size() ) )
+				|| WwBl::vkBlDraw( prog, vkCounts.data(), vkOffs.data(), n, std::size_t( sh->verts.size() ) ) ) ) {
+			f.vkDraws++;
+			return true;
+		}
+	}
 	Gpu * gp = rec.indirect ? gpuOf() : nullptr;
 	if ( gp && qsizetype( rec.numTris ) == numTriangles ) {
 		WwBl::unpoolForIndirect( fn );	// lane BINDLESS2: the commands hold the shape's own offsets
@@ -1231,10 +1250,11 @@ void finish()
 	} else if ( f.flushing && GpuDriven::census() ) {
 		const Gpu * gp = gpus().contains( QOpenGLContext::currentContext() ) ? &gpus()[QOpenGLContext::currentContext()] : nullptr;
 		GpuDriven::censusLine( "b", QStringLiteral( "%1 shapes %2 candidates %3 occluders %4 fallback %5 clusters %6 visible %7 "
-			"frustum %8 cone %9 occluded %10 tris %11/%12 multidraws %13 commands %14 rangedraws %15 alphatest-refused %16" )
+			"frustum %8 cone %9 occluded %10 tris %11/%12 multidraws %13 commands %14 rangedraws %15 alphatest-refused %16 vulkan %17%18" )
 			.arg( f.why ).arg( f.shapes ).arg( f.candidates ).arg( f.occluders ).arg( f.fallback ).arg( f.items )
 			.arg( f.counts[0] ).arg( f.counts[1] ).arg( f.counts[2] ).arg( f.counts[3] ).arg( f.counts[4] ).arg( f.trisKept )
-			.arg( f.mdi ).arg( f.mdiCmds ).arg( f.rangeDraws ).arg( f.atRefused ) );
+			.arg( f.mdi ).arg( f.mdiCmds ).arg( f.rangeDraws ).arg( f.atRefused ).arg( f.vkDraws )
+			.arg( sw().vkKeep ? QStringLiteral( " RED vkkeep" ) : QString() ) );
 		if ( gp )
 			GpuDriven::censusLine( "b arena", QStringLiteral( "shapes %1 clusters %2/%3 garbage %4 builds %5 rebuilds %6%7" )
 				.arg( gp->clusters.size() ).arg( gp->mUsed ).arg( gp->mCap ).arg( gp->mGarbage ).arg( gp->builds )

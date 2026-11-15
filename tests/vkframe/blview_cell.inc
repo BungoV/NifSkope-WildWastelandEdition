@@ -87,7 +87,9 @@
  * each range as the GPU cull's commands do: one command per 8-triangle cluster (the last one short), nothing occluded (the Hi-Z drops
  * only hidden clusters: tests/features/near/signdrop1's matter, not this row's). Vulkan draws rangeDraws' counts and offsets in
  * vkCellDraw's command form (count, 1, offset / 2, base vertex, 0). Bars: the twin's own (depth EXACT, colour within the bound, the
- * crossing counts, lit). Red droprange (rangeDraws red 1: each draw's last kept range dropped) must FAIL and move the Vulkan depth. */
+ * crossing counts, lit). Red droprange (rangeDraws red 1: the last kept range dropped from each draw that keeps more than one) must FAIL and move the Vulkan depth. */
+#include "../../src/features/near/cellgpucullvk.h"  // lane VKOBJ7: step B's ranges (the `stepb` rows)
+
 bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], unsigned reds = 15u, const char * label = nullptr, unsigned vars = 0u )
 {
 	using namespace WwVkPresent;
@@ -110,6 +112,7 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	const bool skinV = ( vars & 2u ) != 0, alphaV = ( vars & 4u ) != 0, rtV = ( vars & 8u ) != 0;
 	const bool volV = twin == 7 && ( vars & 16u ) != 0;  // twin 7: the lit cards volumetric (the ReSTIR ratio's way into an effect)
 	const bool aoV = ( vars & 32u ) != 0;  // lane VKWATER5: cellAo (and cellSsr on twins 2, 3, 5, 6) bound as the app binds them
+	const bool sbV = ( vars & 64u ) != 0;  // lane VKOBJ7: step B's kept ranges on Vulkan against GL's cluster commands
 	const bool ssrV = aoV;  // cellSsr and cellAoDecal are bound wherever GL's program has the sampler (a unit with none holds a stale texture)
 	const bool ssrJudged = twin == 2 || twin == 3;  // the SSR probe is a bar there only: pbrm's cube term never moved (r1: 0 of 11571)
 	const std::string tagS = std::string( twinTag[twin] ) + ( label ? std::string( " " ) + label : std::string() );
@@ -804,6 +807,30 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		{ 1, { h, 1, 0, std::uint32_t( nv ), 0, std::uint32_t( ni ) - h, 1, h, 0, 0 } },
 		{ 0, { std::uint32_t( ni ), 1, 0, std::uint32_t( nv ), 0 } }, { 1, { std::uint32_t( ni ), 1, 0, 0, 0 } } };
 	const int nDraws = 6;
+	/* lane VKOBJ7 (`stepb`): each draw's kept ranges (first triangle, triangles); GL draws them as 8-triangle cluster commands (the GPU
+	 * cull's form), Vulkan as cellgpucullvk.h's rangeDraws in vkCellDraw's command form; sbVkRed: rangeDraws red 1 */
+	std::vector<std::uint32_t> sbGl[6], sbVk[6], sbVkRed[6];
+	if ( sbV ) {
+		static const std::vector<std::uint32_t> sbRanges[6] = { {}, { 0, 50 }, { 0, 16, 24, 26 }, { 0, 8, 8, 0, 16, 34 }, { 0, 40, 48, 2 },
+			{ 8, 42 } };
+		for ( int i = 0; i < 6; i++ ) {
+			const std::uint32_t bv = draws[i].cmds[3], tris = std::uint32_t( ni / 3 );
+			const bool whole = sbRanges[i].empty();
+			const std::vector<std::uint32_t> rg = whole ? std::vector<std::uint32_t>{ 0, tris } : sbRanges[i];
+			for ( std::size_t k = 0; k + 1 < rg.size(); k += 2 )
+				for ( std::uint32_t t = rg[k]; t < rg[k] + rg[k + 1]; t += 8 )
+					sbGl[i].insert( sbGl[i].end(), { std::min( 8u, rg[k] + rg[k + 1] - t ) * 3u, 1u, t * 3u, bv, 0u } );
+			for ( int red = 0; red < 2; red++ ) {
+				std::vector<int> counts;
+				std::vector<const void *> offs;
+				GpuDrivenBVk::rangeDraws( whole, rg.data(), rg.size(), tris, tris, counts, offs, red );
+				for ( std::size_t k = 0; k < counts.size(); k++ )
+					( red ? sbVkRed : sbVk )[i].insert( ( red ? sbVkRed : sbVk )[i].end(),
+						{ std::uint32_t( counts[k] ), 1u, std::uint32_t( std::uintptr_t( offs[k] ) / 2 ), bv, 0u } );
+			}
+		}
+	}
+	const std::vector<std::uint32_t> * sbUse = sbVk;
 	int probe = 0;  // the GL-only variant probes: 1 the lights off, 2 the skinning off, 3 the alpha test and blend off
 	bool oldBrdf = false;  // pbrm_default's red 8: r3Red 64, the BRDF before OpenPBR (GL's reference always draws without it)
 	static const int alphaMode[6] = { 4, 4 | 8, 8, 6, 0, 1 | 8 };  // '>', '>' + blend, blend, '>=', none, '<' + blend
@@ -990,9 +1017,10 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 			frameState( false );
 			drawState( i );
 			f.bindVertexArray( vao[draws[i].lay] );
-			for ( std::size_t c = 0; c < draws[i].cmds.size(); c += 5 )
-				u.drawBv( GL_TRIANGLES, GLsizei( draws[i].cmds[c] ), GL_UNSIGNED_SHORT,
-					reinterpret_cast<const void *>( std::size_t( draws[i].cmds[c + 2] ) * 2 ), GLint( draws[i].cmds[c + 3] ) );
+			const std::vector<std::uint32_t> & cm = sbV ? sbGl[i] : draws[i].cmds;  // lane VKOBJ7: stepb, the cluster commands
+			for ( std::size_t c = 0; c < cm.size(); c += 5 )
+				u.drawBv( GL_TRIANGLES, GLsizei( cm[c] ), GL_UNSIGNED_SHORT, reinterpret_cast<const void *>( std::size_t( cm[c + 2] ) * 2 ),
+					GLint( cm[c + 3] ) );
 			frameOff();
 		}
 		shadeRead( out.depth, &out.c0, &out.c1 );
@@ -1014,8 +1042,9 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 			s.prog = prog;
 			s.poolKey = poolKey;
 			s.verts = std::size_t( 2 * nv );
-			s.cmds = draws[i].cmds.data();
-			s.nCmds = draws[i].cmds.size() / 5;
+			const std::vector<std::uint32_t> & vc = sbV && onlyLay < 0 ? sbUse[i] : draws[i].cmds;  // lane VKOBJ7: stepb, the ranges
+			s.cmds = vc.data();
+			s.nCmds = vc.size() / 5;
 			s.red = red;
 			s.rt = rtV;
 			ran = objCellShade( glProc, s, w );
@@ -1344,6 +1373,32 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		}
 		std::printf( "BLVIEW RED %s %s %s (%zu values over the bound, %zu Vulkan values moved off the Vulkan base%s%s)\n", tag, redName[r - 1],
 			passes ? "PASSED" : vch ? "FAIL" : "TESTS NOTHING", over, vch, rr ? "" : "; refused: ", rr ? "" : rw.c_str() );
+		ok = ok && !passes && vch > 0;
+	}
+	if ( sbV ) {  // lane VKOBJ7: red droprange, the last kept range of each multi-range draw dropped by rangeDraws (Vulkan only)
+		CellOut o;
+		std::string rw;
+		std::size_t sbCmds = 0, sbN = 0, sbRed = 0;
+		for ( int i = 0; i < nDraws; i++ ) {
+			sbCmds += sbGl[i].size() / 5;
+			sbN += sbVk[i].size() / 5;
+			sbRed += sbVkRed[i].size() / 5;
+		}
+		sbUse = sbVkRed;
+		takeObjBlRunStat();
+		const bool rr = vkSweep( 0, o, rw );
+		sbUse = sbVk;
+		bool passes = false;
+		std::size_t vch = 0;
+		if ( rr ) {
+			const DepthCmp dc = depthCmp( o.depth, gl.depth );
+			passes = ( dc.exact() || dc.bound() ) && colCmp( o ).over == 0;
+			for ( std::size_t i = 0; ran && i < o.depth.size() && i < vk0.depth.size(); i++ )
+				vch += o.depth[i] != vk0.depth[i];
+		}
+		std::printf( "BLVIEW %s cluster commands: GL %zu, Vulkan ranges %zu (red %zu)\n", tag, sbCmds, sbN, sbRed );
+		std::printf( "BLVIEW RED %s droprange (last kept range of each multi-range draw dropped) %s (%zu Vulkan depth values moved off the Vulkan base%s%s)\n",
+			tag, passes ? "PASSED" : vch ? "FAIL" : "TESTS NOTHING", vch, rr ? "" : "; refused: ", rr ? "" : rw.c_str() );
 		ok = ok && !passes && vch > 0;
 	}
 	if ( !label ) {  // the refusals: nothing drawn, the reason given

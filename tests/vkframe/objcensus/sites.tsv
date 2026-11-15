@@ -61,16 +61,16 @@ src/features/gi/rtddgicell.cpp|rtddgiCellViewDrawLinear|glDrawArraysInstanced|2	
 src/features/lights/celllamps.cpp|cubeDrawCaster|drawShape|1	other		lamp shadow casters (VKLAMP lanes; not touched by VKOBJ)
 src/features/lights/celllamps.cpp|cubeDrawCaster|glDrawElementsInstanced|1	other		lamp shadow casters (VKLAMP lanes; not touched by VKOBJ)
 src/features/lights/celllamps.cpp|lampShadowPass|drawShape|1	other		lamp shadow casters (VKLAMP lanes; not touched by VKOBJ)
-src/features/near/cellbindless.cpp|runIssue|mdi|1	twin	vkShade	a bindless run (WW_VKOBJ_SHADE): objBlShade; NOTE vkShade does not refuse the RT GI key as vkBlDraw does
+src/features/near/cellbindless.cpp|runIssue|mdi|1	twin	vkShade	a bindless run (WW_VKOBJ_SHADE): objBlShade, the base or RT GI bl twin by objBlVariant (vkwater3 G4, merged 585f4432)
 src/features/near/cellbindless.cpp|drawElements|glDrawElementsBaseVertex|1	other		wrapper body: WwBl::drawElements (its callers are the sites)
 src/features/near/cellbindless.cpp|drawElements|glDrawElements|1	other		wrapper body: WwBl::drawElements (its callers are the sites)
 src/features/near/cellbindless.cpp|multiDrawElements|glMultiDrawElements|1	other		wrapper body: WwBl::multiDrawElements (its callers are the sites)
 src/features/near/cellbindless.cpp|multiDrawElements|glMultiDrawElementsBaseVertex|1	other		wrapper body: WwBl::multiDrawElements (its callers are the sites)
 src/features/near/cellgpucull.cpp|prepare|GpuDriven::poolDraw|1	twin	WwVkPresent::objRun	step B occluder depth prepass (WW_VKVIEW_OBJ_RED is its GL red key)
 src/features/near/cellgpucull.cpp|prepare|GpuDriven::poolDraw|2	twin	WwVkPresent::objRun	step B occluder depth prepass (WW_VKVIEW_OBJ_RED is its GL red key)
-src/features/near/cellgpucull.cpp|draw|glMultiDrawElementsIndirect|1	glonly		GPU cull step B (WW_GPUDRIVEN_B, ships on): every learned opaque fo4_cell(csm)/bl/pbrm shape of the main walk; bsshape tries it BEFORE vkCellDraw / vkBlDraw
-src/features/near/cellgpucull.cpp|draw|WwBl::drawElements|1	glonly		GPU cull step B (WW_GPUDRIVEN_B, ships on): every learned opaque fo4_cell(csm)/bl/pbrm shape of the main walk; bsshape tries it BEFORE vkCellDraw / vkBlDraw
-src/features/near/cellgpucull.cpp|draw|WwBl::multiDrawElements|1	glonly		GPU cull step B (WW_GPUDRIVEN_B, ships on): every learned opaque fo4_cell(csm)/bl/pbrm shape of the main walk; bsshape tries it BEFORE vkCellDraw / vkBlDraw
+src/features/near/cellgpucull.cpp|draw|glMultiDrawElementsIndirect|1	twin	WwBl::vkCellDraw+WwBl::vkBlDraw	GPU cull step B (WW_GPUDRIVEN_B, ships on): under WW_VKOBJ_SHADE a twin's shape takes vkCellDraw / vkBlDraw first with the CPU cull's kept ranges (cellgpucullvk.h; Vulkan keeps the frustum cull, not the Hi-Z one); GL red key WW_GPUDRIVEN_B_RED=vkkeep (lane VKOBJ7, blview cell stepb)
+src/features/near/cellgpucull.cpp|draw|WwBl::drawElements|1	twin	WwBl::vkCellDraw+WwBl::vkBlDraw	GPU cull step B (WW_GPUDRIVEN_B, ships on): under WW_VKOBJ_SHADE a twin's shape takes vkCellDraw / vkBlDraw first with the CPU cull's kept ranges (cellgpucullvk.h; Vulkan keeps the frustum cull, not the Hi-Z one); GL red key WW_GPUDRIVEN_B_RED=vkkeep (lane VKOBJ7, blview cell stepb)
+src/features/near/cellgpucull.cpp|draw|WwBl::multiDrawElements|1	twin	WwBl::vkCellDraw+WwBl::vkBlDraw	GPU cull step B (WW_GPUDRIVEN_B, ships on): under WW_VKOBJ_SHADE a twin's shape takes vkCellDraw / vkBlDraw first with the CPU cull's kept ranges (cellgpucullvk.h; Vulkan keeps the frustum cull, not the Hi-Z one); GL red key WW_GPUDRIVEN_B_RED=vkkeep (lane VKOBJ7, blview cell stepb)
 src/features/near/cellqueue.cpp|poolDraw|mdi|1	other		wrapper body: GpuDriven::poolDraw (its callers are the sites)
 src/features/near/cellqueue.cpp|poolDraw|glDrawElementsInstancedBaseVertexBaseInstance|1	other		wrapper body: GpuDriven::poolDraw (its callers are the sites)
 src/features/near/cellvrs.cpp|wwCellVrsBuild|drawShape|1	other		VRS rate image: screen pass
