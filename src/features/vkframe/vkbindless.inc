@@ -30,6 +30,7 @@ struct BlImg
 struct BlSwzView
 {
 	VkImage img = VK_NULL_HANDLE;
+	std::uint64_t gen = 0;  // lane VKWATER3: sharedGen() when made (a remade twin can come back at the freed handle value)
 	VkImageView view = VK_NULL_HANDLE;
 };
 using BlViewKey = std::pair<std::uintptr_t, std::uint32_t>;
@@ -249,7 +250,7 @@ VkImageView blView( std::uintptr_t key, VkFormat & fmt, std::uint32_t swz = 0 )
 		return s->view;
 	Vk & v = vk();
 	BlSwzView & sv = blS().swzViews[{ key, swz }];
-	if ( sv.view && sv.img == s->img )
+	if ( sv.view && sv.img == s->img && sv.gen == sharedGen() )
 		return sv.view;
 	if ( sv.view )  // the key's image was remade (its old one is gone, so is any work on it)
 		v.vkDestroyImageView( v.dev, sv.view, nullptr );
@@ -266,6 +267,7 @@ VkImageView blView( std::uintptr_t key, VkFormat & fmt, std::uint32_t swz = 0 )
 		return VK_NULL_HANDLE;
 	}
 	sv.img = s->img;
+	sv.gen = sharedGen();
 	return sv.view;
 }
 
