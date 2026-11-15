@@ -83,6 +83,18 @@ frame changes.
 - One lookup for both (ddgiAtlasView) and a counter that moves on every make / drop (ddgiAtlasGen), so a pass knows
   to rewrite its descriptor. Gate: 17 of 17, the cascades' buffer EXACT, its red FAILS.
 
+## VKFAR3 A1 screen GI (2026-11-15): the traced GI's screen read on Vulkan (WW_VKVIEW=1), gate red
+
+Changed, not built, not checked live.
+
+- With the traced GI on and the PRT off, the half-res screen GI (cell_gihalf) runs on the present device right after
+  the volume mask, reading the cascades' buffer in place. The `giHalf` echo line ends "drawn on Vulkan" or "on GL";
+  the route line names why GL kept it (the PRT, no cascades' read, the buffer not shared). Red WW_VKVIEW_GIHALF_RED=1.
+- Offline gate tests/vkframe/gihalfview.sh against the app's GL program on one shared atlas: the uniform table, the
+  atlas lookup and all three reds pass; the 4-ulp bar does NOT (giStep 1: 1694 of 57377 texels; decoded at most 0.3 %
+  of E, visibility codes within 1). The cause is float order (NV GL's choice for the world position, proven by a
+  probe; the rest is inside the read). The bar is left as written.
+
 ## VKFAR2 L8 slice 1 (2026-11-14): rain / snow pass for the Vulkan view, not wired in (gate red)
 
 Changed, not built, not checked live. Nothing in the app calls it yet, so no frame changes.

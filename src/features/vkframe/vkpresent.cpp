@@ -40,6 +40,7 @@
 #include "features/vkframe/light_aox_z.spv.h"  // lane VKFAR3: the ported AO methods (XeGTAO, GTAO)
 #include "features/vkframe/light_aox_xe.spv.h"
 #include "features/vkframe/light_aox_r8.spv.h"
+#include "features/vkframe/light_gihalf.spv.h"  // lane VKFAR3 (A1 b): the screen GI's DDGI read
 // lane VKLIGHT2: the reflections' stages (ssr_vk.hlsl SSR_LIVE; w = the water look)
 #include "features/vkframe/ssr_view_s1.spv.h"
 #include "features/vkframe/ssr_view_s1w.spv.h"
@@ -6341,6 +6342,10 @@ struct LightPassState
 	VkDeviceMemory bufMem = VK_NULL_HANDLE;
 	void * bufPtr = nullptr;
 	VkDeviceSize bufBytes = 0;
+	VkBuffer ubo = VK_NULL_HANDLE;  // binding 31 (lane VKFAR3: GL's uniforms for LightGiHalf), host-coherent like buf
+	VkDeviceMemory uboMem = VK_NULL_HANDLE;
+	void * uboPtr = nullptr;
+	VkDeviceSize uboBytes = 0;
 	std::vector<LightImg> img;
 	std::vector<WwVkPresent::LightDispatch> d;  // what the worker records (written while the fence is done)
 	WwVkPresent::LightStat st;
@@ -6358,6 +6363,13 @@ struct Light
 	double buildMs = 0.0;
 	LightImg dummy;  // 1x1 for unbound sampled slots
 	void * dummyCtx = nullptr;
+	// lane VKFAR3: binding 44's stand-in (16 zero RGBA32F texels) when a set has no DDGI atlas; the Vk table has no
+	// buffer-view entry points, so they are looked up here
+	PFN_vkCreateBufferView createBv = nullptr;
+	PFN_vkDestroyBufferView destroyBv = nullptr;
+	VkBuffer texelDummy = VK_NULL_HANDLE;
+	VkDeviceMemory texelDummyMem = VK_NULL_HANDLE;
+	VkBufferView texelDummyView = VK_NULL_HANDLE;
 	LightPassState p[WwVkPresent::LightPasses];
 };
 
@@ -6439,6 +6451,47 @@ bool lightImgMake( LightImg & x, unsigned glFmt, int w, int h, int levels, std::
 	return true;
 }
 
+// a host-coherent, mapped buffer of `usage`, grown on demand (bindings 9 and 31, the texel stand-in); the GPU is done with
+// the old one when called
+bool lightHostBuf( VkBuffer & buf, VkDeviceMemory & mem, void *& ptr, VkDeviceSize & have, VkDeviceSize bytes,
+	VkBufferUsageFlags usage )
+{
+	Vk & v = vk();
+	if ( buf && have >= bytes )
+		return true;
+	if ( mem ) {
+		v.vkUnmapMemory( v.dev, mem );
+		v.vkFreeMemory( v.dev, mem, nullptr );
+	}
+	if ( buf )
+		v.vkDestroyBuffer( v.dev, buf, nullptr );
+	buf = VK_NULL_HANDLE;
+	mem = VK_NULL_HANDLE;
+	ptr = nullptr;
+	have = 0;
+	VkBufferCreateInfo bci { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+	bci.size = bytes;
+	bci.usage = usage;
+	bool ok = v.vkCreateBuffer( v.dev, &bci, nullptr, &buf ) == VK_SUCCESS;
+	if ( ok ) {
+		VkMemoryRequirements br {};
+		v.vkGetBufferMemoryRequirements( v.dev, buf, &br );
+		VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+		ai.allocationSize = br.size;
+		ai.memoryTypeIndex = memType( br.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
+		ok = ai.memoryTypeIndex != UINT32_MAX && v.vkAllocateMemory( v.dev, &ai, nullptr, &mem ) == VK_SUCCESS
+			&& v.vkBindBufferMemory( v.dev, buf, mem, 0 ) == VK_SUCCESS
+			&& v.vkMapMemory( v.dev, mem, 0, VK_WHOLE_SIZE, 0, &ptr ) == VK_SUCCESS;
+	}
+	if ( !ok || !ptr )
+		return false;
+	have = bytes;
+	return true;
+}
+
+// lane VKFAR3: the set's bindings (LightBindingsVk.hlsli's 0..9, then gihalf_vk.hlsl's on DXC's default numbering)
+constexpr std::uint32_t kLightUbo = 31, kLightAtlas = 44, kLightGbuf = 46, kLightBindings = 13;
+
 // once per device: the samplers, the set layout (LightBindingsVk.hlsli), the pipeline layout (a 128-byte push block) and
 // the seven kernels (the AO raw kernel only with shaderFloat64)
 bool lightStatic( std::string & why )
@@ -6466,16 +6519,34 @@ bool lightStatic( std::string & why )
 		if ( v.vkCreateSampler( v.dev, &sci, nullptr, &L.samp[s] ) != VK_SUCCESS )
 			return fail( "vkCreateSampler (the light passes) failed" );
 	}
-	VkDescriptorSetLayoutBinding b[10] = {};
-	for ( std::uint32_t i = 0; i < 10; i++ ) {
-		b[i].binding = i;
+	VkDescriptorSetLayoutBinding b[kLightBindings] = {};
+	for ( std::uint32_t i = 0; i < kLightBindings; i++ ) {
+		b[i].binding = i < 10 ? i : i == 10 ? kLightUbo : i == 11 ? kLightAtlas : kLightGbuf;
 		b[i].descriptorType = i < 5 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE : i < 7 ? VK_DESCRIPTOR_TYPE_SAMPLER
-			: i < 9 ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			: i < 9 ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : i == 9 ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+			: i == 10 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : i == 11 ? VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 		b[i].descriptorCount = 1;
 		b[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 	}
+	// binding 44's stand-in: 16 zero RGBA32F texels and their view
+	L.createBv = reinterpret_cast<PFN_vkCreateBufferView>( v.vkGetDeviceProcAddr( v.dev, "vkCreateBufferView" ) );
+	L.destroyBv = reinterpret_cast<PFN_vkDestroyBufferView>( v.vkGetDeviceProcAddr( v.dev, "vkDestroyBufferView" ) );
+	{
+		void * p = nullptr;
+		VkDeviceSize have = 0;
+		if ( !L.createBv || !L.destroyBv
+			|| !lightHostBuf( L.texelDummy, L.texelDummyMem, p, have, 256, VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT ) )
+			return fail( "the light passes' texel-buffer stand-in failed" );
+		std::memset( p, 0, 256 );
+		VkBufferViewCreateInfo bv { VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO };
+		bv.buffer = L.texelDummy;
+		bv.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+		bv.range = VK_WHOLE_SIZE;
+		if ( L.createBv( v.dev, &bv, nullptr, &L.texelDummyView ) != VK_SUCCESS )
+			return fail( "vkCreateBufferView (the light passes' stand-in) failed" );
+	}
 	VkDescriptorSetLayoutCreateInfo lci { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-	lci.bindingCount = 10;
+	lci.bindingCount = kLightBindings;
 	lci.pBindings = b;
 	const VkPushConstantRange pr { VK_SHADER_STAGE_COMPUTE_BIT, 0, 128 };
 	if ( v.vkCreateDescriptorSetLayout( v.dev, &lci, nullptr, &L.dsl ) != VK_SUCCESS )
@@ -6493,7 +6564,7 @@ bool lightStatic( std::string & why )
 		{ vkframe_light_ao_blur_spv, sizeof( vkframe_light_ao_blur_spv ) }, { vkframe_light_ao_blurf_spv, sizeof( vkframe_light_ao_blurf_spv ) },
 		{ vkframe_light_contact_spv, sizeof( vkframe_light_contact_spv ) }, { vkframe_light_ssgi_spv, sizeof( vkframe_light_ssgi_spv ) },
 		{ vkframe_light_aox_z_spv, sizeof( vkframe_light_aox_z_spv ) }, { vkframe_light_aox_xe_spv, sizeof( vkframe_light_aox_xe_spv ) },
-		{ vkframe_light_aox_r8_spv, sizeof( vkframe_light_aox_r8_spv ) } };
+		{ vkframe_light_aox_r8_spv, sizeof( vkframe_light_aox_r8_spv ) }, { vkframe_light_gihalf_spv, sizeof( vkframe_light_gihalf_spv ) } };
 	for ( int k = 0; k < WwVkPresent::LightKernels; k++ ) {
 		if ( k == WwVkPresent::LightAoRaw && !v.float64 )
 			continue;  // AO refuses with the reason
@@ -6528,11 +6599,12 @@ bool lightPassMake( LightPassState & P, std::string & why )
 	Light & L = light();
 	if ( P.dpool )
 		return true;
-	const VkDescriptorPoolSize ps[4] = { { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 5 * kLightSets }, { VK_DESCRIPTOR_TYPE_SAMPLER, 2 * kLightSets },
-		{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 * kLightSets }, { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, kLightSets } };
+	const VkDescriptorPoolSize ps[6] = { { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 6 * kLightSets }, { VK_DESCRIPTOR_TYPE_SAMPLER, 2 * kLightSets },
+		{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 * kLightSets }, { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, kLightSets },
+		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kLightSets }, { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, kLightSets } };
 	VkDescriptorPoolCreateInfo pci { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
 	pci.maxSets = kLightSets;
-	pci.poolSizeCount = 4;
+	pci.poolSizeCount = 6;
 	pci.pPoolSizes = ps;
 	VkDescriptorSetLayout lay[kLightSets];
 	for ( VkDescriptorSetLayout & l : lay )
@@ -6561,38 +6633,10 @@ bool lightPassMake( LightPassState & P, std::string & why )
 // binding 9: host-coherent, mapped, grown on demand (the fence is done when called)
 bool lightBuf( LightPassState & P, VkDeviceSize bytes, std::string & why )
 {
-	Vk & v = vk();
-	if ( P.buf && P.bufBytes >= bytes )
-		return true;
-	if ( P.bufMem ) {
-		v.vkUnmapMemory( v.dev, P.bufMem );
-		v.vkFreeMemory( v.dev, P.bufMem, nullptr );
-	}
-	if ( P.buf )
-		v.vkDestroyBuffer( v.dev, P.buf, nullptr );
-	P.buf = VK_NULL_HANDLE;
-	P.bufMem = VK_NULL_HANDLE;
-	P.bufPtr = nullptr;
-	P.bufBytes = 0;
-	VkBufferCreateInfo bci { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-	bci.size = bytes;
-	bci.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-	bool ok = v.vkCreateBuffer( v.dev, &bci, nullptr, &P.buf ) == VK_SUCCESS;
-	if ( ok ) {
-		VkMemoryRequirements br {};
-		v.vkGetBufferMemoryRequirements( v.dev, P.buf, &br );
-		VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-		ai.allocationSize = br.size;
-		ai.memoryTypeIndex = memType( br.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-		ok = ai.memoryTypeIndex != UINT32_MAX && v.vkAllocateMemory( v.dev, &ai, nullptr, &P.bufMem ) == VK_SUCCESS
-			&& v.vkBindBufferMemory( v.dev, P.buf, P.bufMem, 0 ) == VK_SUCCESS
-			&& v.vkMapMemory( v.dev, P.bufMem, 0, VK_WHOLE_SIZE, 0, &P.bufPtr ) == VK_SUCCESS;
-	}
-	if ( !ok || !P.bufPtr ) {
+	if ( !lightHostBuf( P.buf, P.bufMem, P.bufPtr, P.bufBytes, bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT ) ) {
 		why = "a light pass's storage buffer failed";
 		return false;
 	}
-	P.bufBytes = bytes;
 	return true;
 }
 
@@ -6683,7 +6727,7 @@ void lightDrop()
 {
 	Vk & v = vk();
 	Light & L = light();
-	bool any = L.made || L.dummy.img;
+	bool any = L.made || L.dummy.img || L.texelDummy;
 	for ( const LightPassState & P : L.p )
 		any = any || P.dpool || P.glDone || !P.img.empty();
 	if ( !any || !v.dev )
@@ -6701,6 +6745,12 @@ void lightDrop()
 		}
 		if ( P.buf )
 			v.vkDestroyBuffer( v.dev, P.buf, nullptr );
+		if ( P.uboMem ) {
+			v.vkUnmapMemory( v.dev, P.uboMem );
+			v.vkFreeMemory( v.dev, P.uboMem, nullptr );
+		}
+		if ( P.ubo )
+			v.vkDestroyBuffer( v.dev, P.ubo, nullptr );
 		if ( P.cmd )
 			v.vkFreeCommandBuffers( v.dev, v.pool, 1, &P.cmd );
 		if ( P.fence )
@@ -6709,6 +6759,14 @@ void lightDrop()
 			v.vkDestroyDescriptorPool( v.dev, P.dpool, nullptr );
 	}
 	lightImgDrop( L.dummy, glOk && L.dummyCtx == gl().ctx );
+	if ( L.texelDummyView && L.destroyBv )
+		L.destroyBv( v.dev, L.texelDummyView, nullptr );
+	if ( L.texelDummyMem ) {
+		v.vkUnmapMemory( v.dev, L.texelDummyMem );
+		v.vkFreeMemory( v.dev, L.texelDummyMem, nullptr );
+	}
+	if ( L.texelDummy )
+		v.vkDestroyBuffer( v.dev, L.texelDummy, nullptr );
 	for ( VkPipeline & p : L.pipe )
 		if ( p )
 			v.vkDestroyPipeline( v.dev, p, nullptr );
@@ -6772,6 +6830,17 @@ bool lightRun( const LightRun & t, std::string & why )
 				return refuse( "a dispatch's sampled image" );
 		if ( d.kernel == LightAoRaw && !v.float64 )
 			return refuse( "the device lacks shaderFloat64 (the AO raw kernel's doubles)" );
+		if ( d.kernel == LightGiHalf && d.t[0] < 0 )
+			return refuse( "the screen GI's dispatch has no g-buffer (t[0])" );
+	}
+	// lane VKFAR3: the screen GI reads the DDGI atlas in place (the cascades' buffer on this device, ddgiAtlasView)
+	VkBufferView atlas = VK_NULL_HANDLE;
+	if ( std::any_of( t.d.begin(), t.d.end(), []( const LightDispatch & d ) { return d.kernel == LightGiHalf; } ) ) {
+		if ( !t.ddgiKey )
+			return refuse( "the screen GI's dispatch without a DDGI atlas key" );
+		atlas = reinterpret_cast<VkBufferView>( std::uintptr_t( ddgiAtlasView( t.ddgiKey ) ) );
+		if ( !atlas )
+			return refuse( "no DDGI atlas on the present device under the key" );
 	}
 	// the last run is done before its sets, buffer, images and command buffer are touched again
 	if ( P.pending ) {
@@ -6834,18 +6903,38 @@ bool lightRun( const LightRun & t, std::string & why )
 	std::memset( P.bufPtr, 0, size_t( bytes ) );
 	if ( !t.buf.empty() )
 		std::memcpy( P.bufPtr, t.buf.data(), t.buf.size() );
+	// binding 31 (lane VKFAR3: GL's uniforms for the screen GI; 256 zero bytes otherwise)
+	const VkDeviceSize uboBytes = std::max<VkDeviceSize>( 256, VkDeviceSize( t.ubo.size() ) );
+	if ( !lightHostBuf( P.ubo, P.uboMem, P.uboPtr, P.uboBytes, uboBytes, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT ) )
+		return breakOff( "a light pass's uniform buffer failed" );
+	std::memset( P.uboPtr, 0, size_t( uboBytes ) );
+	if ( !t.ubo.empty() )
+		std::memcpy( P.uboPtr, t.ubo.data(), t.ubo.size() );
 	// one set a dispatch
 	const VkDescriptorBufferInfo sbi { P.buf, 0, VK_WHOLE_SIZE };
+	const VkDescriptorBufferInfo ubi { P.ubo, 0, VK_WHOLE_SIZE };
 	for ( size_t k = 0; k < t.d.size(); k++ ) {
 		const LightDispatch & d = t.d[k];
-		VkDescriptorImageInfo ii[10] = {};
-		VkWriteDescriptorSet wr[10] = {};
-		for ( std::uint32_t i = 0; i < 10; i++ ) {
+		const bool gi = d.kernel == LightGiHalf;
+		VkDescriptorImageInfo ii[kLightBindings] = {};
+		VkWriteDescriptorSet wr[kLightBindings] = {};
+		const VkBufferView texel = gi ? atlas : L.texelDummyView;
+		for ( std::uint32_t i = 0; i < kLightBindings; i++ ) {
 			wr[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 			wr[i].dstSet = P.set[k];
-			wr[i].dstBinding = i;
+			wr[i].dstBinding = i < 10 ? i : i == 10 ? kLightUbo : i == 11 ? kLightAtlas : kLightGbuf;
 			wr[i].descriptorCount = 1;
-			if ( i < 5 ) {
+			if ( i == 10 ) {
+				wr[i].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+				wr[i].pBufferInfo = &ubi;
+			} else if ( i == 11 ) {
+				wr[i].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
+				wr[i].pTexelBufferView = &texel;
+			} else if ( i == 12 ) {  // binding 46, the screen GI's g-buffer = its t[0]
+				ii[i] = { VK_NULL_HANDLE, gi ? P.img[size_t( d.t[0] )].view : L.dummy.view, VK_IMAGE_LAYOUT_GENERAL };
+				wr[i].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+				wr[i].pImageInfo = &ii[i];
+			} else if ( i < 5 ) {
 				ii[i] = { VK_NULL_HANDLE, d.t[i] >= 0 ? P.img[size_t( d.t[i] )].view : L.dummy.view, VK_IMAGE_LAYOUT_GENERAL };
 				wr[i].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 				wr[i].pImageInfo = &ii[i];
@@ -6863,7 +6952,7 @@ bool lightRun( const LightRun & t, std::string & why )
 				wr[i].pBufferInfo = &sbi;
 			}
 		}
-		v.vkUpdateDescriptorSets( v.dev, 10, wr, 0, nullptr );
+		v.vkUpdateDescriptorSets( v.dev, kLightBindings, wr, 0, nullptr );
 	}
 	P.d = t.d;
 	// GL's inputs copied -> the worker's dispatches -> GL copies the targets back into its own textures
@@ -6871,7 +6960,9 @@ bool lightRun( const LightRun & t, std::string & why )
 	std::vector<GLenum> lay( static_cast<size_t>( ni ), kLayoutGeneral );
 	for ( int i = 0; i < ni; i++ )
 		tex[size_t( i )] = P.img[size_t( i )].tex;
-	g.signalSemaphore( P.glDoneGl, 0, nullptr, GLuint( ni ), tex.data(), lay.data() );
+	const GLuint glBuf = atlas ? GLuint( t.ddgiGlBuf ) : 0u;  // the DDGI atlas GL wrote, ordered by the same semaphores
+	const GLuint nb = glBuf ? 1u : 0u;
+	g.signalSemaphore( P.glDoneGl, nb, nb ? &glBuf : nullptr, GLuint( ni ), tex.data(), lay.data() );
 	g.flush();
 	Worker & W = wk();
 	std::uint64_t want = 0;
@@ -6892,7 +6983,7 @@ bool lightRun( const LightRun & t, std::string & why )
 	}
 	if ( !ok )
 		return breakOff( w );  // nothing signals vkDone: GL does not wait it; GL draws its stages this frame
-	g.waitSemaphore( P.vkDoneGl, 0, nullptr, GLuint( ni ), tex.data(), lay.data() );
+	g.waitSemaphore( P.vkDoneGl, nb, nb ? &glBuf : nullptr, GLuint( ni ), tex.data(), lay.data() );
 	for ( int i = 0; i < ni; i++ ) {
 		const LightImage & x = t.img[size_t( i )];
 		if ( x.out )
@@ -8762,10 +8853,11 @@ void lightSay( int pass, bool wanted, const char * glWhy )
 {
 	if ( pass < 0 || pass >= LightPasses )
 		return;
-	static const char * const kName[LightPasses] = { "ao", "contact", "ssgi" };
+	static const char * const kName[LightPasses] = { "ao", "contact", "ssgi", "gihalf" };
 	static const char * const kWhat[LightPasses] = { "ao_vk: 4 mips, raw, across, fin, or aox_vk: a ported method's stages; gbuf on GL",
 		"contact_vk: the shadow lines",
-		"ssgi_vk: the cast" };
+		"ssgi_vk: the cast",
+		"gihalf_vk: the DDGI cascades' read in place; the volume mask on GL" };
 	static QString said[LightPasses];
 	static double at[LightPasses] = {};
 	const QString head = QStringLiteral( "vk %1: " ).arg( QLatin1String( kName[pass] ) );

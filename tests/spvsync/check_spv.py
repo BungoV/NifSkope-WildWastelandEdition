@@ -47,6 +47,9 @@ VKFRAME_LIGHT = {'ao_gbuf': ('ao_vk', 'AO_STAGE=5'), 'ao_mip': ('ao_vk', 'AO_STA
 	'ao_blur': ('ao_vk', 'AO_STAGE=3'), 'ao_blurf': ('ao_vk', 'AO_STAGE=4'), 'contact': ('contact_vk', ''), 'ssgi': ('ssgi_vk', ''),
 	'aox_z': ('aox_vk', 'AOX_KERNEL=1'), 'aox_xe': ('aox_vk', 'AOX_KERNEL=2'), 'aox_r8': ('aox_vk', 'AOX_KERNEL=3')}	# lane VKFAR3
 HLSL_SPECS += [('src/features/vkframe', 'light_' + k, 'vulkan1.2', 'vkframe_light_%s_spv' % k) for k in VKFRAME_LIGHT]
+# lane VKFAR3 (A1 b): the screen GI's DDGI read, its own line after the light loop (four defines, -O0)
+VKFRAME_GIHALF_ARGS = ['-O0', '-D', 'WW_CELL_FOGLEAK=1', '-D', 'WW_CELL_RTDDGI=1', '-D', 'WW_CELL_RTDDGI_CASCADES=1', '-D', 'WW_FRAME_UBO=1']
+HLSL_SPECS += [('src/features/vkframe', 'light_gihalf', 'vulkan1.2', 'vkframe_light_gihalf_spv')]
 # lane VKLIGHT2: the reflections, the script's `ssr <name> "<defines>"` lines (res/shaders/hlsl/vklight/ssr_vk.hlsl -DSSR_LIVE)
 VKFRAME_SSR = {'ssr_view_s1': '-DSSR_STAGE=1', 'ssr_view_s1w': '-DSSR_STAGE=1 -DF4FX_SSR_WATER_LOOK',
 	'ssr_view_s2': '-DSSR_STAGE=2', 'ssr_view_s2w': '-DSSR_STAGE=2 -DF4FX_SSR_WATER_LOOK',
@@ -202,6 +205,8 @@ def script_ok(tree):
 	lloop = dict((i.split(':')[0], (i.split(':')[1], i.split(':', 2)[2])) for i in m.group(1).split()) if m else {}
 	if lloop != VKFRAME_LIGHT:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its light loop (%s) is not this checker\'s light kernels' % ' '.join(sorted(lloop)))
+	if '"$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main ' + ' '.join(VKFRAME_GIHALF_ARGS) + ' -Fo "light_gihalf.spv" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its gihalf line is not this checker\'s')
 	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main -DSSR_LIVE $2 -Fo "$1.spv" ' not in vf:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its ssr() compile line changed')
 	rlines = dict(re.findall(r'^ssr ([a-z0-9_]+) "([^"]*)"$', vf, re.M))
@@ -387,6 +392,9 @@ def main(argv):
 			if lk in VKFRAME_LIGHT:
 				src = os.path.join(tree, 'res/shaders/hlsl/vklight', VKFRAME_LIGHT[lk][0] + '.hlsl')
 				hdefs = ['-O0'] + (['-D', VKFRAME_LIGHT[lk][1]] if VKFRAME_LIGHT[lk][1] else [])
+			if lk == 'gihalf':
+				src = os.path.join(tree, 'res/shaders/hlsl/vklight/gihalf_vk.hlsl')
+				hdefs = VKFRAME_GIHALF_ARGS
 			if k in VKFRAME_CSM:
 				src = os.path.join(tree, VKFRAME_CSM[k][0], VKFRAME_CSM[k][1] + '.hlsl')
 			if k in VKFRAME_SSR:

@@ -306,10 +306,11 @@ SkyStat takeSkyStat();
  * the worker records the dispatches (LightBindingsVk.hlsli's set, a 128-byte push block each), GL waits and copies the
  * `out` twins back into GL's textures, so every consumer reads what it read before. false: why; nothing changed (GL draws
  * its stages). Reds WW_VKVIEW_AO_RED / _CONTACT_RED / _SSGI_RED = 1 (or WW_VKVIEW off): GL. */
-enum LightPass { LightAo = 0, LightContact = 1, LightSsgi = 2, LightPasses = 3 };
+// LightGi (lane VKFAR3 A1 b): the screen GI's own run (after the volume mask, which stays GL); red WW_VKVIEW_GIHALF_RED=1
+enum LightPass { LightAo = 0, LightContact = 1, LightSsgi = 2, LightGi = 3, LightPasses = 4 };
 // LightAoxZ / Xe / R8 (lane VKFAR3): the ported AO methods' depth mips, XeGTAO's term + edges, the r8 stages (aox_vk.hlsl)
 enum LightKernel { LightAoGbuf = 0, LightAoMip, LightAoRaw, LightAoBlur, LightAoBlurF, LightContactK, LightSsgiK, LightAoxZ, LightAoxXe,
-	LightAoxR8, LightKernels };
+	LightAoxR8, LightGiHalf, LightKernels };	// LightGiHalf (VKFAR3 A1 b): the screen GI's DDGI read (gihalf_vk.hlsl)
 struct LightImage
 {
 	unsigned tex = 0;              //!< GL's texture (GL_TEXTURE_2D)
@@ -331,6 +332,12 @@ struct LightRun
 	std::vector<LightImage> img;
 	std::vector<LightDispatch> d;
 	std::vector<std::uint8_t> buf; //!< binding 9 (the contact bands); empty: 256 zero bytes
+	// lane VKFAR3 (A1 b), LightGiHalf: binding 31 = GL's uniforms (kT_gihalf), 44 = the DDGI atlas found under ddgiKey
+	// (ddgiAtlasView; none: refused), 46 = the first dispatch's t[0] (the g-buffer). ddgiGlBuf (GL's name of that buffer)
+	// joins GL's signal / wait lists
+	std::vector<std::uint8_t> ubo; //!< empty: 256 zero bytes
+	const void * ddgiKey = nullptr;
+	unsigned ddgiGlBuf = 0;
 };
 //! GL current, its inputs drawn: the dispatches run on Vulkan and the outputs are back in GL's textures
 bool lightRun( const LightRun & t, std::string & why );
@@ -454,6 +461,15 @@ inline constexpr FxField kT_volsky[] = {
 	{ "atHazeSpec", 832, 3, 1, 0, 0 }, { "atMsOld", 844, 1, 1, 0, 0 },
 };
 inline constexpr int kT_volskyBytes = 848;
+// kT_gihalf (lane VKFAR3): the 13 fields gihalf_vk.hlsl reads of its 176 (4112 bytes; spirv-cross --reflect of the
+// shipped SPIR-V, reflect_table.py, cut to the used ones by spirv-cross --hlsl)
+inline constexpr FxField kT_gihalf[] = {
+	{ "cellOn", 1248, 1, 1, 1, 0 }, { "cellRow", 1264, 4, 3, 0, 0 }, { "cellGiLoop8", 3604, 1, 1, 1, 0 },
+	{ "cellDdgiOn", 3772, 1, 1, 1, 0 }, { "cellDdgiCount", 3776, 1, 1, 1, 0 }, { "cellDdgiCOrigin", 3792, 4, 4, 0, 0 },
+	{ "cellDdgiCStep", 3856, 4, 4, 0, 0 }, { "cellDdgiCDims", 3920, 4, 4, 1, 0 }, { "cellDdgiCBase", 3984, 1, 4, 1, 0 },
+	{ "cellDdgiRed", 4048, 1, 1, 1, 0 }, { "giFull", 4084, 2, 1, 1, 0 }, { "giProj", 4096, 2, 1, 0, 0 }, { "giStep", 4104, 1, 1, 1, 0 },
+};
+inline constexpr int kT_gihalfBytes = 4112;
 // kT_march: 56 fields, 1152 bytes (spirv-cross --reflect of the shipped SPIR-V; tools: notes/vkair1/tools/reflect_table.py)
 inline constexpr FxField kT_march[] = {
 	{ "cvCal", 0, 1, 34, 0, 0 }, { "cvBands.baseKm", 544, 3, 1, 0, 0 }, { "cvBands.topKm", 560, 3, 1, 0, 0 },

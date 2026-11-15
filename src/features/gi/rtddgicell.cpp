@@ -3078,6 +3078,21 @@ bool rtddgiCellEmissiveTraced( Scene * scene )
 	return rtddgiEmissiveRed() != 1 && rtddgiCellReadUp( scene );
 }
 
+const void * rtddgiCellVkAtlas( Scene * scene, unsigned * glBuf )
+{
+	if ( glBuf )
+		*glBuf = 0;
+	Renderer * r = scene ? scene->renderer : nullptr;
+	if ( !r || !rtddgiCellShaderDefine() || cell().nif != scene->nifModel )
+		return nullptr;
+	Combined & K = combined();
+	if ( !K.shared || K.owner != r || !K.tex || K.count <= 0 || !cascCell( 0 ).live )
+		return nullptr;
+	if ( glBuf )
+		*glBuf = K.buf;
+	return &K;
+}
+
 // lane INTGI1 (SSGIHO-INT): the densest read volume's smallest spacing (cascade 0 under the cascades), 0 when none is up
 float rtddgiCellReadSpacing( Scene * scene )
 {

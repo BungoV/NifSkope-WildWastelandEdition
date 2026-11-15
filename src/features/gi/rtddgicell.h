@@ -78,6 +78,9 @@ bool rtddgiCellReadUp( Scene * scene );
 bool rtddgiCellEmissiveTraced( Scene * scene );
 //! lane INTGI1: the read volume's smallest probe spacing (game units; cascade 0 under the cascades), 0 when none is up
 float rtddgiCellReadSpacing( Scene * scene );
+//! lane VKFAR3 (A1 b): the key of the cascades' buffer on the present device (WwVkPresent::ddgiAtlasView) while the cascades'
+//! read is up for this document and that buffer is shared, with GL's name of it in *glBuf; else nullptr
+const void * rtddgiCellVkAtlas( Scene * scene, unsigned * glBuf );
 //! the debug view over the frame (glview.cpp, beside the PRTP views): since RTXFIX1 only with WW_CELL_RTDDGI_VIEW_FOG=0,
 //! or on a frame the view did not draw inside (no linear frame)
 void rtddgiCellViewDraw( Scene * scene, const Transform & viewTrans );
