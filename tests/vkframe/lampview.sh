@@ -16,6 +16,15 @@
 #   unrelated shared target is made between the frames (the framebuffer cache key moves; frame 2 must stay EXACT).
 # Reds (each must FAIL, with its differing count printed): face order (face ^ 1's clip), slot offset (layer + 6),
 # radius (radius * 1.01), clear skipped (no op clears), mover cleared (a LOAD op set to clear).
+# Alpha case (lane VKLAMP2, bar stated before its first run): frame 1's casters with 4 of each slot's random casters
+# alpha-tested (cell_shadowdepth shAlphaTest 1, a checker BaseMap with 0 / 1 alpha, threshold 0.5, location 7 UVs).
+# Test arm = the app's route: lampRun clears and draws only the solid casters, then GL draws the alpha-tested ones on the
+# same layers with NO clear, LEQUAL (cone-skipped faces get none). Reference = GL drawing every caster in order with clears.
+# - Per slot and face the same bar as above (EXACT, else BOUND; CLEAR faces all 0xFFFF on both sides).
+# - The alpha casters must win > 0 texels against GL's solid-only picture, and the alpha test must discard: the
+#   test-off picture must differ from the reference in > 0 texels. Either at 0 FAILs (the case proves nothing).
+# Alpha reds (each must FAIL): alpha clear (GL clears the layer before its alpha draw), alpha depth func (GL_ALWAYS, not
+# LEQUAL), alpha test off (shAlphaTest 0 on the alpha draw).
 # Fence red: the exe re-run with WW_VKFENCE_RED=lamp must end `LAMPVIEW GATE FAILED`.
 # Last line: `LAMPVIEW GATE OK` or `LAMPVIEW GATE FAILED`.
 set -u
