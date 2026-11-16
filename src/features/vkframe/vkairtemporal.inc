@@ -24,7 +24,7 @@ static_assert( kHostBytes % 256 == 0, "a slice's host bytes keep the uniform off
 
 struct At
 {
-	bool made = false, broken = false;
+	bool made = false, broken = false, isFar = false;  // lane VKAIR20: isFar the far grid's instance (one attachment, no history)
 	std::string brokenWhy;
 	farlod::WaterDraw D[2];  // twinStatic's layout / modules / binds (the air inject's twins), the blocks' exported copy
 	VkRenderPass pass[2] = { VK_NULL_HANDLE, VK_NULL_HANDLE };  // [0] strata 4, [1] strata 6
@@ -41,21 +41,34 @@ struct At
 	CsmBuf quad;
 	// the framebuffers' cache: a slice's views of the two shared targets
 	std::uintptr_t fbInject = 0, fbOut = 0;
-	int fbStrata = 0, fbSlices = 0, fbCols = 0, fbRows = 0, fbRot = -1;
+	int fbStrata = 0, fbSlices = 0, fbCols = 0, fbRows = 0, fbRot = -1, fbBase = -1;
 	std::uint64_t fbGen = 0;
 	std::vector<VkImageView> views;
 	std::vector<VkFramebuffer> fbs;
 	// this crossing
-	int cur = 0, curS = 0, cols = 0, rows = 0, slices = 0;
+	int cur = 0, curS = 0, cols = 0, rows = 0, slices = 0, k0 = 0, k1 = 0;  // draws k0..k1 (lane VKAIR20)
 	char keys[2][128] = {};  // the inputs' twin keys (slot + binding)
 	WaterRun run;
 	AirTemporalStat st;
 };
 
+// lane VKAIR20: two instances, 0 the temporal reader, 1 the far grid's stage 1; atCur() is the one GL's thread runs (set
+// before any helper, kept while the worker draws: GL's thread waits it)
+int & atCur()
+{
+	static int c = 0;
+	return c;
+}
+
+At & atS( int i )
+{
+	static At s[2];
+	return s[i];
+}
+
 At & atS()
 {
-	static At s;
-	return s;
+	return atS( atCur() );
 }
 
 bool atStatic( std::string & why )
@@ -64,8 +77,8 @@ bool atStatic( std::string & why )
 	At & S = atS();
 	if ( S.made )
 		return true;
-	for ( int i = 0; i < 2; i++ ) {
-		const std::uint32_t n = 1 + ( i ? 6 : 4 );
+	for ( int i = 0; i < ( S.isFar ? 1 : 2 ); i++ ) {
+		const std::uint32_t n = S.isFar ? 1 : 1 + ( i ? 6 : 4 );  // lane VKAIR20: the far grid's one attachment
 		std::vector<VkAttachmentDescription> at( n );
 		std::vector<VkAttachmentReference> cr( n );
 		for ( std::uint32_t a = 0; a < n; a++ ) {
@@ -155,7 +168,7 @@ bool atPipe( int k, int si, std::string & why )
 	for ( VkPipelineColorBlendAttachmentState & c : cb )
 		c.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 	VkPipelineColorBlendStateCreateInfo cbs { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
-	cbs.attachmentCount = 1 + ( si ? 6 : 4 );
+	cbs.attachmentCount = S.isFar ? 1 : 1 + ( si ? 6 : 4 );
 	cbs.pAttachments = cb;
 	const VkDynamicState dyn[2] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
 	VkPipelineDynamicStateCreateInfo dy { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
@@ -258,7 +271,7 @@ void atFbFree()
 	S.fbs.clear();
 	S.views.clear();
 	S.fbInject = S.fbOut = 0;
-	S.fbRot = -1;
+	S.fbRot = S.fbBase = -1;
 }
 
 /* a slice's framebuffer: inject layer k at 0, out history layer q x slices + k at 1 + p, q = p (red 2: (p + 1) mod strata);
@@ -268,16 +281,17 @@ bool atFbs( const AirTemporalRun & r, const Shared & inj, const Shared & out, st
 	Vk & v = vk();
 	At & S = atS();
 	const int rot = ( r.red & 2 ) ? 1 : 0;
+	const int base = S.isFar && !( r.red & 4 ) ? r.base : 0;  // lane VKAIR20: the far grid's layers base + k (red 4: k)
 	if ( !S.fbs.empty() && S.fbInject == r.injectKey && S.fbOut == r.histOutKey && S.fbStrata == r.strata && S.fbSlices == r.slices
-		&& S.fbCols == r.cols && S.fbRows == r.rows && S.fbRot == rot && S.fbGen == sharedGen() )
+		&& S.fbCols == r.cols && S.fbRows == r.rows && S.fbRot == rot && S.fbBase == base && S.fbGen == sharedGen() )
 		return true;
 	atFbFree();
-	const int ns = r.strata;
+	const int ns = S.isFar ? 0 : r.strata;
 	S.views.assign( std::size_t( r.slices ) * std::size_t( 1 + ns ), VK_NULL_HANDLE );
 	S.fbs.assign( std::size_t( r.slices ), VK_NULL_HANDLE );
 	for ( int k = 0; k < r.slices; k++ ) {
 		VkImageView * a = &S.views[std::size_t( k ) * std::size_t( 1 + ns )];
-		a[0] = sliceView( inj, k, why );
+		a[0] = sliceView( inj, base + k, why );
 		if ( !a[0] )
 			return atFbFree(), why = "the inject: " + why, false;
 		for ( int p = 0; p < ns; p++ ) {
@@ -303,15 +317,15 @@ bool atFbs( const AirTemporalRun & r, const Shared & inj, const Shared & out, st
 	S.fbCols = r.cols;
 	S.fbRows = r.rows;
 	S.fbRot = rot;
+	S.fbBase = base;
 	S.fbGen = sharedGen();
 	return true;
 }
 
 // the worker: a render pass and a draw a slice (its own set), GL's signal waited, signalled back, the fence
-bool atWork( std::string & why )
+bool atWorkOn( At & S, std::string & why )
 {
 	Vk & v = vk();
-	At & S = atS();
 	farlod::WaterDraw & D = S.D[S.cur];
 	v.vkResetFences( v.dev, 1, &S.fence );
 	v.vkResetCommandBuffer( S.cmd, 0 );
@@ -326,7 +340,7 @@ bool atWork( std::string & why )
 	const VkRect2D sc { { 0, 0 }, { std::uint32_t( S.cols ), std::uint32_t( S.rows ) } };
 	v.vkCmdSetViewport( S.cmd, 0, 1, &vp );
 	v.vkCmdSetScissor( S.cmd, 0, 1, &sc );
-	for ( int k = 0; k < S.slices; k++ ) {
+	for ( int k = S.k0; k < S.k1; k++ ) {  // lane VKAIR20: the far grid's run (the reader: 0..slices)
 		VkRenderPassBeginInfo rbi { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
 		rbi.renderPass = S.pass[S.curS];
 		rbi.framebuffer = S.fbs[std::size_t( k )];
@@ -357,6 +371,17 @@ bool atWork( std::string & why )
 	return true;
 }
 
+bool atWork( std::string & why )
+{
+	return atWorkOn( atS( 0 ), why );
+}
+
+// lane VKAIR20: the far grid's crossing
+bool afWork( std::string & why )
+{
+	return atWorkOn( atS( 1 ), why );
+}
+
 // a GL buffer texture that is the present device's texel buffer (farTexelBuffer: GL writes it, Vulkan reads it in place)
 const FcBuf * texelOnDevice( GLuint tex )
 {
@@ -382,15 +407,17 @@ std::string airTemporalRefusal()
 	return std::string();
 }
 
-WaterRun & airTemporalScratch()
+WaterRun & airTemporalScratch( bool isFar )
 {
-	return airtemporal::atS().run;
+	return airtemporal::atS( isFar ? 1 : 0 ).run;
 }
 
 bool airTemporalRunState( const AirTemporalRun & r, WaterRun & s, std::string & why )
 {
 	using namespace airtemporal;
+	atCur() = r.far ? 1 : 0;  // lane VKAIR20: the far grid's own instance
 	At & S = atS();
+	S.isFar = r.far;
 	Gl & g = gl();
 	Vk & v = vk();
 	Fx & F = fx();
@@ -403,7 +430,7 @@ bool airTemporalRunState( const AirTemporalRun & r, WaterRun & s, std::string & 
 	};
 	auto breakOff = [&]( const std::string & w ) {
 		S.broken = true;
-		S.brokenWhy = "the air temporal reader on Vulkan broke: " + w;
+		S.brokenWhy = std::string( r.far ? "the far air inject" : "the air temporal reader" ) + " on Vulkan broke: " + w;
 		return refuse( S.brokenWhy );
 	};
 	if ( const std::string no = airTemporalRefusal(); !no.empty() )
@@ -413,25 +440,28 @@ bool airTemporalRunState( const AirTemporalRun & r, WaterRun & s, std::string & 
 	if ( r.wwDefs != airTemporalKey( r.rt ) )
 		return refuse( "GL's air program has the key \"" + r.wwDefs + "\", the " + ( r.rt ? "RT GI" : "default" ) + " twin's key is \""
 			+ airTemporalKey( r.rt ) + "\"" );
-	if ( r.strata != 4 && r.strata != 6 )
+	if ( !r.far && r.strata != 4 && r.strata != 6 )
 		return refuse( "strata " + std::to_string( r.strata ) + " (the twin's targets are 4 or 6)" );
 	if ( r.cols <= 0 || r.rows <= 0 || r.slices <= 0 )
 		return refuse( "an empty grid" );
+	if ( r.far && ( r.base < 0 || r.k0 < 0 || r.k0 > r.k1 || r.k1 > r.slices ) )  // lane VKAIR20
+		return refuse( "the far run " + std::to_string( r.k0 ) + ".." + std::to_string( r.k1 ) + " at base " + std::to_string( r.base )
+			+ " is outside the grid" );
 	// the targets: the inject (3D, at least the grid) and the out history (3D, the grid x strata exactly), both slice-viewable
 	const Shared * inj = sharedFind( r.injectKey );
-	const Shared * out = sharedFind( r.histOutKey );
+	const Shared * out = r.far ? nullptr : sharedFind( r.histOutKey );  // lane VKAIR20: the far grid has no history
 	if ( !inj || !inj->img || !inj->tex || inj->type != 1 || inj->fmt != VK_FORMAT_R32G32B32A32_SFLOAT || !inj->slices )
 		return refuse( "the inject is not a shared RGBA32F 3D target with slice views" );
-	if ( !out || !out->img || !out->tex || out->type != 1 || out->fmt != VK_FORMAT_R32G32B32A32_SFLOAT || !out->slices )
+	if ( !r.far && ( !out || !out->img || !out->tex || out->type != 1 || out->fmt != VK_FORMAT_R32G32B32A32_SFLOAT || !out->slices ) )
 		return refuse( "the out history is not a shared RGBA32F 3D target with slice views" );
-	if ( inj->w < r.cols || inj->h < r.rows || inj->d < r.slices )
+	if ( inj->w < r.cols || inj->h < r.rows || inj->d < ( r.far ? r.base : 0 ) + r.slices )
 		return refuse( "the inject is " + std::to_string( inj->w ) + " x " + std::to_string( inj->h ) + " x " + std::to_string( inj->d )
 			+ ", smaller than the grid" );
-	if ( out->w != r.cols || out->h != r.rows || out->d != r.strata * r.slices )
+	if ( !r.far && ( out->w != r.cols || out->h != r.rows || out->d != r.strata * r.slices ) )
 		return refuse( "the out history is " + std::to_string( out->w ) + " x " + std::to_string( out->h ) + " x " + std::to_string( out->d )
 			+ ", the grid x strata is " + std::to_string( r.cols ) + " x " + std::to_string( r.rows ) + " x "
 			+ std::to_string( r.strata * r.slices ) );
-	const GLuint injTex = inj->tex, outTex = out->tex;
+	const GLuint injTex = inj->tex, outTex = out ? out->tex : 0;
 	// the inputs refused by name, before any device work
 	std::vector<std::pair<GLuint, WwVkPresent::RtBuf>> rtIn;  // lane VKAIR18: the RT GI inputs found by name, read in place below
 	const WaterSlot * hist = nullptr;
@@ -454,12 +484,12 @@ bool airTemporalRunState( const AirTemporalRun & r, WaterRun & s, std::string & 
 		if ( c.name == "volLampAtlas" && !( c.kind == 5 ? texelOnDevice( c.tex ) != nullptr : farSharedOf( c.tex ) != 0 ) )
 			return refuse( "volLampAtlas: bound and not shared" );
 	}
-	if ( !hist || !hist->tex )
+	if ( !r.far && ( !hist || !hist->tex ) )
 		return refuse( "volHist: nothing bound on its unit" );
-	const std::uintptr_t histKey = farSharedOf( hist->tex );
+	const std::uintptr_t histKey = r.far ? 0 : farSharedOf( hist->tex );  // lane VKAIR20: the far grid reads no history (volTemporal 0)
 	if ( histKey && histKey == r.histOutKey )
 		return refuse( "volHist: feedback (the out history is the history in)" );
-	if ( !histKey )
+	if ( !r.far && !histKey )
 		return refuse( "volHist: the history in is not a shared target (never copied a run)" );
 	const FxField * tab = r.rt ? kT_airinjectRtPs : kT_airinjectPs;
 	const int nTab = r.rt ? int( sizeof( kT_airinjectRtPs ) / sizeof( kT_airinjectRtPs[0] ) ) : int( sizeof( kT_airinjectPs ) / sizeof( kT_airinjectPs[0] ) );
@@ -477,7 +507,7 @@ bool airTemporalRunState( const AirTemporalRun & r, WaterRun & s, std::string & 
 	if ( std::string fw; !fenceDone( S.fence, S.pending, "airtemporal", fw ) )
 		return refuse( fw );
 	S.pending = false;
-	if ( !atFbs( r, *inj, *out, w ) )
+	if ( !atFbs( r, *inj, out ? *out : *inj, w ) )
 		return refuse( w );
 	// GL's blocks into the exported copy (airinject's layout); an unbound one reads slice 0's zeros
 	const WaterUbo * ubos[2] = { &s.global, &s.shadow };
@@ -507,7 +537,9 @@ bool airTemporalRunState( const AirTemporalRun & r, WaterRun & s, std::string & 
 		}
 	}
 	// the inputs: shared targets and the present device's texel buffers in place, others one copy a run, unbound ones zero
-	std::vector<GLuint> texNames { injTex, outTex };
+	std::vector<GLuint> texNames { injTex };
+	if ( outTex )
+		texNames.push_back( outTex );
 	std::vector<GLuint> bufNames { D.geo.gl };
 	const std::size_t nb = D.binds.size();
 	std::vector<VkDescriptorImageInfo> ii( nb );
@@ -654,6 +686,8 @@ bool airTemporalRunState( const AirTemporalRun & r, WaterRun & s, std::string & 
 	S.cols = r.cols;
 	S.rows = r.rows;
 	S.slices = r.slices;
+	S.k0 = r.far && !( r.red & 8 ) ? r.k0 : 0;  // lane VKAIR20: red 8 the run's bounds ignored
+	S.k1 = r.far && !( r.red & 8 ) ? r.k1 : r.slices;
 	// GL's work so far signalled (the targets, the inputs, the copies; each name once) -> the worker's job -> GL waits
 	std::sort( texNames.begin(), texNames.end() );
 	texNames.erase( std::unique( texNames.begin(), texNames.end() ), texNames.end() );
@@ -670,7 +704,7 @@ bool airTemporalRunState( const AirTemporalRun & r, WaterRun & s, std::string & 
 	}
 	Work j;
 	j.k = -1;
-	j.fn = atWork;
+	j.fn = r.far ? afWork : atWork;
 	hand( j );
 	bool ok = false;
 	{
@@ -685,7 +719,7 @@ bool airTemporalRunState( const AirTemporalRun & r, WaterRun & s, std::string & 
 	S.pending = true;
 	const double ms = nowMs() - t0;
 	S.st.runs++;
-	S.st.draws += r.slices;
+	S.st.draws += S.k1 - S.k0;
 	S.st.copies += copies;
 	S.st.bufCopies += bufCopies;
 	S.st.cpuMs += ms;
@@ -695,14 +729,13 @@ bool airTemporalRunState( const AirTemporalRun & r, WaterRun & s, std::string & 
 
 void airTemporalOnGl( const char * why )
 {
-	airtemporal::At & S = airtemporal::atS();
+	airtemporal::At & S = airtemporal::atS( 0 );
 	S.st.gl++;
 	S.st.glWhy = why ? why : "";
 }
 
-AirTemporalStat takeAirTemporalStat()
+static AirTemporalStat atTake( airtemporal::At & S )
 {
-	airtemporal::At & S = airtemporal::atS();
 	AirTemporalStat s = S.st;
 	if ( S.broken && s.failWhy.empty() )
 		s.failWhy = S.brokenWhy;
@@ -712,5 +745,23 @@ AirTemporalStat takeAirTemporalStat()
 	S.st.pipelines = pipes;
 	S.st.buildMs = build;
 	return s;
+}
+
+AirTemporalStat takeAirTemporalStat()
+{
+	return atTake( airtemporal::atS( 0 ) );
+}
+
+// lane VKAIR20: the far grid's stat and GL fallback, apart from the reader's (its line and arms stay as they were)
+AirTemporalStat takeAirFarStat()
+{
+	return atTake( airtemporal::atS( 1 ) );
+}
+
+void airFarOnGl( const char * why )
+{
+	airtemporal::At & S = airtemporal::atS( 1 );
+	S.st.gl++;
+	S.st.glWhy = why ? why : "";
 }
 }  // namespace WwVkPresent

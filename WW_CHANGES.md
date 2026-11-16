@@ -1,3 +1,15 @@
+## VKAIR19 + VKAIR20 (2026-11-16): the far air grid's inject runs on Vulkan
+
+Changed, not built, not checked in the app. Offline: tests/vkframe/airtemporalview.sh (GATE OK, 79 of 79 reds fired; the
+near arms print the same lines as before), tests/vkframe/airlampview.sh, tests/vkframe/rtbufview.sh and SPVSYNC pass.
+- With the view on Vulkan, the far air grid's stage 1 (the layers past the near grid, a run of them a frame while the
+  view holds still) is drawn on the present device in one crossing, with the same twins as the near grid's stage 1.
+  If the route refuses, GL draws the layers as before and the reason shows in a new `vk airfar:` log line.
+  Red WW_VKVIEW_AIRFAR_RED=1 keeps GL.
+- The gate gained far arms (default and all-on, whole grid and a spread run) with reds for the layer, the base, the run's
+  bounds, the key, feedback and the RT GI inputs. Not covered: the far cascades, the terrain shadow map and the clouds
+  (the gate binds them empty).
+
 ## VKAIR18 (2026-11-16): the air's lamp and temporal stages read the RT GI inputs on Vulkan (all-on)
 
 Changed, not built, not checked in the app. Offline: tests/vkframe/airlampview.sh (GATE OK, 59 of 59 reds fired),

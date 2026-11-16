@@ -1899,6 +1899,49 @@ static void vaAtSayLine( bool wanted )
 	qInfo().noquote() << line;
 }
 
+/* lane VKAIR20: the `vk airfar:` line (one a 5 s window, or when it changes off Vulkan): runs = the far grid's stage-1 runs
+ * with stage 1's inputs shared, drawn = by the twin (the run's layers, one crossing), gl = refused to GL (glWhy the last),
+ * copies / bufCopies = inputs copied (0 when every input is shared), ms = the drawing thread's mean a run; RED when
+ * WW_VKVIEW_AIRFAR_RED=1 keeps GL */
+static VaAiSay & vaAfSay()
+{
+	static VaAiSay s;
+	return s;
+}
+
+static void vaAfSayLine( bool wanted )
+{
+	VaAiSay & A = vaAfSay();
+	const bool red = qEnvironmentVariableIntValue( "WW_VKVIEW_AIRFAR_RED" ) == 1;
+	if ( !wanted ) {
+		const QString line = QStringLiteral( "vk airfar: on GL (%1)%2" )
+			.arg( red ? QStringLiteral( "red" ) : QStringLiteral( "stage 1's inputs not shared" ) )
+			.arg( red ? QStringLiteral( " [RED WW_VKVIEW_AIRFAR_RED=1]" ) : QString() );
+		if ( line != A.said ) {
+			A.said = line;
+			qInfo().noquote() << line;
+		}
+		A.runs = A.drawn = 0;
+		return;
+	}
+	static QElapsedTimer clock;
+	if ( !clock.isValid() )
+		clock.start();
+	const double now = double( clock.elapsed() );
+	if ( now - A.at < 5000.0 && !A.said.isEmpty() && !A.said.contains( QStringLiteral( "on GL (" ) ) )
+		return;
+	A.at = now;
+	const WwVkPresent::AirTemporalStat st = WwVkPresent::takeAirFarStat();
+	QString line = QStringLiteral( "vk airfar: runs=%1 drawn=%2 gl=%3 layers=%4 copies=%5 bufCopies=%6 ms=%7" )
+		.arg( A.runs ).arg( A.drawn ).arg( st.gl ).arg( st.draws ).arg( st.copies ).arg( st.bufCopies )
+		.arg( st.runs > 0 ? st.cpuMs / st.runs : 0.0, 0, 'f', 3 );
+	if ( !st.glWhy.empty() )
+		line += QStringLiteral( " glWhy=%1" ).arg( QString::fromStdString( st.glWhy ) );
+	A.said = line;
+	A.runs = A.drawn = 0;
+	qInfo().noquote() << line;
+}
+
 /* lane VKAIR16: the `vk airlamp:` line (one a 5 s window, or when it changes off Vulkan): runs = stage 4 walks with its
  * inputs shared, drawn = by the twin (64 slices, two outs, one crossing), gl = refused to GL (glWhy the last), copies /
  * bufCopies = inputs copied (0 / the light list when every image is shared), ms = the drawing thread's mean a run; RED when
@@ -2423,6 +2466,9 @@ static void vaPassInner( Scene * scene, bool run )
 	 * are shared targets while its reader runs (vaStage4Reader; red WW_VKVIEW_AIRLAMP_RED keeps GL and GL's own inputs); the
 	 * lamp volume stage 1 reads (lvNow) rides s1Share */
 	const bool s4Share = vaStage4Reader() && s1Share && WwVkPresent::shareWanted( "WW_VKVIEW_AIRLAMP_RED" );
+	/* lane VKAIR20: the far grid's stage 1 on the present device (vkairtemporal.inc, AirTemporalRun::far) while stage 1's
+	 * inputs are shared (s1Share); red WW_VKVIEW_AIRFAR_RED=1 keeps GL's loop */
+	const bool afShare = s1Share && WwVkPresent::shareWanted( "WW_VKVIEW_AIRFAR_RED" );
 	if ( s1Share && temporal ) {
 		const VaShareSpec hs { 1, GL_RGBA32F, GL_RGBA, GL_FLOAT, cols, rows, strata * kSlices, true, false };
 		int made = 0;
@@ -3531,7 +3577,34 @@ static void vaPassInner( Scene * scene, bool run )
 				fn->glActiveTexture( GLenum( GL_TEXTURE0 + kInjectUnit ) );
 				fn->glBindTexture( GL_TEXTURE_3D, stage == 2 ? g.inject : 0 );
 				const int k0 = stage == 1 ? farShare.inj0 : farShare.sum ? 0 : fp.slices, k1 = stage == 1 ? farShare.inj1 : fp.slices;	// AIRPERF1 A4
-				for ( int k = k0; k < k1; k++ ) {
+				/* lane VKAIR20: stage 1's run of layers on the present device (GL's program, uniforms and units as set above, one
+				 * crossing); a refusal (named in the vk airfar line) draws GL's loop; an empty run (the sum frame) asks nothing */
+				bool afVk = false;
+				if ( stage == 1 && afShare && k1 > k0 ) {
+					std::string why;
+					if ( !fogVk )
+						why = "the inject or the integrated volume is not a shared target";
+					else {
+						WwVkPresent::AirTemporalRun run;
+						run.prog = prog->id;
+						run.wwDefs = prog->wwDefs;
+						run.rt = prog->wwDefs.find( "WW_CELL_RTDDGI" ) != std::string::npos;
+						run.cols = fp.cols;
+						run.rows = fp.rows;
+						run.slices = fp.slices;
+						run.injectKey = injectKey;
+						run.far = true;
+						run.base = kSlices;
+						run.k0 = k0;
+						run.k1 = k1;
+						afVk = WwVkPresent::airTemporalRun( run, *fn, why );
+					}
+					if ( !afVk )
+						WwVkPresent::airFarOnGl( why.c_str() );
+					vaAfSay().runs++;
+					vaAfSay().drawn += afVk ? 1 : 0;
+				}
+				for ( int k = k0; k < k1 && !afVk; k++ ) {
 					fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, stage == 1 ? g.inject : g.integ, 0, kSlices + k );
 					if ( k == k0 && !fbComplete( stage == 1 ? 5 : 6 ) ) {
 						farOk = false;
@@ -3570,6 +3643,7 @@ static void vaPassInner( Scene * scene, bool run )
 	WwVkPresent::fogSay( fogShare, "red WW_VKVIEW_FOG_RED=1 or WW_VKVIEW_AIR_RED=1, or the view not on Vulkan" );	// lane VKFAR2
 	vaAiSayLine( aiShare );	// lane VKAIR5
 	vaAtSayLine( s1Share );	// lane VKAIR14
+	vaAfSayLine( afShare );	// lane VKAIR20
 	vaAlSayLine( s4Share );	// lane VKAIR16
 	PassTime::subBegin( PassTime::AirPost );
 	// the numbers the dump echoes, read before the program stops

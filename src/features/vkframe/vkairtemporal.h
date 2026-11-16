@@ -16,6 +16,18 @@
 
 #include "features/vkframe/vkairinject.h"
 
+/* lane VKAIR20: the far grid's stage 1 rides the same route (AirTemporalRun::far, airFarOnGl, takeAirFarStat; gate: the far
+ * arms of tests/vkframe/airtemporalview.cpp). windef.h's empty `far` macro would eat the field's name: undefined here, FAR
+ * kept meaning nothing */
+#define WW_VK_AIRFAR 1
+#ifdef far
+#undef far
+#ifdef FAR
+#undef FAR
+#define FAR
+#endif
+#endif
+
 namespace WwVkPresent
 {
 /*! the pass: GL's program (in use, its uniforms set, stage 1's inputs on their units), its pixel stage's loader defines, the
@@ -29,6 +41,11 @@ struct AirTemporalRun
 	int cols = 0, rows = 0, slices = 0, strata = 0;
 	std::uintptr_t injectKey = 0, histOutKey = 0;
 	int red = 0;
+	/* lane VKAIR20: the far grid's stage 1 (cellvolair.cpp vaPassInner's far loop): no history (strata 0, histOutKey 0), one
+	 * attachment; draw k in [k0, k1) of slices writes the inject's layer base + k with volLayer k. Reds: 1 as above, 4 the
+	 * base dropped (layers k), 8 the run's bounds ignored (0..slices) */
+	bool far = false;
+	int base = 0, k0 = 0, k1 = 0;
 };
 
 struct AirTemporalStat
@@ -50,13 +67,16 @@ bool airTemporalRunState( const AirTemporalRun & r, WaterRun & s, std::string & 
 std::string airTemporalRefusal();
 void airTemporalOnGl( const char * why );
 AirTemporalStat takeAirTemporalStat();
-//! the route's WaterRun, in its own state; GL's thread only
-WaterRun & airTemporalScratch();
+//! the route's WaterRun, in its own state (the reader's or the far grid's); GL's thread only
+WaterRun & airTemporalScratch( bool isFar = false );
+//! lane VKAIR20: the far grid's GL fallback (its why) and stat, apart from the reader's
+void airFarOnGl( const char * why );
+AirTemporalStat takeAirFarStat();
 
 //! GL current, r.prog in use with its uniforms and stage 1's inputs bound: GL's side read, then the run
 template <class GL> bool airTemporalRun( const AirTemporalRun & r, GL & fn, std::string & why )
 {
-	WaterRun & s = airTemporalScratch();
+	WaterRun & s = airTemporalScratch( r.far );
 	s = WaterRun();
 	if ( r.rt )
 		twinStateOf( &fn, r.prog, s, kT_airinjectRtPs, int( sizeof( kT_airinjectRtPs ) / sizeof( kT_airinjectRtPs[0] ) ), kT_airinjectRtPsBytes );
