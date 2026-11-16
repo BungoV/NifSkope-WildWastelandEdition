@@ -105,10 +105,10 @@ src/features/post/gametaa.cpp|taaResolveImpl|drawShape|4	other		post / bloom / T
 src/features/post/gametaa.cpp|taaResolveImpl|drawShape|5	other		post / bloom / TAA resolve / lens flare: screen passes
 src/features/post/gametaa.cpp|taaResolveImpl|drawShape|6	other		post / bloom / TAA resolve / lens flare: screen passes
 src/features/post/taainputs.cpp|wwTaaInputsPass|drawShape|1	other		TAA inputs: the camera-motion screen quad (a screen pass, not an object)
-src/features/post/taainputs.cpp|wwTaaInputsPass|drawShape|2	glonly		TAA inputs: moving objects' velocity redraw and the blended composition redraw (taa_objvel.prog)
-src/features/post/taainputs.cpp|wwTaaInputsPass|glDrawElements|1	glonly		TAA inputs: moving objects' velocity redraw and the blended composition redraw (taa_objvel.prog)
-src/features/post/taainputs.cpp|wwTaaInputsPass|drawShape|3	glonly		TAA inputs: moving objects' velocity redraw and the blended composition redraw (taa_objvel.prog)
-src/features/post/taainputs.cpp|wwTaaInputsPass|glDrawElements|2	glonly		TAA inputs: moving objects' velocity redraw and the blended composition redraw (taa_objvel.prog)
+src/features/post/taainputs.cpp|wwTaaInputsPass|drawShape|2	twin	WwVkPresent::objVelRun	TAA inputs: moving objects' velocity redraw (taa_objvel.prog, objVelRun; gate tests/vkframe/objveldraw.sh)
+src/features/post/taainputs.cpp|wwTaaInputsPass|glDrawElements|1	twin	WwVkPresent::objVelRun	TAA inputs: moving objects' velocity redraw (taa_objvel.prog, objVelRun; gate tests/vkframe/objveldraw.sh)
+src/features/post/taainputs.cpp|wwTaaInputsPass|drawShape|3	glonly		TAA inputs: the see-through layers into the reactive mask (taa_reactive.prog, step 4), no Vulkan route yet
+src/features/post/taainputs.cpp|wwTaaInputsPass|glDrawElements|2	glonly		TAA inputs: the see-through layers into the reactive mask (taa_reactive.prog, step 4), no Vulkan route yet
 src/features/post/taainputs.cpp|wwTaaInputsView|drawShape|1	other		debug view of the TAA inputs
 src/features/reflections/cellreflprobe.cpp|wwCellReflProbePass|drawShape|1	other		SSR / reflection probe: screen passes
 src/features/reflections/cellreflprobe.cpp|wwCellReflProbePass|drawShape|2	other		SSR / reflection probe: screen passes
