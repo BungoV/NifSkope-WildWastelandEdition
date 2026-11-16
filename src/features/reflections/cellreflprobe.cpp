@@ -921,8 +921,9 @@ void wwCellReflProbePass( Scene * scene, bool run )
 			static QElapsedTimer said;	// one line a 5 s window
 			if ( !said.isValid() || said.elapsed() >= 5000 ) {
 				said.start();
-				std::fprintf( stderr, "vk reflcapture: faces=%d casters=%d drawn=%d gl=%d%s%s\n", int( jobs.size() ), int( draws ),
-					capDrawn ? st.draws : 0, st.gl, st.glWhy.empty() ? "" : " glWhy=", st.glWhy.c_str() );
+				std::fprintf( stderr, "vk reflcapture: faces=%d casters=%d drawn=%d copies=%d inPlace=%d gl=%d%s%s\n", int( jobs.size() ),
+					int( draws ), capDrawn ? st.draws : 0, st.copies, st.inPlace, st.gl, st.glWhy.empty() ? "" : " glWhy=",
+					st.glWhy.c_str() );
 			}
 		}
 		for ( const auto & job : jobs ) {	// the bookkeeping, once
