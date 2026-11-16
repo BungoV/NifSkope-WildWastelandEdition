@@ -14,7 +14,7 @@
 // 0). Light 0 is a shadow-casting omni (t4 = (-1, 1): no cube slot) at (0, 150, -700), radius 5000, cellLightCount 1,
 // cellClusterOn off. One DDGI cascade (origin (-1200, -900, -2100), step 300, 9 x 7 x 8 probes) covers the rings, seeded
 // irradiance, distance pairs far (2000 / 4e6: Chebyshev 1), probe states alternating 2 / 1; cellDdgiCount 1, cellGiLoop8 8,
-// cellGiSky 1, cellExtDalc 1, cellGiAmb 1. cellGiHalfOn 0 in every judged arm (cellGiHalf / cellGiHalfKey are not shared).
+// cellGiSky 1, cellExtDalc 1, cellGiAmb 1. cellGiHalfOn 0 in every judged arm but the all-on arm below.
 // Switch profiles: farloddraw's seeds 1 and 2 without cellClusterOn, plus cellRestirOn, cellDdgiOn, cellGiSky, cellLightCount,
 // cellExtDalc. Arms: key RT and key DG, each seed 1 and seed 2.
 // Bar (set before the first run, never widened; farloddraw's colour bar, unchanged):
@@ -27,7 +27,22 @@
 // shared GL buffer, Vulkan runs, then the bytes are put back (a twin reading a stale copy, or none, passes); red atlas: the
 // shared cellDdgiAtlas shifted one texel the same way; red key: the DG twin on the RT program, the base twin (farLodRun) on
 // the DG program (FAIL or REFUSE both count).
-// Refusal check (seed 1 of each key, counted): cellGiHalfOn 1 must REFUSE with the "cellGiHalfOn 1" reason.
+// Refusal check (seed 1 of the DG key, counted): cellGiHalfOn 1 must REFUSE with the "cellGiHalfOn 1" reason (the DG twin
+// does not read the screen GI). Lane VKFAR30: on the RT key (twin 1, the all-on key) this refusal became a route, so its
+// check is replaced by the all-on arm.
+// All-on arm (seed 1 of the RT key): cellGiHalf / cellGiHalfKey are VKBUF2's shared images (vkrtbuf.h rtImgShare at W x H,
+// step 1: cellGiHalfScale 1, cellGiHalfRect (0, 0, W, H); owners registered, always fresh) and GL binds THOSE names;
+// cellGiHalfOn 1, cellPass 0, cellProbe 0. The key is the rings' own surface: a GL normals pass (wwDebugView 2: the program's
+// own shading normal) and its depth give each pixel's sample-0 position (view = world, P from the depth at the pixel centre)
+// and normal, packed as cellGiKeyNormal reads it (octahedral, 2048 x 2048); w = -1 where the rings miss. cellGiHalf holds
+// seeded values from a side rng (every other arm's seeding unchanged). Both are copied into the shared images from plain
+// textures (glCopyImageSubData).
+// All-on bar: the clean run BOUND (the same judge and colour bar as red 0); >= 1000 key texels written and >= 90 % of them
+// decode to a unit normal; GL probes cellGiHalfOn 0 and cellGiHalf reseeded each move >= 20 % of GL's covered samples.
+// All-on reds (each must FAIL: judge FAIL or REFUSED; a clean run after each must be BOUND again): not shared (a plain GL
+// texture with the same bytes bound on cellGiHalf: must REFUSE, naming "cellGiHalf:"), wrong image (the twin side binds
+// cellGiHalfKey's shared image on cellGiHalf and cellGiHalf's on cellGiHalfKey), stale gen (the WaterRun taken, then the
+// owner drops and remakes cellGiHalf: rtImgGen must move, the new image is cleared to a sentinel; the run must not be BOUND).
 // Last line `FARLODRTDRAW GATE OK` or `FARLODRTDRAW GATE FAILED`.
 // Seeding fix after run frt1 (bar and reds unchanged): the run refused every Vulkan arm with "no owner" on cellDdgiAtlas
 // (rtBufOf answers only for a slot with an owner: the gate now registers one per slot, always fresh, as the app's owners
@@ -165,6 +180,21 @@ int main( int argc, char ** argv )
 	// the owners (as rtddgicell.cpp / the ReSTIR step register them): the gate writes the buffers itself, always fresh
 	WwVkPresent::rtBufOwner( WwVkPresent::kRtBufRestir, []( std::string & ) { return true; } );
 	WwVkPresent::rtBufOwner( WwVkPresent::kRtBufDdgiAtlas, []( std::string & ) { return true; } );
+	// lane VKFAR30: the screen GI's two images (vkrtbuf.h rtImg), as ao.cpp's giShare makes them, at full size (step 1)
+	static char giOwnerKeys[2];
+	auto giKeyOf = [&]( int slot ) { return reinterpret_cast<std::uintptr_t>( &giOwnerKeys[slot] ); };
+	unsigned giTex[2] = { 0, 0 };
+	for ( int slot = 0; slot < 2; slot++ ) {
+		if ( !WwVkPresent::rtImgShare( slot, giKeyOf( slot ), W, H, 0, 0, giTex[slot], why ) )
+			return fatal( std::string( "rtImgShare " ) + WwVkPresent::rtImgName( slot ) + ": " + why );
+		WwVkPresent::rtImgOwner( slot, []( std::string & ) { return true; } );
+	}
+	using ClearTexImage = void( WINAPI * )( GLuint, GLint, GLenum, GLenum, const void * );
+	const auto clearTex = reinterpret_cast<ClearTexImage>( wglGetProcAddress( "glClearTexImage" ) );
+	if ( !clearTex )
+		return fatal( "glClearTexImage" );
+	std::printf( "FARLODRTDRAW shared: cellGiHalf texture %u, cellGiHalfKey texture %u (%dx%d RGBA32F, rtImgGen %llu)\n", giTex[0], giTex[1],
+		W, H, static_cast<unsigned long long>( WwVkPresent::rtImgGen() ) );
 
 	// ---- each key's samplers: one unit each; cellRestir / cellDdgiAtlas are the shared names
 	for ( KeyArm & k : keys ) {
@@ -841,8 +871,230 @@ int main( int argc, char ** argv )
 				if ( cs != kMain ? !fail : fail )
 					gateOk = false;
 			}
-			// the refusal check: cellGiHalfOn 1 stays on GL, by name
-			if ( seed == 1 ) {
+			// lane VKFAR30: the all-on arm (header): cellGiHalfOn 1 on VKBUF2's shared screen GI images
+			if ( seed == 1 && k.v == 1 ) {
+				Smp * sg = nullptr, * sk = nullptr;
+				for ( Smp & s : k.smp ) {
+					if ( s.name == "cellGiHalf" )
+						sg = &s;
+					else if ( s.name == "cellGiHalfKey" )
+						sk = &s;
+				}
+				if ( !sg || !sk )
+					return fatal( "RT program: cellGiHalf / cellGiHalfKey not active (the all-on arm would test nothing)" );
+				const GLuint plainG = sg->tex, plainK = sk->tex;	// the gate's own fills, bound again after the arm
+				auto getI = [&]( const char * n ) {
+					float x = 0.0f;
+					if ( loc( k, n ) >= 0 ) {
+						f.useProgram( k.p );
+						f.getUniformfv( k.p, loc( k, n ), &x );
+					}
+					return GLint( x );
+				};
+				const GLint passWas = getI( "cellPass" ), splatWas = getI( "landSplat" );
+				setI( k, "cellPass", 0 );
+				setI( k, "cellProbe", 0 );
+				{
+					const float rect[4] = { 0.0f, 0.0f, float( W ), float( H ) }, one = 1.0f;
+					setF( k, "cellGiHalfRect", 4, 1, rect );
+					setF( k, "cellGiHalfScale", 1, 1, &one );
+				}
+				// the key: GL's own shading normal (wwDebugView 2) and depth at each pixel's sample 0
+				setI( k, "cellGiHalfOn", 0 );
+				setI( k, "wwDebugView", 2 );
+				setI( k, "landSplat", 0 );
+				before( fbRef );
+				drawState( fbRef, scissor, k );
+				glDraw();
+				stateEnd( k );
+				setI( k, "wwDebugView", 0 );
+				setI( k, "landSplat", splatWas );
+				const std::vector<std::uint16_t> nC = readColor( refCol );
+				const std::vector<float> nD = readDepth( refDs, false );
+				std::vector<float> keyT( static_cast<size_t>( W ) * static_cast<size_t>( H ) * 4u, 0.0f ), giT( keyT.size() ), giT2( keyT.size() );
+				size_t written = 0, unitN = 0;
+				for ( int y = 0; y < H; y++ )
+					for ( int x = 0; x < W; x++ ) {
+						const size_t s0 = size_t( y ) * size_t( WS ) + size_t( x ) * size_t( S ), t = 4 * ( size_t( y ) * size_t( W ) + size_t( x ) );
+						keyT[t + 3] = -1.0f;
+						if ( nD[s0] == bgD[s0] )
+							continue;
+						written++;
+						float n[3];
+						for ( int c = 0; c < 3; c++ )
+							n[c] = 2.0f * h2f( nC[s0 * 4 + size_t( c )] ) - 1.0f;
+						if ( std::fabs( std::sqrt( n[0] * n[0] + n[1] * n[1] + n[2] * n[2] ) - 1.0f ) > 0.03f )
+							continue;	// not a normal: no surface there
+						unitN++;
+						const float D = proj[14] / ( 2.0f * nD[s0] - 1.0f + proj[10] );
+						const float xn = ( float( x ) + 0.5f ) / float( W ) * 2.0f - 1.0f, yn = ( float( y ) + 0.5f ) / float( H ) * 2.0f - 1.0f;
+						keyT[t] = xn * D / proj[0];
+						keyT[t + 1] = yn * D / proj[5];
+						keyT[t + 2] = -D;
+						const float a = std::fabs( n[0] ) + std::fabs( n[1] ) + std::fabs( n[2] );
+						float ox = n[0] / a, oy = n[1] / a;
+						if ( n[2] < 0.0f ) {
+							const float tx = ( 1.0f - std::fabs( oy ) ) * ( ox >= 0.0f ? 1.0f : -1.0f ), ty = ( 1.0f - std::fabs( ox ) ) * ( oy >= 0.0f ? 1.0f : -1.0f );
+							ox = tx, oy = ty;
+						}
+						keyT[t + 3] = std::floor( ( ox * 0.5f + 0.5f ) * 2047.0f + 0.5f ) * 2048.0f + std::floor( ( oy * 0.5f + 0.5f ) * 2047.0f + 0.5f );
+					}
+				{
+					std::mt19937 giRng( 20261130u );	// a side rng: the other arms' seeding stays as it was
+					std::uniform_real_distribution<float> gu( 0.05f, 1.0f );
+					for ( float & g : giT )
+						g = gu( giRng );
+					for ( float & g : giT2 )
+						g = gu( giRng );
+				}
+				const GLuint gPlain = tex2d( W, H, fRgba32f, GL_RGBA, GL_FLOAT, giT.data(), false ),
+					gPlain2 = tex2d( W, H, fRgba32f, GL_RGBA, GL_FLOAT, giT2.data(), false ),
+					kPlain = tex2d( W, H, fRgba32f, GL_RGBA, GL_FLOAT, keyT.data(), false );
+				auto toShared = [&]( GLuint src, int slot ) {
+					f.copyImageSubData( src, GL_TEXTURE_2D, 0, 0, 0, 0, giTex[slot], GL_TEXTURE_2D, 0, 0, 0, 0, W, H, 1 );
+				};
+				toShared( gPlain, 0 );
+				toShared( kPlain, 1 );
+				const bool keyOk = written >= 1000 && unitN * 10 >= written * 9;
+				std::printf( "FARLODRTDRAW RT all-on key: %zu texels on the rings, %zu decode to a unit normal (want >= 1000, >= 90 %%): %s\n", written,
+					unitN, keyOk ? "OK" : "FAIL" );
+				if ( !keyOk )
+					gateOk = false;
+				// GL's reference on the shared names
+				sg->tex = giTex[0], sk->tex = giTex[1];
+				setI( k, "cellGiHalfOn", 1 );
+				auto glFrame = [&]() {
+					before( fbRef );
+					drawState( fbRef, scissor, k );
+					glDraw();
+					stateEnd( k );
+					return readColor( refCol );
+				};
+				const std::vector<std::uint16_t> aC = glFrame();
+				const std::vector<float> aD = readDepth( refDs, false );
+				std::vector<char> aMask( aD.size(), 0 );
+				size_t aCov = 0;
+				for ( size_t s = 0; s < aD.size(); s++ ) {
+					bool c = aD[s] != bgD[s];
+					for ( int ch = 0; ch < 4; ch++ )
+						c = c || aC[s * 4 + size_t( ch )] != bgC[s * 4 + size_t( ch )];
+					aMask[s] = c;
+					aCov += c;
+				}
+				auto movedOf = [&]( const std::vector<std::uint16_t> & pc ) {
+					size_t m = 0;
+					for ( size_t s = 0; s < aMask.size(); s++ ) {
+						if ( !aMask[s] )
+							continue;
+						bool d = false;
+						for ( int ch = 0; ch < 4; ch++ )
+							d = d || pc[s * 4 + size_t( ch )] != aC[s * 4 + size_t( ch )];
+						m += d;
+					}
+					return m;
+				};
+				setI( k, "cellGiHalfOn", 0 );
+				const size_t mOff = movedOf( glFrame() );
+				setI( k, "cellGiHalfOn", 1 );
+				toShared( gPlain2, 0 );
+				const size_t mImg = movedOf( glFrame() );
+				toShared( gPlain, 0 );
+				for ( int pr = 0; pr < 2; pr++ ) {
+					const size_t m = pr == 0 ? mOff : mImg;
+					const bool ok = aCov > 0 && m * 5 >= aCov;
+					std::printf( "FARLODRTDRAW RT all-on GL probe %s: moved %zu of %zu covered samples (%.1f %%): %s\n",
+						pr == 0 ? "cellGiHalfOn 0" : "cellGiHalf reseeded", m, aCov, aCov ? 100.0 * double( m ) / double( aCov ) : 0.0,
+						ok ? "OK" : "FAIL (the screen GI does not reach the colour)" );
+					if ( !ok )
+						gateOk = false;
+				}
+				// the Vulkan runs: BOUND / EXACT, FAIL, or REFUSED (with the reason)
+				auto vkRun = [&]( const char * name, const std::function<void()> & between ) {
+					before( fbFrame );
+					drawState( fbFrame, scissor, k );
+					WwVkPresent::WaterRun r;
+					WwVkPresent::farLodRtStateOf( &gw, k.p, r, 1 );
+					r.w = W, r.h = H, r.color = fc, r.cmds = cmds, r.key = reinterpret_cast<std::uintptr_t>( twinKeys[ki] );
+					if ( between )
+						between();
+					std::string w;
+					const bool ran = WwVkPresent::farLodRtRun( r, 1, w );
+					stateEnd( k );
+					runs++;
+					std::string word = "REFUSED";
+					if ( ran ) {
+						const Verdict v = judge( bgC, bgD, readColor( fc ), readDepth( fds, true ), aC, aD );
+						word = v.word();
+						std::printf( "FARLODRTDRAW RT all-on %s: %s covered %zu (both %zu, one side only %zu), depth max %ld D24 units (%zu past 1), "
+							"colour %zu halves differ, %zu samples past 1e-2 (max rel %.3g)", name, word.c_str(), v.covered, v.both, v.onlyOne,
+							v.maxDepthU, v.depthPast, v.halvesDiff, v.colPast, v.maxRel );
+					} else
+						std::printf( "FARLODRTDRAW RT all-on %s: REFUSED (%s)", name, w.c_str() );
+					return std::make_pair( word, w );
+				};
+				int cleanRuns = 0, cleanBound = 0, redsFailing = 0;
+				auto clean = [&]( const char * name ) {
+					const auto res = vkRun( name, nullptr );
+					const bool ok = res.first == "BOUND" || res.first == "EXACT";
+					cleanRuns++;
+					cleanBound += ok;
+					std::printf( "%s\n", ok ? "" : " -> FAIL (must be BOUND)" );
+					if ( !ok )
+						gateOk = false;
+				};
+				auto red = [&]( const std::pair<std::string, std::string> & res, bool ok ) {
+					redsFailing += ok;
+					std::printf( "%s\n", ok ? " -> red FAILS as it must" : " -> red PASSES: the gate is blind" );
+					if ( !ok )
+						gateOk = false;
+				};
+				clean( "clean" );
+				sg->tex = gPlain;	// red not shared: the same bytes in a plain GL texture
+				{
+					const auto res = vkRun( "red not shared", nullptr );
+					red( res, res.first == "REFUSED" && res.second.find( "cellGiHalf:" ) != std::string::npos );
+				}
+				sg->tex = giTex[0];
+				clean( "clean after red not shared" );
+				sg->tex = giTex[1], sk->tex = giTex[0];	// red wrong image: the two shared images swapped on the twin side
+				{
+					const auto res = vkRun( "red wrong image", nullptr );
+					red( res, res.first == "FAIL" || res.first == "REFUSED" );
+				}
+				sg->tex = giTex[0], sk->tex = giTex[1];
+				clean( "clean after red wrong image" );
+				{	// red stale gen: the run taken, then the owner remakes cellGiHalf (a sentinel in the new image)
+					const std::uint64_t gen0 = WwVkPresent::rtImgGen();
+					unsigned remade = 0;
+					bool remadeOk = false;
+					std::string rw;
+					const auto res = vkRun( "red stale gen", [&]() {
+						WwVkPresent::rtImgDrop( 0, giKeyOf( 0 ) );
+						remadeOk = WwVkPresent::rtImgShare( 0, giKeyOf( 0 ), W, H, 0, 0, remade, rw );
+						const float sentinel[4] = { 64.0f, 64.0f, 64.0f, 1.0f };
+						if ( remadeOk )
+							clearTex( remade, 0, GL_RGBA, GL_FLOAT, sentinel );
+					} );
+					const bool genMoved = WwVkPresent::rtImgGen() != gen0;
+					std::printf( " [remade %s: GL texture %u -> %u, rtImgGen %s]", remadeOk ? "OK" : rw.c_str(), giTex[0], remade,
+						genMoved ? "moved" : "did NOT move" );
+					red( res, remadeOk && genMoved && res.first != "BOUND" && res.first != "EXACT" );
+					if ( !remadeOk )
+						return fatal( "rtImgShare cellGiHalf again: " + rw );
+					giTex[0] = remade;
+					sg->tex = remade;
+					toShared( gPlain, 0 );
+				}
+				clean( "clean after red stale gen" );
+				std::printf( "FARLODRTDRAW RT all-on: clean %d of %d BOUND, reds failing %d of 3\n", cleanBound, cleanRuns, redsFailing );
+				sg->tex = plainG, sk->tex = plainK;
+				setI( k, "cellGiHalfOn", 0 );
+				setI( k, "cellPass", passWas );
+				const GLuint del[3] = { gPlain, gPlain2, kPlain };
+				glDeleteTextures( 3, del );
+			}
+			// the refusal check: cellGiHalfOn 1 stays on GL, by name (the DG key; the RT key's became the all-on arm above)
+			if ( seed == 1 && k.v == 2 ) {
 				refusalsWanted++;
 				setI( k, "cellGiHalfOn", 1 );
 				before( fbFrame );
