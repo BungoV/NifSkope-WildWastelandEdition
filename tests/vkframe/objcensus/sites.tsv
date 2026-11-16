@@ -125,6 +125,7 @@ src/features/shadows/sunshadow.cpp|sunShadowPassImpl|GpuDriven::poolDraw|2	other
 src/features/shadows/sunshadow.cpp|sunShadowPassImpl|drawShape|1	other		sun shadow map casters / cascades (csmRun, the CSM lanes')
 src/features/shadows/sunshadow.cpp|sunShadowPassImpl|drawShape|2	other		sun shadow map casters / cascades (csmRun, the CSM lanes')
 src/features/shadows/sunshadow.cpp|sunShadowPassImpl|drawShape|3	other		sun shadow map casters / cascades (csmRun, the CSM lanes')
+src/features/shadows/sunshadow.cpp|sunShadowPassImpl|drawShape|4	other		sun shadow map casters / cascades (csmRun, the CSM lanes'): the GL draw of the Vulkan cascade's meshes (vkMDraw, VKSHADOW1); VKMERGE1 row, the site came with the batch
 src/features/shadows/sunshadow.cpp|sunShadowPassImpl|glDrawArrays|1	other		sun shadow map casters / cascades (csmRun, the CSM lanes')
 src/features/shadows/sunshadow.cpp|sunShadowPassImpl|GpuDriven::poolDraw|3	other		sun shadow map casters / cascades (csmRun, the CSM lanes')
 src/features/sky/atmosphere.cpp|quad|drawShape|1	other		sky: screen pass
