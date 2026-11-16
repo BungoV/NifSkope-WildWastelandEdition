@@ -30,7 +30,7 @@ static float4 gl_FragCoord;
 
 #define WW_CELL_FX 1
 /* lane FOGLEAK1 (fog lit where no light reaches, notes/fogleak-r/RESEARCH.md): the leak fix, compiled only under the
- * loader's WW_CELL_FOGLEAK (off by default) and only with the ray-traced volume to read (WW_CELL_RTDDGI). Each fix
+ * loader's WW_CELL_FOGLEAK (compiled unless =0, wwFogLeakShaderDefine) and only with the RT volume (WW_CELL_RTDDGI). Each fix
  * keeps the old path as a red bit of volLeakRed (cellvolair.cpp WW_CELL_AIR_RED= dalcenv / nosungate / lightleak) */
 #if defined( WW_CELL_FOGLEAK ) && defined( WW_CELL_RTDDGI )
 #define WW_AIR_LEAK 1

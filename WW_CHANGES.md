@@ -1,3 +1,15 @@
+## VKAIR18 (2026-11-16): the air's lamp and temporal stages read the RT GI inputs on Vulkan (all-on)
+
+Changed, not built, not checked in the app. Offline: tests/vkframe/airlampview.sh (GATE OK, 59 of 59 reds fired),
+tests/vkframe/airtemporalview.sh (GATE OK, 53 of 53 reds fired) and tests/vkframe/rtbufview.sh (GATE OK) pass.
+- With the view on Vulkan and the all-on route (RT GI + ReSTIR), the air's stage 4 (lamp volume) and stage 1 temporal
+  now ask for the RT GI cascades and ReSTIR's buffer by name (vkrtbuf.h rtBufOf) and read them in place, where they
+  used to refuse ReSTIR's buffer and stay on GL. If the owner has nothing fresh, or GL's program reads another buffer,
+  the stage refuses by name and GL draws it as before.
+- Both gates gained an all-on arm: Vulkan matches GL, each name is looked up once a run, and reds
+  WW_VKVIEW_RTBUF_RED=1, a stale owner and a GL-owned buffer each refuse by name.
+- A comment in res/shaders/hlsl/air/cell_volair_ps.hlsl now says the fog leak fix is compiled unless WW_CELL_FOGLEAK=0.
+
 ## VKAIR17 (2026-11-16): the lamp shadow atlas is shared with Vulkan while the air runs there
 
 Changed, not built, not checked in the app. Offline: tests/vkframe/airlampview.sh (GATE OK, 42 of 42 reds fired) and
