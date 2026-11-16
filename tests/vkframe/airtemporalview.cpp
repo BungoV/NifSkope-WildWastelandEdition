@@ -54,6 +54,27 @@
 // RG32F buffer with the same bytes on cellRestir while the slot lives (named "cellRestir"); plus every red above (512 included).
 // Content: stage 1 reads cellRestir only under volLeakRed & 4: the shipped uniforms gate the binding and the refusals; the
 // "RT GI inputs rewritten" line is informative, not a bar. airtemporalview.sh greps both routes for the rtBufOf call.
+// Lane VKAIR19 (2026-11-16), the far grid's stage 1 (census row |6, cellvolair.cpp vaPassInner's far loop, FARGRID1): appended
+// after every arm above (their lines stay byte-equal). GL draws stage 1 of the far grid as the app does: volFarMode 3,
+// volLayerBase 64, volTemporal 0, volHistOk 0, volTerms 9, volDepthSkip 0, volDrift (0, 2000, 1, 0.5), volClusterDims (0, 0, 8,
+// 8), volLampVol 0, volDims / volSlices of the far grid (13 x 9 x 24 from 200, ln 10), nothing on volHist; one attachment, layer
+// 64 + k of an inject 21 x 12 x 88, k in [k0, k1). Vulkan: airTemporalRun with `far` set (base 64, k0, k1) into the SHARED
+// inject. Arms "far def" (key 0) and "far all-on" (key 1, the atlas and both RT GI buffers bound as the all-on arm), each a
+// whole run (0..24) and a spread run (5..17, airfar::Share's run of layers).
+// Bar (set before the first run, never widened): GL writes every texel of the run's layers inside 13 x 9, all finite, and
+// leaves every other texel at the sentinel; at least half of those texels lit (rgb > 0: a black frame passes any identity);
+// Vulkan vs GL on every texel: the run's ones |vk - gl| <= 1e-4 max(1, |gl|), every other one the sentinel on both sides;
+// stat (takeAirFarStat) 1 run, k1 - k0 draws, 0 image copies; read twice EXACT; all-on: rtBufOf lookups 1 and 1 a run; a
+// rerun after the reds EXACT against the first run.
+// GL probes (LIVE >= 50): volLayer 0 on every draw, airTerr rewritten, volSlices' start doubled. volDrift.x is 0 in the far
+// grid, so the noise is not read: no noise probe or red. Informative: volFarMode 0 vs 3 (airFarVis).
+// Reds, each must FAIL: route 1 volLayer stuck at 0; route 4 the base dropped (layers k, not 64 + k); route 8 the run's
+// bounds ignored (spread run: 0..24 drawn); gate 16 airTerr rewritten after GL's draw; gate 32 the other key: REFUSE "key";
+// gate 64 the inject bound on volHist: REFUSE "feedback"; all-on 16384 WW_VKVIEW_RTBUF_RED=1 and 65536 a GL-owned cellRestir
+// (REFUSE by name).
+// Coverage limit: airFarVis (the cascades, the terrain shadow-height map, the clouds) reads blocks this gate binds zero (ussOn,
+// volCsm), so the far grid's own sun visibility is not reached here; the informative volFarMode line shows how much moves.
+// Without the far route (no WW_VK_AIRFAR) the far arms print "no route" and the gate FAILS (the red-first run).
 // Last line `AIRTEMPORALVIEW GATE OK` or `AIRTEMPORALVIEW GATE FAILED`.
 #define FLD_NO_MAIN
 #include "farloddraw.cpp"
@@ -124,7 +145,7 @@ int gAtlasOn = 0;	// lane VKAIR17: 1 = stage1 sets the atlas uniforms (the atlas
 char gAtlasKey, gAtlasPlainKey;
 
 // key slots (a static array: never an address inside a container)
-enum Slot { kInject, kOut6, kOut4, kHistA, kHistB, kLampNow, kNoise, kTerr, kTile, kSlots };
+enum Slot { kInject, kOut6, kOut4, kHistA, kHistB, kLampNow, kNoise, kTerr, kTile, kInjectFar, kSlots };
 char gKeys[kSlots];
 std::uintptr_t keyOf( int s )
 {
@@ -290,6 +311,62 @@ VolV judge( const Pair & gl, const Pair & vk )
 	VolV v;
 	judgeInto( v, gl.inj, vk.inj );
 	judgeInto( v, gl.out, vk.out );
+	return v;
+}
+
+// lane VKAIR19: the far grid's run = layers [lo, hi) of the inject, cols x rows of the texture; every other texel the sentinel on both
+struct FarV
+{
+	int run = 0, unwritten = 0, nonFinite = 0, diff = 0, bad = 0, stray = 0, moved = 0, lit = 0;
+	double maxRel = 0.0;
+	bool ok() const { return run > 0 && unwritten == 0 && nonFinite == 0 && bad == 0 && stray == 0; }
+	const char * word() const { return !ok() ? "FAIL" : diff == 0 ? "EXACT" : "BOUND"; }
+};
+
+FarV judgeFar( const std::vector<float> & gl, const std::vector<float> & vk, int cols, int rows, int lo, int hi )
+{
+	FarV v;
+	const size_t layerFloats = static_cast<size_t>( kAtCols ) * static_cast<size_t>( kAtRows ) * 4;
+	if ( gl.size() != vk.size() || gl.size() % layerFloats != 0 ) {
+		v.bad++;
+		return v;
+	}
+	const size_t layers = gl.size() / layerFloats;
+	for ( size_t z = 0; z < layers; z++ )
+		for ( int y = 0; y < kAtRows; y++ )
+			for ( int x = 0; x < kAtCols; x++ ) {
+				const size_t t = ( ( z * size_t( kAtRows ) + size_t( y ) ) * size_t( kAtCols ) + size_t( x ) ) * 4;
+				bool sg = true, sk = true;
+				for ( int c = 0; c < 4; c++ ) {
+					sg = sg && gl[t + size_t( c )] == kAtSentinel;
+					sk = sk && vk[t + size_t( c )] == kAtSentinel;
+				}
+				const bool inRun = int( z ) >= lo && int( z ) < hi && x < cols && y < rows;
+				if ( !inRun ) {
+					const bool st = !sg || !sk;
+					v.stray += st;
+					v.moved += st;
+					continue;
+				}
+				v.run++;
+				bool m = sg || sk;
+				v.unwritten += m;
+				v.lit += !sg && ( gl[t] > 0.0f || gl[t + 1] > 0.0f || gl[t + 2] > 0.0f );
+				for ( int c = 0; c < 4; c++ ) {
+					const double g = gl[t + size_t( c )], k = vk[t + size_t( c )];
+					if ( !std::isfinite( g ) || !std::isfinite( k ) ) {
+						v.nonFinite++;
+						m = true;
+						continue;
+					}
+					const double rel = std::fabs( k - g ) / std::max( 1.0, std::fabs( g ) );
+					v.maxRel = std::max( v.maxRel, rel );
+					v.diff += k != g;
+					v.bad += rel > 1e-4;
+					m = m || rel > 1e-4;
+				}
+				v.moved += m;
+			}
 	return v;
 }
 
@@ -991,6 +1068,269 @@ int main( int argc, char ** argv )
 		( void )vkInj;
 		( void )vkOut;
 #endif
+	}
+	// ---- lane VKAIR19: the far grid's stage 1 (cellvolair.cpp vaPassInner's far loop, census row |6), GL's draws vs the far route
+	{
+		const int fCols = 13, fRows = 9, fSl = 24, fBase = kAtSlices, fDepth = kAtSlices + 24;
+		unsigned vkInjF = 0;
+		if ( !WwVkPresent::sharedTarget( keyOf( kInjectFar ), 1, kAtCols, kAtRows, fDepth, fRgba32f, vkInjF, why, 1 ) )
+			return fatal( "the shared far inject: " + why );
+		GLuint glInjF = 0;
+		vol( glInjF, fDepth );
+		struct FarOpt
+		{
+			bool stuck = false;
+			double start = 200.0;
+			int mode = 3;
+		};
+		// the app's far block (FARGRID1) over stage1's near set: the far loop runs after the near passes
+		auto farStage = [&]( int key, const FarOpt & o, std::string * absent ) {
+			stage1( progs[key], 0, 6, 0 );
+			struct U
+			{
+				const char * n;
+				std::vector<double> v;
+				bool need;
+			};
+			const std::vector<U> us = { { "volFarMode", { double( o.mode ) }, true }, { "volLayerBase", { double( fBase ) }, false },
+				{ "volTemporal", { 0 }, true }, { "volHistOk", { 0 }, true }, { "volTerms", { 9 }, true }, { "volLampVol", { 0 }, true },
+				{ "volDepthSkip", { 0 }, false }, { "volClusterDims", { 0, 0, 8, 8 }, false }, { "volDrift", { 0.0, 2000.0, 1.0, 0.5 }, true },
+				{ "volJitter", { 0, 0, 0, 0 }, false }, { "volDims", { double( fCols ), double( fRows ), double( fSl ) }, true },
+				{ "volSlices", { o.start, std::log( 10.0 ), double( fSl ), 1.0 }, true } };
+			std::string need;
+			for ( const U & u : us )
+				if ( !setU( progs[key], u.n, u.v ) ) {
+					if ( u.need )
+						need += std::string( " " ) + u.n;
+					else if ( absent )
+						*absent += std::string( " " ) + u.n;
+				}
+			return need;
+		};
+		// GL's far stage 1 as the app draws it: one attachment, layer base + k, k in [k0, k1), nothing on volHist
+		auto glRunF = [&]( int key, int k0, int k1, std::string & err, const FarOpt & o ) {
+			sentinel( glInjF );
+			farStage( key, o, nullptr );
+			bindInputs( units[key], 0 );
+			f.bindFramebuffer( fFb, fb );
+			const GLenum b0[1] = { 0x8CE0 };
+			f.drawBuffers( 1, b0 );
+			drawState0();
+			glViewport( 0, 0, fCols, fRows );
+			at.bindVertexArray( vao );
+			for ( int k = k0; k < k1; k++ ) {
+				at.framebufferTextureLayer( fFb, 0x8CE0, glInjF, 0, fBase + k );
+				if ( k == k0 && f.checkFramebufferStatus( fFb ) != 0x8CD5 )
+					err = "GL's far framebuffer is not complete";
+				setU( progs[key], "volLayer", { o.stuck ? 0.0 : double( k ) } );
+				glDrawElements( GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, nullptr );
+			}
+			at.framebufferTextureLayer( fFb, 0x8CE0, 0, 0, 0 );
+			f.bindFramebuffer( fFb, 0 );
+			unbindInputs( units[key] );
+			glFinish();
+			if ( const GLenum e = glGetError() )
+				err = "GL error " + std::to_string( e ) + " in GL's far stage 1";
+			return readVol( glInjF, fDepth );
+		};
+		for ( int key = 0; key < 2; key++ ) {
+			std::string absent;
+			const std::string need = farStage( key, FarOpt(), &absent );
+			std::printf( "AIRTEMPORALVIEW far %s: optional far uniforms GL's program lacks:%s\n", keyName[key], absent.empty() ? " none" : absent.c_str() );
+			if ( !need.empty() )
+				return fatal( std::string( "far " ) + keyName[key] + ": GL's program has no uniform" + need );
+		}
+		ensureInputs( in, 6, true, true );
+		struct FarArm
+		{
+			int key;
+			bool allOn;
+			int k0, k1;
+		};
+		const FarArm farArms[4] = { { 0, false, 0, fSl }, { 0, false, 5, 17 }, { 1, true, 0, fSl }, { 1, true, 5, 17 } };
+		for ( const FarArm & a : farArms ) {
+			const int key = a.key, k0 = a.k0, k1 = a.k1;
+			const bool whole = k0 == 0 && k1 == fSl;
+			const std::string arm = std::string( a.allOn ? "far all-on" : "far def" ) + " layers " + std::to_string( k0 ) + ".." + std::to_string( k1 );
+			const char * an = arm.c_str();
+			gAtlasOn = a.allOn ? 1 : 0;
+			boundAtlas = a.allOn ? atlasTex : 0;
+			boundDdgi = a.allOn ? rtTex[0] : 0;
+			boundRestir = a.allOn ? rtTex[1] : 0;
+			std::string err;
+			const std::vector<float> g = glRunF( key, k0, k1, err, FarOpt() );
+			if ( !err.empty() )
+				return fatal( arm + ": " + err );
+			{
+				const FarV self = judgeFar( g, g, fCols, fRows, fBase + k0, fBase + k1 );
+				const bool ok = self.ok() && self.lit * 2 >= self.run;
+				std::printf( "AIRTEMPORALVIEW %s GL written: run %d texels, unwritten %d, non-finite %d, outside the run not the sentinel %d, lit %d "
+							 "(want >= half) %s\n",
+					an, self.run, self.unwritten, self.nonFinite, self.stray, self.lit, ok ? "OK" : "FAIL" );
+				fails += !ok;
+			}
+			auto probe = [&]( const char * what, const std::vector<float> & other, bool bar ) {
+				const FarV p = judgeFar( g, other, fCols, fRows, fBase + k0, fBase + k1 );
+				const bool live = p.moved >= kAtLive;
+				std::printf( "AIRTEMPORALVIEW %s probe %s: moved %d of %d %s\n", an, what, p.moved, p.run,
+					bar ? ( live ? "LIVE" : "TESTS NOTHING" ) : "(informative)" );
+				probesDead += bar && !live;
+			};
+			if ( whole ) {
+				FarOpt o;
+				o.stuck = true;
+				probe( "volLayer 0 on every draw", glRunF( key, k0, k1, err, o ), true );
+				fillTerr( in.terr, 2 );
+				probe( "airTerr rewritten", glRunF( key, k0, k1, err, FarOpt() ), true );
+				fillTerr( in.terr, 1 );
+				o = FarOpt();
+				o.start = 400.0;
+				probe( "volSlices start doubled", glRunF( key, k0, k1, err, o ), true );
+				o = FarOpt();
+				o.mode = 0;
+				probe( "volFarMode 0 (airFarVis off)", glRunF( key, k0, k1, err, o ), false );
+				if ( !err.empty() )
+					return fatal( arm + " (probes): " + err );
+			}
+#ifdef WW_VK_AIRFAR
+			auto vkRunF = [&]( int red, std::string & w, WwVkPresent::AirTemporalStat & st, std::vector<float> * res ) {
+				sentinel( vkInjF );
+				farStage( key, FarOpt(), nullptr );
+				bindInputs( units[key], ( red & 64 ) ? vkInjF : 0 );
+				( void )WwVkPresent::takeAirFarStat();
+				WwVkPresent::AirTemporalRun r;
+				r.prog = progs[key];
+				r.rt = key == 1;
+				r.wwDefs = WwVkPresent::airTemporalKey( ( key == 1 ) != ( ( red & 32 ) != 0 ) );
+				r.cols = fCols;
+				r.rows = fRows;
+				r.slices = fSl;
+				r.strata = 0;
+				r.injectKey = keyOf( kInjectFar );
+				r.histOutKey = 0;
+				r.far = true;
+				r.base = fBase;
+				r.k0 = k0;
+				r.k1 = k1;
+				r.red = red & 13;
+				const bool ok = WwVkPresent::airTemporalRun( r, gw, w );
+				st = WwVkPresent::takeAirFarStat();
+				unbindInputs( units[key] );
+				if ( ok && res )
+					*res = readVol( vkInjF, fDepth );
+				return ok;
+			};
+			std::string w;
+			WwVkPresent::AirTemporalStat st;
+			std::vector<float> v0;
+			if ( !vkRunF( 0, w, st, &v0 ) ) {
+				std::printf( "AIRTEMPORALVIEW %s: Vulkan refused: %s\n", an, w.c_str() );
+				fails++;
+				continue;
+			}
+			{
+				const std::vector<float> again = readVol( vkInjF, fDepth );
+				const FarV twice = judgeFar( v0, again, fCols, fRows, fBase + k0, fBase + k1 );
+				const bool same = twice.ok() && twice.diff == 0;
+				std::printf( "AIRTEMPORALVIEW %s read twice: %s (differ %d, unwritten %d)\n", an, same ? "EXACT" : "FAIL", twice.diff, twice.unwritten );
+				fails += !same;
+			}
+			{
+				const FarV v = judgeFar( g, v0, fCols, fRows, fBase + k0, fBase + k1 );
+				std::printf( "AIRTEMPORALVIEW %s Vulkan vs GL: %s (run %d, unwritten %d, non-finite %d, outside the run not the sentinel %d, differ %d, "
+							 "past 1e-4 rel %d, max rel %.3g)\n",
+					an, v.word(), v.run, v.unwritten, v.nonFinite, v.stray, v.diff, v.bad, v.maxRel );
+				fails += !v.ok();
+				const bool cp = st.runs == 1 && st.draws == k1 - k0 && st.copies == 0;
+				std::printf( "AIRTEMPORALVIEW %s stat: runs %d draws %d copies %d buffer copies %d (want 1 run, %d draws, 0 copies) %s\n", an, st.runs,
+					st.draws, st.copies, st.bufCopies, k1 - k0, cp ? "OK" : "FAIL" );
+				fails += !cp;
+			}
+			if ( a.allOn ) {
+				const WwVkPresent::RtBufStat s0 = WwVkPresent::rtBufStat();
+				std::string lw;
+				WwVkPresent::AirTemporalStat ls;
+				const bool ran = vkRunF( 0, lw, ls, nullptr );
+				const WwVkPresent::RtBufStat s1 = WwVkPresent::rtBufStat();
+				const unsigned long long da = s1.lookups[0] - s0.lookups[0], dr = s1.lookups[1] - s0.lookups[1];
+				const bool ok = ran && da == 1 && dr == 1;
+				std::printf( "AIRTEMPORALVIEW %s rtBufOf lookups a run: cellDdgiAtlas %llu cellRestir %llu (want 1 and 1) %s%s%s\n", an, da, dr,
+					ok ? "OK" : "FAIL", ran ? "" : " refused: ", ran ? "" : lw.c_str() );
+				fails += !ok;
+			}
+			std::vector<int> redList { 1, 4, 16, 32, 64 };
+			if ( !whole )
+				redList.push_back( 8 );	// the run's bounds ignored: only a spread run can show it
+			if ( a.allOn )
+				redList.insert( redList.end(), { 16384, 65536 } );
+			for ( int red : redList ) {
+				redsRun++;
+				if ( red == 16 )
+					fillTerr( in.terr, 2 );
+				if ( red == 16384 )
+					_putenv( "WW_VKVIEW_RTBUF_RED=1" );
+				const GLuint keepRestir = boundRestir;
+				GLuint plainRs = 0, plainRsBuf = 0;
+				if ( red == 65536 ) {
+					const std::vector<float> d = rtData( 1, 0 );
+					f.genBuffers( 1, &plainRsBuf );
+					f.bindBuffer( 0x8C2A, plainRsBuf );
+					f.bufferData( 0x8C2A, std::ptrdiff_t( d.size() * 4 ), d.data(), fStatic );
+					f.bindBuffer( 0x8C2A, 0 );
+					glGenTextures( 1, &plainRs );
+					glBindTexture( 0x8C2A, plainRs );
+					ex.texBuffer( 0x8C2A, GLenum( fRg32f ), plainRsBuf );
+					glBindTexture( 0x8C2A, 0 );
+					boundRestir = plainRs;
+				}
+				std::string rw;
+				WwVkPresent::AirTemporalStat rs;
+				std::vector<float> rv;
+				const bool ran = vkRunF( red == 1 || red == 4 || red == 8 || red == 32 || red == 64 ? red : 0, rw, rs, &rv );
+				if ( red == 16 )
+					fillTerr( in.terr, 1 );
+				if ( red == 16384 )
+					_putenv( "WW_VKVIEW_RTBUF_RED=0" );
+				boundRestir = keepRestir;
+				if ( plainRs )
+					glDeleteTextures( 1, &plainRs );	// its buffer lives on (no glDeleteBuffers loaded)
+				bool fired = false;
+				FarV jv;
+				if ( red == 32 )
+					fired = !ran && rw.find( "key" ) != std::string::npos;
+				else if ( red == 64 )
+					fired = !ran && rw.find( "feedback" ) != std::string::npos;
+				else if ( red == 16384 )
+					fired = !ran && rw.find( "WW_VKVIEW_RTBUF_RED" ) != std::string::npos;
+				else if ( red == 65536 )
+					fired = !ran && rw.find( "cellRestir" ) != std::string::npos;
+				else if ( ran ) {
+					jv = judgeFar( g, rv, fCols, fRows, fBase + k0, fBase + k1 );
+					fired = !jv.ok();
+				}
+				std::printf( "AIRTEMPORALVIEW %s red %d: %s (unwritten %d, outside the run %d, past 1e-4 rel %d, moved %d)%s%s\n", an, red,
+					fired ? "FAIL (fired)" : "PASS (dead)", jv.unwritten, jv.stray, jv.bad, jv.moved, ran ? "" : " refused: ", ran ? "" : rw.c_str() );
+				redsFired += fired;
+			}
+			{
+				std::string aw;
+				WwVkPresent::AirTemporalStat as;
+				std::vector<float> rv;
+				const bool ran = vkRunF( 0, aw, as, &rv );
+				const FarV v = ran ? judgeFar( v0, rv, fCols, fRows, fBase + k0, fBase + k1 ) : FarV();
+				const bool ok = ran && v.ok() && v.diff == 0 && as.copies == 0;
+				std::printf( "AIRTEMPORALVIEW %s rerun after the reds: %s (differ %d, copies %d want 0)%s%s\n", an, ok ? "EXACT" : "FAIL", v.diff, as.copies,
+					ran ? "" : " refused: ", ran ? "" : aw.c_str() );
+				fails += !ok;
+			}
+#else
+			( void )vkInjF;
+			std::printf( "AIRTEMPORALVIEW %s: no route (WW_VK_AIRFAR not defined)\n", an );
+			fails++;
+#endif
+		}
+		gAtlasOn = 0;
+		boundAtlas = boundDdgi = boundRestir = 0;
 	}
 #ifdef WW_VK_AIRTEMPORAL
 	for ( int s2 = 0; s2 < 2; s2++ ) {	// lane VKAIR18: the gate's owner gone

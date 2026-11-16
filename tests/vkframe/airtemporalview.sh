@@ -19,4 +19,8 @@ g++ -O2 -std=c++17 -pthread -I"$ROOT/src" "$ROOT/tests/vkframe/airtemporalview.c
 n3=$(cat "$ROOT/src/features/vkframe/vkairlamp.inc" "$ROOT/src/features/vkframe/vkairtemporal.inc" | grep -c 'WwVkPresent::rtBufOf( c.name.c_str()')
 echo "AIRTEMPORALVIEW app: rtBufOf( c.name ) calls in vkairlamp.inc + vkairtemporal.inc $n3 (want 2)"
 [ "$n3" = 2 ] || { echo "AIRTEMPORALVIEW GATE FAILED (the air routes do not ask the RT GI inputs by name)"; exit 1; }
+# lane VKAIR19: the app's far loop takes the far route and says when it falls back to GL
+n4=$(grep -c 'WwVkPresent::airFarOnGl(' "$ROOT/src/features/air/cellvolair.cpp")
+echo "AIRTEMPORALVIEW app: airFarOnGl calls in cellvolair.cpp $n4 (want >= 1)"
+[ "$n4" -ge 1 ] || { echo "AIRTEMPORALVIEW GATE FAILED (the far loop has no Vulkan route)"; exit 1; }
 tail -1 "$OUT/airtemporalview.txt" | grep -q "AIRTEMPORALVIEW GATE OK"
