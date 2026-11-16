@@ -13,31 +13,36 @@ namespace
 {
 namespace farlod
 {
-// the pixel stages' images (t n -> 64 + n, samplers at + 64) from the reflect (X:/ClaudeOverflow/vkfar25/probe rt.txt /
-// dg.txt, notes/vkfar26/tools/imgtab.py) and the vertex stage's farStream (t 0 -> 200)
+// the pixel stages' images (t n -> 64 + n, samplers at + 64): every DECLARED image of the shipped headers (twinRun merges
+// declared bindings, used or not; lane VKFAR28 by notes/vkfar3/tools/spvh_binds.py: the reflect listed the used ones only and
+// left 65-67, 70 (RT), 79, 102, 103, 117 out) and the vertex stage's farStream (t 0 -> 200)
 const WaterImgName kFarlodRtImg[] = {
-	{ 64, "cellLights" }, { 68, "cellIsLut" }, { 69, "cellIsBloom" }, { 71, "cellRestir" }, { 72, "cellFarSlots" },
-	{ 73, "cellFarRecs" }, { 74, "cellFarPlaced" }, { 77, "cellCtGbuf" }, { 80, "cellSsgi" }, { 89, "atApTex" },
+	{ 64, "cellLights" }, { 65, "cellGi" }, { 66, "cellGiSlots" }, { 67, "cellRooms" }, { 68, "cellIsLut" },
+	{ 69, "cellIsBloom" }, { 70, "cellShadow" }, { 71, "cellRestir" }, { 72, "cellFarSlots" }, { 73, "cellFarRecs" },
+	{ 74, "cellFarPlaced" }, { 77, "cellCtGbuf" }, { 79, "cellAoDecal" }, { 80, "cellSsgi" }, { 89, "atApTex" },
 	{ 90, "volTex" }, { 91, "volTile" }, { 92, "volAirTerr" }, { 93, "volAirRainMap" }, { 94, "volAirNoise" },
 	{ 95, "csmMap" }, { 96, "ussTerrMap" }, { 97, "ussContactMap" }, { 98, "ussCloudMap" }, { 99, "waterInfoIndex" },
-	{ 100, "waterInfoAtlas" }, { 101, "waterInfoBodies" }, { 104, "cellGiHalf" }, { 105, "cellGiHalfKey" }, { 106, "cellAo" },
-	{ 107, "cellSsr" }, { 108, "cellDdgiAtlas" }, { 109, "cellCluster" }, { 110, "rainCover" }, { 111, "landShoreIndex" },
-	{ 112, "landShoreAtlas" }, { 114, "BaseMap" }, { 115, "NormalMap" }, { 116, "GlowMap" }, { 118, "SpecularMap" },
-	{ 119, "GreyscaleMap" }, { 120, "EnvironmentMap" }, { 121, "CubeMap" }, { 122, "RefractionSrc" }, { 123, "LandLodDiff" },
-	{ 124, "LandLodOuter" }, { 125, "LandLodNoise" }, { 126, "LandLodDetail" }, { 127, "farSkyMap" }, { 200, "farStream" } };
-// the DG key keeps cellShadow (70) and reads no cellRestir
+	{ 100, "waterInfoAtlas" }, { 101, "waterInfoBodies" }, { 102, "waterFlowIndex" }, { 103, "waterFlowAtlas" },
+	{ 104, "cellGiHalf" }, { 105, "cellGiHalfKey" }, { 106, "cellAo" }, { 107, "cellSsr" }, { 108, "cellDdgiAtlas" },
+	{ 109, "cellCluster" }, { 110, "rainCover" }, { 111, "landShoreIndex" }, { 112, "landShoreAtlas" }, { 114, "BaseMap" },
+	{ 115, "NormalMap" }, { 116, "GlowMap" }, { 117, "BacklightMap" }, { 118, "SpecularMap" }, { 119, "GreyscaleMap" },
+	{ 120, "EnvironmentMap" }, { 121, "CubeMap" }, { 122, "RefractionSrc" }, { 123, "LandLodDiff" }, { 124, "LandLodOuter" },
+	{ 125, "LandLodNoise" }, { 126, "LandLodDetail" }, { 127, "farSkyMap" }, { 200, "farStream" } };
+// the DG key reads no cellRestir (71)
 const WaterImgName kFarlodDgImg[] = {
-	{ 64, "cellLights" }, { 68, "cellIsLut" }, { 69, "cellIsBloom" }, { 70, "cellShadow" }, { 72, "cellFarSlots" },
-	{ 73, "cellFarRecs" }, { 74, "cellFarPlaced" }, { 77, "cellCtGbuf" }, { 80, "cellSsgi" }, { 89, "atApTex" },
+	{ 64, "cellLights" }, { 65, "cellGi" }, { 66, "cellGiSlots" }, { 67, "cellRooms" }, { 68, "cellIsLut" },
+	{ 69, "cellIsBloom" }, { 70, "cellShadow" }, { 72, "cellFarSlots" }, { 73, "cellFarRecs" },
+	{ 74, "cellFarPlaced" }, { 77, "cellCtGbuf" }, { 79, "cellAoDecal" }, { 80, "cellSsgi" }, { 89, "atApTex" },
 	{ 90, "volTex" }, { 91, "volTile" }, { 92, "volAirTerr" }, { 93, "volAirRainMap" }, { 94, "volAirNoise" },
 	{ 95, "csmMap" }, { 96, "ussTerrMap" }, { 97, "ussContactMap" }, { 98, "ussCloudMap" }, { 99, "waterInfoIndex" },
-	{ 100, "waterInfoAtlas" }, { 101, "waterInfoBodies" }, { 104, "cellGiHalf" }, { 105, "cellGiHalfKey" }, { 106, "cellAo" },
-	{ 107, "cellSsr" }, { 108, "cellDdgiAtlas" }, { 109, "cellCluster" }, { 110, "rainCover" }, { 111, "landShoreIndex" },
-	{ 112, "landShoreAtlas" }, { 114, "BaseMap" }, { 115, "NormalMap" }, { 116, "GlowMap" }, { 118, "SpecularMap" },
-	{ 119, "GreyscaleMap" }, { 120, "EnvironmentMap" }, { 121, "CubeMap" }, { 122, "RefractionSrc" }, { 123, "LandLodDiff" },
-	{ 124, "LandLodOuter" }, { 125, "LandLodNoise" }, { 126, "LandLodDetail" }, { 127, "farSkyMap" }, { 200, "farStream" } };
-// the integer images (usampler2D): the water info and shore lookups (cellCluster is a texel buffer, by name)
-const std::uint32_t kFarlodRtInts[] = { 99, 100, 111, 112 };
+	{ 100, "waterInfoAtlas" }, { 101, "waterInfoBodies" }, { 102, "waterFlowIndex" }, { 103, "waterFlowAtlas" },
+	{ 104, "cellGiHalf" }, { 105, "cellGiHalfKey" }, { 106, "cellAo" }, { 107, "cellSsr" }, { 108, "cellDdgiAtlas" },
+	{ 109, "cellCluster" }, { 110, "rainCover" }, { 111, "landShoreIndex" }, { 112, "landShoreAtlas" }, { 114, "BaseMap" },
+	{ 115, "NormalMap" }, { 116, "GlowMap" }, { 117, "BacklightMap" }, { 118, "SpecularMap" }, { 119, "GreyscaleMap" },
+	{ 120, "EnvironmentMap" }, { 121, "CubeMap" }, { 122, "RefractionSrc" }, { 123, "LandLodDiff" }, { 124, "LandLodOuter" },
+	{ 125, "LandLodNoise" }, { 126, "LandLodDetail" }, { 127, "farSkyMap" }, { 200, "farStream" } };
+// the integer images (usampler2D): the water info, flow and shore lookups (cellCluster is a texel buffer, by name)
+const std::uint32_t kFarlodRtInts[] = { 99, 100, 102, 103, 111, 112 };
 // the pixel blocks (RT 7424, DG 7392 bytes) end before 20224: the constants after them
 constexpr VkDeviceSize kFarlodRtConstAt = 20224, kFarlodRtHostBytes = 20480;
 static_assert( kWaterPsLooseAt + WwVkPresent::kT_farlodRtPsBytes <= kFarlodRtConstAt
