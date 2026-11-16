@@ -2944,7 +2944,7 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 		d.texelRed = 1;
 		d.texelRedName = s.red == 9 ? "cellRestir" : "cellDdgiAtlas";
 	}
-	d.dropName = s.red == 11 ? "cellGiHalf" : s.red == 12 ? "cellGiHalfKey" : nullptr;
+	d.dropName = s.red == 11 ? "cellGiHalf" : s.red == 12 ? "cellGiHalfKey" : s.red == 13 ? "cellSsgi" : nullptr;  // VKOBJ21: 13 ssgi
 	d.copyRed = s.standInRed ? 2 : s.red == 8 ? 1 : 0;  // red copy; standin: no copy twin (the stand-in)
 	d.vs = vkframe_objbl_vs_spv;
 	d.vsWords = sizeof( vkframe_objbl_vs_spv ) / 4;

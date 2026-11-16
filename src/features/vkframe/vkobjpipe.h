@@ -377,7 +377,7 @@ struct ObjBlShade
 	std::size_t nCmds = 0;
 	int red = 0;  //!< gates only: 1 objBlPipe's strict target count (a 1-buffer frame must refuse); RT GI: 9 the ReSTIR ratio /
 	              //!< 10 the atlas copied a texel on, 11 / 12 the screen GI / its key dropped to the stand-in; 8 the copy twins
-	              //!< (cellAo, cellAoDecal, cellSsr) copied a texel on
+	              //!< (cellAo, cellAoDecal, cellSsr) copied a texel on; 13 (VKOBJ21) cellSsgi dropped to the stand-in
 	const std::uint32_t * psGate = nullptr;  //!< gates only: this pixel module instead of the shipped twin (blview's plain row)
 	std::size_t psGateWords = 0;
 	int skinRed = 0;   //!< lane VKOBJ5 red `bone`: the mirrored skinningUniforms one bone on (bone i reads i + 1's transform)

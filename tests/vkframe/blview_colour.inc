@@ -75,7 +75,7 @@
 static int gColTwin = 0;  // colPrintf: 1 prints `BLVIEW colourcsm` for `BLVIEW colour`
 static const char * gColTag = "";  // the plain row: `BLVIEW colour plain`; the RT row: `BLVIEW colour rt`
 static int gColKind = 0;  // lane VKOBJ5: 1 ` skin`, 2 ` alpha`, 3 ` single`, 4 ` own` after it; lane VKWATER3: 5 ` ao`; VKOBJ19: 6 ` fade`
-static const char * kColKindName[7] = { "", " skin", " alpha", " single", " own", " ao", " fade" };
+static const char * kColKindName[8] = { "", " skin", " alpha", " single", " own", " ao", " fade", " ssgi" };  // VKOBJ21: 7 ` ssgi`
 /* lane VKWATER3 (manager ruling 11-15, the AO note; stated before its first run, never widened): kind 5 `ao` runs the main arm
  * on the app's key with a GL R32F texture on cellAo (half the view, a ramp in y and a 7-texel saw in x, bilinear, clamped),
  * cellAoOn 1, cellAoRect the frame. GL probe: cellAoOn 0 moves GL's colour on >= 20 % of the covered pixels. Ruling item 3:
@@ -104,6 +104,17 @@ static const char * kColKindName[7] = { "", " skin", " alpha", " single", " own"
  * form (glDraws: a draw a shape / a piece with its wwDrawBase and alpha); for kind 0 that is the same one multi-draw as before. The
  * harness calls objBlShade, not vkBlDraw: vkBlDraw's variant pick (objBlVariant, the RT twin for the decal-fade pieces only) is
  * the app's, checked by the syntax check and the census, not by this gate. */
+/* lane VKOBJ21 (11-16; stated before its first run, never widened): kind 7 `ssgi` is the all-on route's screen-space GI input
+ * (WW_RENDER_SSGI=1: cellssgi.cpp binds its result on cellSsgi for every opaque cell-lit draw). Its owner now makes the result a
+ * shared target, so the twin reads it in place. The fixture: a shared RGBA16F target of half the view (rgb 0.1 .. 0.9 and a 0.3 .. 1
+ * in small saws, bilinear, clamped, one level) on cellSsgi's unit, cellSsgiOn 1, cellSsgiRect the frame, cellSsgiK (1, 1),
+ * cellSsgiRed 0; the main arm's form (one multi-draw), on the app's key (spvapp, both twins) and on the all-on RT key (spvrt, both
+ * twins). Bars as the main arm (depth EXACT or BOUND, colour EXACT or BOUND 4e-3 of max(1, |GL|), lit >= 0.9 of covered, one
+ * crossing, 0 failed), every cellSsgi value with an active location, 0 copies (in place). GL probe: cellSsgiOn 0 moves GL's colour on
+ * >= 20 % of the covered pixels. Red ssgi (red 28 = objBlShade's 13: cellSsgi dropped to the stand-in) must FAIL with Vulkan's colour
+ * moved off its base; on the RT rows the RT reds 21 .. 24 too. Kinds 1 skin, 2 alpha and 4 own on the RT key (`colour rt skin` /
+ * `rt alpha` / `rt own`, both twins): bars, probes and reds as kind 3 on that key (VKOBJ20), each kind's own reds (bone, flags,
+ * offset / half) and the RT reds 21 .. 24. These rows run after every older row, which stay byte for byte. */
 void colPrintf( const char * fmt, ... )
 {
 	std::string f2( fmt );
@@ -535,6 +546,52 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			return false;
 		}
 	}
+	// lane VKOBJ21 kind 7: the SSGI result as its owner makes it under the view (a shared RGBA16F target) on cellSsgi
+	static int ssgiAt = 0;
+	const std::uintptr_t ssgiKey = reinterpret_cast<std::uintptr_t>( &ssgiAt );
+	GLuint ssgiTex = 0;
+	int ssgiUnit = -1;
+	if ( kind == 7 ) {
+		const int sw = kSW / 2, sh = kSH / 2;
+		if ( !sharedTarget( ssgiKey, 0, sw, sh, 1, 0x881A, ssgiTex, why ) ) {
+			colPrintf( "BLVIEW colour FAIL (the SSGI result's shared target: %s)\n", why.c_str() );
+			return false;
+		}
+		std::vector<float> sv( std::size_t( sw ) * std::size_t( sh ) * 4 );
+		for ( int y = 0; y < sh; y++ )
+			for ( int x = 0; x < sw; x++ ) {
+				float * p = sv.data() + ( std::size_t( y ) * std::size_t( sw ) + std::size_t( x ) ) * 4;
+				p[0] = 0.1f + 0.1f * float( ( x + 3 * y ) % 9 );
+				p[1] = 0.1f + 0.8f * float( y ) / float( sh - 1 );
+				p[2] = 0.1f + 0.2f * float( ( 2 * x + y ) % 5 );
+				p[3] = 0.3f + 0.1f * float( ( x + y ) % 8 );
+			}
+		glBindTexture( GL_TEXTURE_2D, ssgiTex );
+		glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, sw, sh, GL_RGBA, GL_FLOAT, sv.data() );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, 0x812F );  // CLAMP_TO_EDGE
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, 0x812F );
+		glTexParameteri( GL_TEXTURE_2D, 0x813D, 0 );  // MAX_LEVEL
+		glBindTexture( GL_TEXTURE_2D, 0 );
+		GLint( WINAPI * loc )( GLuint, const char * ) = nullptr;
+		load( loc, "glGetUniformLocation" );
+		GLint l = loc ? loc( prog, "cellSsgi" ) : -1;
+		if ( l < 0 && reg.count( "cellSsgi" ) )
+			l = reg["cellSsgi"];
+		ssgiUnit = unitAt.count( l ) ? unitAt[l] : -1;
+		const int inactive0 = inactive;
+		put( "cellSsgiOn", { 1 } );
+		put( "cellSsgiRect", { 0.0f, 0.0f, 1.0f / float( kSW ), 1.0f / float( kSH ) } );
+		put( "cellSsgiK", { 1.0f, 1.0f } );
+		put( "cellSsgiRed", { 0 } );
+		colPrintf( "BLVIEW colour ssgi state: unit %d, %d of 4 values with no active location or member\n", ssgiUnit, inactive - inactive0 );
+		if ( ssgiUnit < 0 || inactive != inactive0 || glGetError() != GL_NO_ERROR ) {
+			colPrintf( "BLVIEW colour FAIL (no unit for cellSsgi, a cellSsgi value not read, or a GL error making its target)\n" );
+			sharedTargetDrop( ssgiKey );
+			return false;
+		}
+	}
 	// globalUniforms (binding 0) at the twin's layout, skinningUniforms (binding 1) zero
 	if ( !gb ) {
 		colPrintf( "BLVIEW colour FAIL (the twin's globalUniforms: %s)\n", why.c_str() );
@@ -756,6 +813,8 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			u.bindTextures( GLuint( aoUnit ), 1, &aoTex );
 		if ( aoTex && ownUnit >= 0 )
 			u.bindTextures( GLuint( ownUnit ), 1, &aoTex );
+		if ( ssgiTex )
+			u.bindTextures( GLuint( ssgiUnit ), 1, &ssgiTex );
 		f.bindBufferBase( 0x8A11, 0, ubo[0] );
 		f.bindBufferBase( 0x8A11, 1, ubo[1] );
 		if ( sfB ) {  // the cascade values as put() left them (a red or probe set after GL drew reaches both sides)
@@ -1037,6 +1096,25 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		colPrintf( "BLVIEW colour GL fade probe %s: every fade 1 moves GL's colour on %zu of %zu covered pixels (bar >= 20 %%)\n",
 			kindReach ? "OK" : "FAIL", moved, cov );
 	}
+	if ( kind == 7 ) {  // lane VKOBJ21: the SSGI result reaches GL's colour (else a stand-in could draw the same picture)
+		ColOut g2;
+		put( "cellSsgiOn", { 0 } );
+		glDraw( g2 );
+		put( "cellSsgiOn", { 1 } );
+		std::size_t cov = 0, moved = 0;
+		for ( std::size_t i = 0; i < gl.depth.size(); i++ ) {
+			if ( !( gl.depth[i] < 1.0f ) )
+				continue;
+			cov++;
+			bool mv = false;
+			for ( int ch = 0; ch < 4; ch++ )
+				mv = mv || gl.c0[i * 4 + ch] != g2.c0[i * 4 + ch];
+			moved += mv;
+		}
+		kindReach = cov > 0 && double( moved ) >= 0.2 * double( cov );
+		colPrintf( "BLVIEW colour GL ssgi probe %s: cellSsgiOn 0 moves GL's colour on %zu of %zu covered pixels (bar >= 20 %%)\n",
+			kindReach ? "OK" : "FAIL", moved, cov );
+	}
 	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
 		colPrintf( "BLVIEW colour FAIL (GL error 0x%x reading GL's fo4_cellbl draw)\n", unsigned( e ) );
 		return false;
@@ -1060,7 +1138,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		s.nRows = nRows;
 		s.cmds = sx.cmds.data();
 		s.nCmds = sx.cmds.size() / 5;
-		s.red = red == 10 ? 1 : red >= 21 && red <= 24 ? red - 12 : red == 26 ? 8 : 0;  // 21 .. 24: the RT reds (objBlShade's 9 .. 12); 26 copy
+		s.red = red == 10 ? 1 : red >= 21 && red <= 24 ? red - 12 : red == 26 ? 8 : red == 28 ? 13 : 0;  // 21 .. 24: the RT reds (objBlShade's 9 .. 12); 26 copy; 28 ssgi
 		s.rt = rt;
 		s.psGate = plainWords.empty() ? nullptr : plainWords.data();
 		s.psGateWords = plainWords.size();
@@ -1205,14 +1283,19 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 				static_cast<unsigned long long>( rs.copyBytes ), static_cast<unsigned long long>( aoBytes ) );
 			ok = ok && copyOk;
 		}
+		if ( kind == 7 ) {  // lane VKOBJ21: cellSsgi bound in place (the owner's shared target), never copied
+			const bool inPlace = rs.copies == 0 && rs.shared >= 1;
+			colPrintf( "BLVIEW colour check cellSsgi in place %s (%d copies, want 0; %d shared units)\n", inPlace ? "OK" : "FAIL", rs.copies, rs.shared );
+			ok = ok && inPlace;
+		}
 	}
 	const char * redName[3] = { "glow (glowMult 0 after GL drew)", "slot (each row's maps one slot on)",
 		"map (the cascade map's checker inverted after GL drew)" };
 	const char * kindRedName[5] = { " bone (bone i reads bone i + 1's transform)", " flags (the mirrored alphaFlags 0)",  // lane VKOBJ5
 		" base (rowsAtBase off: the mirrored wwDrawBase kept)", " offset (every attribute read from offset 0)",
 		" half (the halves read as 16-bit unorm)" };
-	const int redLo = kind == 0 ? 1 : kind == 4 ? 14 : kind == 5 ? 25 : kind == 6 ? 27 : 10 + kind;
-	const int redHi = kind == 0 ? ( twin ? 3 : 2 ) : kind == 4 ? 15 : kind == 5 ? 26 : kind == 6 ? 27 : 10 + kind;
+	const int redLo = kind == 0 ? 1 : kind == 4 ? 14 : kind == 5 ? 25 : kind == 6 ? 27 : kind == 7 ? 28 : 10 + kind;
+	const int redHi = kind == 0 ? ( twin ? 3 : 2 ) : kind == 4 ? 15 : kind == 5 ? 26 : kind == 6 ? 27 : kind == 7 ? 28 : 10 + kind;
 	for ( int r = redLo; r <= redHi; r++ ) {
 		ColOut o;
 		std::string rw;
@@ -1230,7 +1313,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			passes = ( dc.exact() || dc.bound() ) && ( cc.exact() || cc.bound() );
 		}
 		colPrintf( "BLVIEW RED colour%s %s (%zu values over the bound, %zu Vulkan colour values moved off the Vulkan base%s%s)\n",
-			r == 27 ? " fade (the band crossings at a0, unscaled)" : r == 25 ? " standin (no copy twin: GL's own cellAo texture stood in)" : r == 26 ? " copy (cellAo copied from one texel on in x)"
+			r == 28 ? " ssgi (cellSsgi dropped to the stand-in)" : r == 27 ? " fade (the band crossings at a0, unscaled)" : r == 25 ? " standin (no copy twin: GL's own cellAo texture stood in)" : r == 26 ? " copy (cellAo copied from one texel on in x)"
 			: r > 10 ? kindRedName[r - 11] : redName[r - 1],
 			passes ? "PASSED" : vch ? "FAIL" : "TESTS NOTHING", over, vch, rr ? "" : "; refused: ", rr ? "" : rw.c_str() );
 		ok = ok && !passes && vch > 0;
@@ -1307,7 +1390,9 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			sharedTargetDrop( csmKey );
 		if ( aoTex )
 			glDeleteTextures( 1, &aoTex );
-		if ( rt || kind == 5 || kind == 6 )
+		if ( ssgiTex )
+			sharedTargetDrop( ssgiKey );
+		if ( rt || kind == 5 || kind == 6 || kind == 7 )
 			colPrintf( "BLVIEW colour %s\n", ok ? "OK" : "FAILED" );
 		gColTwin = gColKind = 0;
 		gColTag = "";
