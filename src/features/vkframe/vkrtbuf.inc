@@ -324,8 +324,7 @@ bool rtImgShare( int slot, std::uintptr_t key, int w, int h, unsigned fbo, int a
 				R.st.dropped[slot]++;
 			R.gen++;
 		}
-		rtImgSay();
-		return false;
+		return false;  // the owner says once a pass (rtImgSay), after both slots
 	}
 	Gl & g = gl();
 	if ( !kept || t != before ) {  // made (or remade at a new size): GL's sampling state, as giHalfPass set it on its own texture
@@ -351,7 +350,6 @@ bool rtImgShare( int slot, std::uintptr_t key, int w, int h, unsigned fbo, int a
 	R.w[slot] = R.st.w[slot] = w;
 	R.h[slot] = R.st.h[slot] = h;
 	tex = t;
-	rtImgSay();
 	return true;
 }
 
@@ -369,7 +367,6 @@ void rtImgDrop( int slot, std::uintptr_t key )
 	R.st.w[slot] = R.st.h[slot] = 0;
 	R.st.dropped[slot]++;
 	R.gen++;
-	rtImgSay();
 }
 
 void rtImgOwner( int slot, std::function<bool( std::string & why )> fresh )
@@ -405,7 +402,7 @@ bool rtImgOf( const char * name, RtImg & out, std::string & why )
 	if ( !R.fresh[slot]( w ) )
 		return refuse( w );
 	const Shared * s = sharedFind( R.key[slot] );
-	if ( !s || !s->img || s->tex != R.tex[slot] )
+	if ( !s || !s->img || !s->view || s->tex != R.tex[slot] )
 		return refuse( "not on the present device (never made, or dropped)" );
 	if ( s->w != R.w[slot] || s->h != R.h[slot] || s->glFmt != kRtImgFmt )
 		return refuse( "the shared image is " + std::to_string( s->w ) + "x" + std::to_string( s->h ) + ", the owner's " + std::to_string( R.w[slot] )
@@ -413,6 +410,7 @@ bool rtImgOf( const char * name, RtImg & out, std::string & why )
 	out.key = R.key[slot];
 	out.glTex = s->tex;
 	out.glFmt = kRtImgFmt;
+	out.view = std::uint64_t( reinterpret_cast<std::uintptr_t>( s->view ) );
 	out.w = s->w;
 	out.h = s->h;
 	out.gen = R.gen;

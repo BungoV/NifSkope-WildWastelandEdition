@@ -656,6 +656,7 @@ void giHalfPass( Scene * scene, AoGpu & g, int W, int H, float p00, float p11 )
 	g.giStep = rate == 1 || ( rate == 0 && !wwCellPrtOn() ) ? 1 : 2;
 	const int hw = WwVkPresent::rtImgSize( W, g.giStep ), hh = WwVkPresent::rtImgSize( H, g.giStep );
 	giShare( fn, g, r, hw, hh );
+	WwVkPresent::rtImgSay();  // once a pass, after both slots (the `vk rtimg:` line)
 	aoAlloc( fn, g.giHalf, hw, hh, GL_RGBA32F, GL_RGBA, false );
 	if ( !g.giKey )
 		fn->glGenTextures( 1, &g.giKey );

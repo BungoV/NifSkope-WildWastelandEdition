@@ -113,6 +113,7 @@ struct RtImgStat
 RtImgStat rtImgStat();
 //! the `vk rtimg:` line (both slots: size, made / dropped, lookups, refusals, the last refusal, the red)
 std::string rtImgLine();
-//! the line on the app's log (stderr without Qt), at most once a 5 s window and only when it changed
+//! the line on the app's log (stderr without Qt), at most once a 5 s window and only when it changed.
+//! The owner calls it once a pass AFTER sharing both slots (rtImgShare / rtImgDrop do not say); lookups say too
 void rtImgSay();
 }  // namespace WwVkPresent
