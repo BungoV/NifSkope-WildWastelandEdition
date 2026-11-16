@@ -217,6 +217,13 @@ bool smpOf( Smp & s, int W, int H )
 		s.d = 6;
 		s.levels = 7;
 	}
+	// lane VKFLIGHT1: WD_LUTFMT (waterdraw.sh reads it off the app's upload) = the app's own 16^3 grade LUT format
+	if ( n == "cellIsLut" ) {
+		if ( const char * lf = getenv( "WD_LUTFMT" ) ) {
+			s.fmt = GLenum( std::strtoul( lf, nullptr, 0 ) );
+			s.w = s.h = s.d = 16;
+		}
+	}
 	// the judged runs sample at anisotropy 1 on both sides (NV's anisotropic footprint differs GL vs Vulkan at the same
 	// maxAnisotropy: skill ww-gl-vk-interop, VKOBJ4's colour arm); the app's 16 is drawn once more and logged, not judged
 	s.appAniso = s.aniso;

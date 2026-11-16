@@ -103,6 +103,20 @@ inline bool waterIntFormat( unsigned f )
 	return f >= 0x8231 && f <= 0x823C;  // R8I .. RG32UI
 }
 
+/* lane VKFLIGHT1: a bound plain cube (the far ground's CubeMap: the material's env cube or the gray fallback, bungo's
+ * Goodneighbor flight 11-16 refused "sampler kinds CubeMap" on every draw) takes farTwin's plain cube (type 4, as the
+ * objects' cubes); cube arrays and BC go through farTwin too */
+inline bool waterViaFar( const WaterSlot & s )
+{
+	return s.kind == 3 || s.kind == 4 || waterBcFormat( s.glFmt );
+}
+
+//! layers / depth of level l in glCopyImageSubData's terms (a cube: its 6 faces)
+inline int waterCopyDepth( const WaterSlot & s, int l )
+{
+	return s.kind == 1 ? std::max( s.d >> l, 1 ) : ( s.kind == 2 || s.kind == 4 ) ? s.d : s.kind == 3 ? 6 : 1;
+}
+
 inline int waterSlotBlock( const WaterSlot & s, const WaterCaps & c )
 {
 	if ( s.kind == 5 )
@@ -111,7 +125,7 @@ inline int waterSlotBlock( const WaterSlot & s, const WaterCaps & c )
 		return c.cubeArray ? kWaterOk : kWaterCubeArray;
 	if ( s.kind == 3 && !s.tex )
 		return kWaterOk;  // lane VKFAR2: GL's unbound cube reads 0 (the rings' zero cube; the water's draw refuses it)
-	if ( s.kind < 0 || s.kind > 2 )
+	if ( s.kind < 0 || s.kind > 3 || ( s.kind == 3 && s.w != s.h ) )
 		return kWaterKind;
 	if ( !s.tex )
 		return kWaterOk;  // GL's zero texture: a zero twin

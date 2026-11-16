@@ -133,6 +133,8 @@ struct Smp
 	bool intF = false, depth = false, compare = false, unbound = false;
 	GLuint tex = 0, buf = 0;
 	float phase[4] = {};  // a mipped map's smooth field (fill)
+	bool rgbBytes = false;  // lane VKFLIGHT1: uploaded as celllights.cpp's LUT (glTexImage3D from GL_RGB bytes)
+	std::vector<std::uint8_t> bytes;
 };
 
 bool g_mipNoise = false;  // the logged arm: noise in every mip level (judged runs: the smooth field)
@@ -183,6 +185,22 @@ bool smpOf( Smp & s, int W, int H )
 	} else if ( n == "ussTerrMap" || n == "ussContactMap" ) {
 		s.fmt = 0x822E;  // R32F
 	}
+	/* lane VKFLIGHT1: FLD_FLIGHT=1 binds the two inputs bungo's Goodneighbor flight (11-16) refused on every far ground draw
+	 * as the app does: cellIsLut 16^3 from RGB bytes in FLD_LUTFMT (celllights.cpp's internal format; the .sh reads it from
+	 * the app source), CubeMap a bound mipped cube (setupProgramCE1 binds the material's env cube or the gray one) */
+	if ( std::getenv( "FLD_FLIGHT" ) ) {
+		if ( n == "cellIsLut" && s.kind == 1 ) {
+			const char * lf = std::getenv( "FLD_LUTFMT" );
+			s.w = s.h = s.d = 16;
+			s.fmt = GLenum( std::strtoul( lf ? lf : "0x8051", nullptr, 0 ) );
+			s.rgbBytes = true;
+		} else if ( n == "CubeMap" && s.kind == 3 ) {
+			s.unbound = false;
+			s.fmt = 0x8058;  // RGBA8
+			s.w = s.h = 32;
+			s.levels = 6;
+		}
+	}
 	return true;
 }
 
@@ -199,6 +217,64 @@ bool fill( Smp & s, std::mt19937 & rng )
 		return true;
 	std::uniform_real_distribution<float> u01( 0.0f, 1.0f );
 	const unsigned tg = targetOf( s.kind );
+	if ( s.rgbBytes ) {  // lane VKFLIGHT1: celllights.cpp's LUT upload (linear, clamped, unpack alignment 1)
+		std::uniform_int_distribution<int> b( 0, 255 );
+		// random bytes: an identity-like grade (tried 11-16) hid fargrounddraw's reds 128 / 256 / 512 under the LDR grade
+		s.bytes.resize( size_t( s.w ) * size_t( s.h ) * size_t( s.d ) * 3u );
+		for ( auto & x : s.bytes )
+			x = std::uint8_t( b( rng ) );
+		if ( !s.tex )
+			glGenTextures( 1, &s.tex );
+		glBindTexture( tg, s.tex );
+		glTexParameteri( tg, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+		glTexParameteri( tg, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		glTexParameteri( tg, GL_TEXTURE_WRAP_S, 0x812F );
+		glTexParameteri( tg, GL_TEXTURE_WRAP_T, 0x812F );
+		glTexParameteri( tg, 0x8072, 0x812F );
+		glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
+		f.texImage3D( tg, 0, GLint( s.fmt ), s.w, s.h, s.d, 0, GL_RGB, GL_UNSIGNED_BYTE, s.bytes.data() );
+		glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
+		const GLenum e = glGetError();
+		if ( e != GL_NO_ERROR )
+			std::printf( "FARLODDRAW texture %s: GL error 0x%X\n", s.name.c_str(), e );
+		return e == GL_NO_ERROR;
+	}
+	if ( s.kind == 3 ) {  // lane VKFLIGHT1: a bound cube (FLD_FLIGHT), one smooth field per face and level
+		const bool fresh = !s.tex;
+		glEnable( 0x884F );  // GL_TEXTURE_CUBE_MAP_SEAMLESS: the app's state (gltex.cpp:531); Vulkan's cubes are always seamless
+		if ( fresh ) {
+			glGenTextures( 1, &s.tex );
+			glBindTexture( tg, s.tex );
+			ex.texStorage2D( tg, s.levels, s.fmt, s.w, s.h );
+			glTexParameteri( tg, GL_TEXTURE_MIN_FILTER, s.levels > 1 ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR );
+			glTexParameteri( tg, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+			glTexParameteri( tg, GL_TEXTURE_WRAP_S, 0x812F );
+			glTexParameteri( tg, GL_TEXTURE_WRAP_T, 0x812F );
+			glTexParameteri( tg, 0x8072, 0x812F );
+			glTexParameteri( tg, fMaxLevel, s.levels - 1 );
+		}
+		glBindTexture( tg, s.tex );
+		for ( float & ph : s.phase )
+			ph = u01( rng );
+		for ( int l = 0; l < s.levels; l++ ) {
+			const int lw = std::max( s.w >> l, 1 );
+			std::vector<float> data( size_t( lw ) * size_t( lw ) * 4u );
+			for ( int face = 0; face < 6; face++ ) {
+				for ( int j = 0; j < lw; j++ )
+					for ( int i = 0; i < lw; i++ )
+						for ( int c = 0; c < 4; c++ ) {
+							const float u = ( float( i ) + 0.5f ) / float( lw ), v = ( float( j ) + 0.5f ) / float( lw ), k = 6.2831853f;
+							data[( size_t( j ) * size_t( lw ) + size_t( i ) ) * 4u + size_t( c )] =
+								0.5f + 0.35f * std::sin( k * ( u + s.phase[c] + 0.17f * float( face ) ) ) * std::cos( k * ( v + s.phase[( c + 1 ) & 3] ) );
+						}
+				glTexSubImage2D( GLenum( 0x8515 + face ), l, 0, 0, lw, lw, GL_RGBA, GL_FLOAT, data.data() );
+			}
+		}
+		const GLenum e = glGetError();
+		if ( e != GL_NO_ERROR )
+			std::printf( "FARLODDRAW texture %s: GL error 0x%X\n", s.name.c_str(), e );
+		return e == GL_NO_ERROR;
+	}
 	if ( s.kind == 5 ) {
 		if ( !s.tex ) {
 			glGenTextures( 1, &s.tex );

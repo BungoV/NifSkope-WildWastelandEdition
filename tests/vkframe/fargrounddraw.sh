@@ -11,6 +11,13 @@ PY="${PY:-$(command -v python)}"	# before the UCRT64 PATH
 DXC="${DXC:-/e/Tools/dxc/bin/x64/dxc.exe}"
 if powershell -NoProfile -Command "if (Get-Process NifSkope,Fallout4 -ErrorAction SilentlyContinue) { 'busy' }" | grep -q busy; then echo "FARGROUNDDRAW GATE FAILED (NifSkope or the game runs: no window of ours now)"; exit 1; fi
 mkdir -p "$OUT"
+# lane VKFLIGHT1: FLD_FLIGHT=1 binds bungo's flight inputs (cellIsLut in the app's own LUT format, a bound CubeMap) and turns them on
+if [ -n "${FLD_FLIGHT:-}" ]; then
+	LF=$(grep -o 'glTexImage3D( GL_TEXTURE_3D, 0, GL_RGBA\?8, 16, 16, 16' "$ROOT/src/gl/celllights.cpp" | grep -o 'GL_RGBA\?8')
+	case "$LF" in GL_RGB8) export FLD_LUTFMT=0x8051 ;; GL_RGBA8) export FLD_LUTFMT=0x8058 ;; *) echo "FARGROUNDDRAW GATE FAILED (the app's LUT upload not found: '$LF')"; exit 1 ;; esac
+	export FLD_SET="${FLD_SET:-hasCubeMap=1,cellIsLutOn=1}"
+	echo "FARGROUNDDRAW flight arm: the app's LUT is $LF ($FLD_LUTFMT), FLD_SET $FLD_SET"
+fi
 # BATCH1117: GL's program is the HLSL-built SPIR-V pair (build_all into $FARGROUNDDRAW_SPVSET, default $OUT/spvset)
 "$PY" -I "$ROOT/tests/vkframe/fargrounddraw_prep.py" "$OUT" ${FARGROUNDDRAW_SPVSET:-} ||{ echo "FARGROUNDDRAW GATE FAILED (job)"; exit 1; }
 g++ -O2 -std=c++17 -pthread -I"$ROOT/src" "$ROOT/tests/vkframe/fargrounddraw.cpp" -o "$OUT/fargrounddraw.exe" -lopengl32 -lgdi32 -luser32 \

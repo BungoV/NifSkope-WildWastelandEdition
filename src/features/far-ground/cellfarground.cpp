@@ -1706,8 +1706,9 @@ static bool vkDrawLive( Scene * scene, NifSkopeOpenGLContext::Program * prog, in
 		GLint drawFb = 0;
 		fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFb );
 		color = wwCellHdrVkToneColor( GLuint( drawFb ) );
-		if ( !color )
-			no = "the draw target is not the shared tone frame";
+		if ( !color )	// lane VKFLIGHT1: which one (bungo's flight: 7239 draws a window, the source unnamed)
+			no = wwCellHdrIsFrame( GLuint( drawFb ) ) ? "the draw target is not the shared tone frame (the linear frame, not shared this frame)"
+				: "the draw target is not the shared tone frame (another framebuffer: a capture or probe pass)";
 	}
 	if ( !no ) {
 		GLint cur = 0;
@@ -1820,8 +1821,9 @@ bool vkDraw( Scene * scene, NifSkopeOpenGLContext::Program * prog, int block, in
 		GLint drawFb = 0;
 		fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFb );
 		color = wwCellHdrVkToneColor( GLuint( drawFb ) );
-		if ( !color )
-			no = "the draw target is not the shared tone frame";
+		if ( !color )	// lane VKFLIGHT1: which one (bungo's flight: 7239 draws a window, the source unnamed)
+			no = wwCellHdrIsFrame( GLuint( drawFb ) ) ? "the draw target is not the shared tone frame (the linear frame, not shared this frame)"
+				: "the draw target is not the shared tone frame (another framebuffer: a capture or probe pass)";
 	}
 	if ( !no ) {
 		GLint cur = 0;

@@ -918,7 +918,15 @@ int main( int argc, char ** argv )
 				const bool ok = pk[0] >= 1.0f / pd[0] && pk[1] >= 1.0f / pd[1] && pk[2] >= 1.0f / pd[0] && pk[3] >= 1.0f / pd[1];
 				std::printf( "FARGNDRTDRAW seed %d volPackDims %g x %g x %g (volTex), volPack shares %s the half-texel clamp\n", seed,
 					double( pd[0] ), double( pd[1] ), double( pd[2] ), ok ? "inside" : "OUTSIDE" );
-				if ( !ok )
+				if ( !ok && lp >= 0 ) {	// lane VKFLIGHT1 (VKGROUND17's rule): seeding, never the bar (the flight arm's rng stream seeded a share under one texel)
+					for ( int c = 0; c < 4; c++ ) {
+						const float lo = 1.0f / pd[c % 2];
+						pk[c] = pk[c] < lo ? lo : pk[c];
+					}
+					f.uniform4fv( lp, 1, pk );
+					std::printf( "FARGNDRTDRAW seed %d volPack raised to one texel of the air volume: %g %g %g %g (seeding)\n", seed,
+						double( pk[0] ), double( pk[1] ), double( pk[2] ), double( pk[3] ) );
+				} else if ( !ok )
 					return fatal( "volPack under one texel of the air volume (wwGridAt's clamp undefined)" );
 			} else if ( l >= 0 )
 				return fatal( "volPackDims read but no volTex sampler" );

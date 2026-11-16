@@ -1857,7 +1857,9 @@ void wwCellLightsUniforms( Scene * scene )
 		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
 		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE );
 		fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
-		fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_RGB8, 16, 16, 16, 0, GL_RGB, GL_UNSIGNED_BYTE, LI->isLut.data() );
+		// lane VKFLIGHT1: RGBA8 storage (the same RGB bytes, alpha 1): the Vulkan twins have no RGB8 (bungo's Goodneighbor
+		// flight 11-16: far ground and water refused "other formats cellIsLut(0x8051)" on every draw)
+		fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_RGBA8, 16, 16, 16, 0, GL_RGB, GL_UNSIGNED_BYTE, LI->isLut.data() );
 		fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
 		g.lutDoc = scene->nifModel;
 		g.lutVersion = s.version.value( scene->nifModel );

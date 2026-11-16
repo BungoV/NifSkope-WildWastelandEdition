@@ -28,6 +28,8 @@ unsigned int wwCellHdrDepthFormat( unsigned int fbo );
 //! lane VKSKY1: the linear frame's colour name when `fbo` is its framebuffer and that colour is the present device's
 //! tone frame (WwVkPresent::toneFrame), else 0: the sky may draw there on Vulkan
 unsigned int wwCellHdrVkToneColor( unsigned int fbo );
+//! lane VKFLIGHT1: `fbo` is a linear frame's framebuffer (shared with Vulkan or not)
+bool wwCellHdrIsFrame( unsigned int fbo );
 //! MODULES1: the linear frame's last depth target for this scene's renderer (size, samples, GLenum format), as the
 //! obscurance's depth pre-pass must match it for the blit; false before the first complete frame
 bool wwCellHdrDepthSpec( Scene * scene, int & w, int & h, int & samples, unsigned int & format );

@@ -1263,6 +1263,8 @@ bool waterTwin( std::uintptr_t key, const WaterSlot & s, unsigned & tex, std::st
 	}
 	if ( s.kind == 4 )
 		return farTwin( key, 3, s.w, s.h, s.d, s.glFmt, tex, why, s.levels );
+	if ( s.kind == 3 )  // lane VKFLIGHT1: a bound plain cube (GL_TEXTURE_CUBE_MAP, 6 faces)
+		return farTwin( key, 4, s.w, s.h, 6, s.glFmt, tex, why, s.levels );
 	if ( s.kind < 0 || s.kind > 2 || ( s.kind == 1 && waterBcFormat( s.glFmt ) ) ) {
 		why = s.name + ": no twin for this sampler kind / format";
 		return false;
@@ -1276,7 +1278,7 @@ void waterTwinDrop( std::uintptr_t key, const WaterSlot & s )
 {
 	if ( s.kind == 5 )
 		farTexelBufferDrop( key );
-	else if ( s.kind == 4 || waterBcFormat( s.glFmt ) )
+	else if ( waterViaFar( s ) )
 		farTwinDrop( key );
 	else
 		sharedTargetDrop( key );
@@ -1652,7 +1654,7 @@ bool waterRun( const WaterRun & r, std::string & why )
 				unsigned twin = 0;
 				if ( !waterTwin( key, *s, twin, w ) )
 					return refuse( std::string( nm ) + ": " + w );
-				const bool viaFar = s->kind == 4 || waterBcFormat( s->glFmt );
+				const bool viaFar = waterViaFar( *s );
 				const Shared * sh = viaFar ? farTwinFind( key ) : sharedFind( key );
 				if ( !sh || !sh->view )
 					return refuse( std::string( nm ) + ": its twin has no view" );
@@ -1661,7 +1663,7 @@ bool waterRun( const WaterRun & r, std::string & why )
 				const GLenum target = kTarget[std::clamp( s->kind, 0, 4 )];
 				for ( int l = 0; l < std::max( s->levels, 1 ); l++ ) {
 					const int lw = std::max( s->w >> l, 1 ), lh = std::max( s->h >> l, 1 );
-					const int ld = s->kind == 1 ? std::max( s->d >> l, 1 ) : ( s->kind == 2 || s->kind == 4 ) ? s->d : 1;
+					const int ld = waterCopyDepth( *s, l );
 					g.copyImageSubData( s->tex, target, l, 0, 0, 0, twin, target, l, 0, 0, 0, lw, lh, ld );
 				}
 				S.copies++;
@@ -2123,7 +2125,7 @@ static bool twinRun( WaterDraw & D, const TwinSpec & P, const WaterRun & r, std:
 				unsigned twin = 0;
 				if ( !waterTwin( key, *s, twin, w ) )
 					return refuse( std::string( nm ) + ": " + w );
-				const bool viaFar = s->kind == 4 || waterBcFormat( s->glFmt );
+				const bool viaFar = waterViaFar( *s );
 				const Shared * sh = viaFar ? farTwinFind( key ) : sharedFind( key );
 				if ( !sh || !sh->view )
 					return refuse( std::string( nm ) + ": its twin has no view" );
@@ -2132,7 +2134,7 @@ static bool twinRun( WaterDraw & D, const TwinSpec & P, const WaterRun & r, std:
 				const GLenum target = kTarget[std::clamp( s->kind, 0, 4 )];
 				for ( int l = 0; l < std::max( s->levels, 1 ); l++ ) {
 					const int lw = std::max( s->w >> l, 1 ), lh = std::max( s->h >> l, 1 );
-					const int ld = s->kind == 1 ? std::max( s->d >> l, 1 ) : ( s->kind == 2 || s->kind == 4 ) ? s->d : 1;
+					const int ld = waterCopyDepth( *s, l );
 					g.copyImageSubData( s->tex, target, l, 0, 0, 0, twin, target, l, 0, 0, 0, lw, lh, ld );
 				}
 				S.copies++;
@@ -2569,7 +2571,7 @@ static bool twinRunN( WaterDraw & D, const TwinSpec & P, const WaterRun * const 
 			unsigned twin = 0;
 			if ( !waterTwin( key, *s, twin, w ) )
 				return refuse( std::string( nm ) + ": " + w );
-			const bool viaFar = s->kind == 4 || waterBcFormat( s->glFmt );
+			const bool viaFar = waterViaFar( *s );
 			const Shared * sh = viaFar ? farTwinFind( key ) : sharedFind( key );
 			if ( !sh || !sh->view )
 				return refuse( std::string( nm ) + ": its twin has no view" );
@@ -2578,7 +2580,7 @@ static bool twinRunN( WaterDraw & D, const TwinSpec & P, const WaterRun * const 
 			const GLenum target = kTarget[std::clamp( s->kind, 0, 4 )];
 			for ( int l = 0; l < std::max( s->levels, 1 ); l++ ) {
 				const int lw = std::max( s->w >> l, 1 ), lh = std::max( s->h >> l, 1 );
-				const int ld = s->kind == 1 ? std::max( s->d >> l, 1 ) : ( s->kind == 2 || s->kind == 4 ) ? s->d : 1;
+				const int ld = waterCopyDepth( *s, l );
 				g.copyImageSubData( s->tex, target, l, 0, 0, 0, twin, target, l, 0, 0, 0, lw, lh, ld );
 			}
 			S.copies++;

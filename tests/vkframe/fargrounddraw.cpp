@@ -852,7 +852,15 @@ int main( int argc, char ** argv )
 				const bool ok = pk[0] >= 1.0f / pd[0] && pk[1] >= 1.0f / pd[1] && pk[2] >= 1.0f / pd[0] && pk[3] >= 1.0f / pd[1];
 				std::printf( "FARGROUNDDRAW seed %d volPackDims %g x %g x %g (volTex), volPack shares %s the half-texel clamp\n", seed,
 					double( pd[0] ), double( pd[1] ), double( pd[2] ), ok ? "inside" : "OUTSIDE" );
-				if ( !ok )
+				if ( !ok && lp >= 0 ) {	// lane VKFLIGHT1 (VKGROUND17's rule): seeding, never the bar (the flight arm's rng stream seeded a share under one texel)
+					for ( int c = 0; c < 4; c++ ) {
+						const float lo = 1.0f / pd[c % 2];
+						pk[c] = pk[c] < lo ? lo : pk[c];
+					}
+					f.uniform4fv( lp, 1, pk );
+					std::printf( "FARGROUNDDRAW seed %d volPack raised to one texel of the air volume: %g %g %g %g (seeding)\n", seed,
+						double( pk[0] ), double( pk[1] ), double( pk[2] ), double( pk[3] ) );
+				} else if ( !ok )
 					return fatal( "volPack under one texel of the air volume (wwGridAt's clamp undefined)" );
 			} else if ( l >= 0 )
 				return fatal( "volPackDims read but no volTex sampler" );
@@ -893,6 +901,60 @@ int main( int argc, char ** argv )
 			std::printf( "FARGROUNDDRAW seed %d GL shared vs plain inputs: %s (%zu colour halves, %zu depth samples differ)\n", seed,
 				exact ? "EXACT" : "DIFFER", cDiff, dDiff );
 			gateOk = gateOk && exact;
+		}
+		if ( getenv( "FLD_FLIGHT" ) ) {	// lane VKFLIGHT1: the flight's inputs are read (GL moves without each), RGB8 = RGBA8 for GL
+			auto glMoved = [&]( const char * what ) {
+				before( fbRef );
+				drawState( fbRef, scissor );
+				glDraw();
+				stateEnd();
+				const std::vector<std::uint16_t> c = readColor( refCol );
+				size_t moved = 0;
+				for ( size_t i = 0; i < c.size() && i < glC.size(); i++ )
+					moved += c[i] != glC[i];
+				std::printf( "FARGROUNDDRAW seed %d flight probe %s: %zu colour halves moved\n", seed, what, moved );
+				return moved;
+			};
+			for ( Smp & s : smp ) {
+				if ( s.name != "CubeMap" && s.name != "cellIsLut" )
+					continue;
+				if ( s.unbound || !s.tex ) {
+					std::printf( "FARGROUNDDRAW seed %d flight: %s is not bound (FLD_FLIGHT made nothing)\n", seed, s.name.c_str() );
+					gateOk = false;
+					continue;
+				}
+				const GLuint keep = s.tex;	// drawState binds every s.tex: unbind through it
+				s.tex = 0;
+				const size_t moved = glMoved( ( s.name + " unbound" ).c_str() );
+				s.tex = keep;
+				/* seed 1 must see the LUT (seed 2's picture is dark and misses it). The CubeMap moved 0 on both seeds, and also
+				 * through cellProbe 50 (cubeK alone): GL's far ground does not read it here, so it is info only; the
+				 * plain cube copy (farTwin type 4) is VKOBJ5's objects gate's, this arm proves the refusal is gone */
+				if ( moved < 1000 && seed == 1 && s.name == "cellIsLut" ) {
+					std::printf( "FARGROUNDDRAW seed %d flight: %s moves under 1000 halves: the arm is blind to it\n", seed, s.name.c_str() );
+					gateOk = false;
+				}
+				if ( s.rgbBytes ) {	// the other internal format from the same bytes: GL's picture must not move
+					const GLenum other = s.fmt == 0x8051 ? 0x8058 : 0x8051;
+					GLuint t2 = 0;
+					glGenTextures( 1, &t2 );
+					glBindTexture( 0x806F, t2 );
+					glTexParameteri( 0x806F, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+					glTexParameteri( 0x806F, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+					glTexParameteri( 0x806F, GL_TEXTURE_WRAP_S, 0x812F );
+					glTexParameteri( 0x806F, GL_TEXTURE_WRAP_T, 0x812F );
+					glTexParameteri( 0x806F, 0x8072, 0x812F );
+					glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
+					f.texImage3D( 0x806F, 0, GLint( other ), s.w, s.h, s.d, 0, GL_RGB, GL_UNSIGNED_BYTE, s.bytes.data() );
+					glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
+					s.tex = t2;
+					const size_t m2 = glMoved( other == 0x8058 ? "cellIsLut as RGBA8" : "cellIsLut as RGB8" );
+					s.tex = keep;
+					glDeleteTextures( 1, &t2 );
+					std::printf( "FARGROUNDDRAW seed %d flight: GL's LUT RGB8 vs RGBA8 %s\n", seed, m2 ? "DIFFER" : "EXACT" );
+					gateOk = gateOk && !m2;
+				}
+			}
 		}
 		{
 			float lo[4] = { 1e30f, 1e30f, 1e30f, 1e30f }, hi[4] = { -1e30f, -1e30f, -1e30f, -1e30f };
@@ -1025,6 +1087,7 @@ int main( int argc, char ** argv )
 				exact ? "EXACT" : "DIFFER", cDiff, dDiff );
 			gateOk = gateOk && exact && ssgiOn == 1;
 			int copiesSsgi = -1;
+			const bool flight = getenv( "FLD_FLIGHT" ) != nullptr;	// lane VKFLIGHT1: the LUT's LDR grade hides red 512 (76644 halves, 2 past 1e-2)
 			for ( const int red : { 0, 512 } ) {
 				ss.tex = red ? 0 : shTex;	// red 512: cellSsgi unbound on the twin's side only (GL's reference read it)
 				before( fbFrame );
@@ -1060,8 +1123,9 @@ int main( int argc, char ** argv )
 					"(%zu past 1), colour %zu halves differ, %zu samples past 1e-2 (max rel %.3g), %d copies%s\n", red,
 					red ? " (cellSsgi dropped to the stand-in)" : " (cellSsgi shared)", v.word(), v.covered, v.both, v.onlyOne, v.maxDepthU,
 					v.depthPast, v.halvesDiff, v.colPast, v.maxRel, copies,
-					red ? ( fail ? " -> red FAILS as it must" : " -> red PASSES: the gate is blind" ) : "" );
-				if ( red ? !fail : fail )
+					red ? ( fail ? " -> red FAILS as it must" : flight ? " -> red passes under the flight arm's LDR grade (judged in the default arm)"
+					: " -> red PASSES: the gate is blind" ) : "" );
+				if ( red ? !fail && !flight : fail )
 					gateOk = false;
 			}
 			ss.tex = plainSsgi;

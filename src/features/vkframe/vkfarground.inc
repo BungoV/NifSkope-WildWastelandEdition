@@ -79,11 +79,31 @@ static WaterStat & farGroundGlS()
 	return s;
 }
 
+// lane VKFLIGHT1: GL draws by reason since the last line (bungo's flight said only the last draw's reason: windows mixed two)
+static std::map<std::string, int> & farGroundGlWhys( int mode )
+{
+	static std::map<std::string, int> m[2];
+	return m[mode & 1];
+}
+
+#ifndef WW_VKPRESENT_NO_QT
+static QString takeFarGroundGlWhys( int mode )
+{
+	std::map<std::string, int> & m = farGroundGlWhys( mode );
+	QString s;
+	for ( const auto & [why, n] : m )
+		s += ( s.isEmpty() ? QStringLiteral( "; GL by reason: " ) : QStringLiteral( ", " ) ) + QStringLiteral( "%1 x %2" ).arg( n ).arg( QString::fromStdString( why ) );
+	m.clear();
+	return s;
+}
+#endif
+
 void farGroundOnGl( const char * why )
 {
 	WaterStat & s = farGroundGlS();
 	s.gl++;
 	s.glWhy = why ? why : "";
+	farGroundGlWhys( 0 )[s.glWhy]++;
 }
 
 WaterStat takeFarGroundGlStat()
@@ -205,6 +225,7 @@ void farGroundLiveOnGl( const char * why )
 	WaterStat & s = farGroundLiveGlS();
 	s.gl++;
 	s.glWhy = why ? why : "";
+	farGroundGlWhys( 1 )[s.glWhy]++;
 }
 
 WaterStat takeFarGroundLiveGlStat()
@@ -261,6 +282,7 @@ void farGroundSay( bool wanted, const char * glWhy )
 		.arg( ds.failWhy.empty() ? QString() : QStringLiteral( ": " ) + QString::fromStdString( ds.failWhy ) ).arg( st.gl );
 	if ( !st.glWhy.empty() )
 		line += QStringLiteral( " (refused: %1)" ).arg( QString::fromStdString( st.glWhy ) );
+	line += takeFarGroundGlWhys( 0 );
 	for ( int v = 1; v <= 2; v++ ) {  // lane VKGROUND11: the RT GI keys' twins (one crossing a tile)
 		const FxStat rs = takeFarGroundRtDrawStat( v );
 		if ( rs.runs || rs.fails )
@@ -301,6 +323,7 @@ void farGroundLiveSay( bool wanted, const char * glWhy )
 		.arg( ds.failWhy.empty() ? QString() : QStringLiteral( ": " ) + QString::fromStdString( ds.failWhy ) ).arg( st.gl );
 	if ( !st.glWhy.empty() )
 		line += QStringLiteral( " (refused: %1)" ).arg( QString::fromStdString( st.glWhy ) );
+	line += takeFarGroundGlWhys( 1 );
 	for ( int v = 1; v <= 2; v++ ) {  // lane VKGROUND18: the RT GI keys' twins (one crossing a shape)
 		const FxStat rs = takeFarGroundLiveRtDrawStat( v );
 		if ( rs.runs || rs.fails )
