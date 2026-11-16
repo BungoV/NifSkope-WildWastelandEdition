@@ -11,6 +11,28 @@ Changed, not built, not checked live. Offline: tests/vkframe/airtemporalview.sh 
   buffers) that must all FAIL.
 - Left on GL by name: the integrate (stage 2) in that same branch, reached only when the Vulkan integrate is refused.
 
+## VKGROUND17..18 (2026-11-16): far ground mode 2 under the RT GI keys on the Vulkan view
+
+Changed, not checked live. Offline: tests/vkframe/fargndrtdraw.sh passes (GATE OK, 4 of 4 keys: both modes, both keys).
+
+- Mode 2 ("Live, cached pages", fo4_cellcsmfgp) now draws on the Vulkan view under the all-on RT key and the DDGI key too
+  (two new twins, fxWork kinds 25 / 26); before, those keys sent it back to GL by name. ReSTIR GI and any other key still
+  refuse by name. The frame line of mode 2 now names the RT / DG twins' draws, copies and fails.
+- Gate: as mode 1's, with mode 2's page pools at anisotropy 1 for the pixel compare (manager ruling 11-16) and the state
+  arm at 8; the DDGI atlas red is seeded one texel off (bar unchanged). Each red FAILS.
+
+## VKGROUND9..16 (2026-11-16): the far ground's live ring under the RT GI keys on the Vulkan view
+
+Changed, not checked live. Offline: tests/vkframe/fargndrtdraw.sh passes (GATE OK, both keys).
+
+- Ring 0's live ground (mode 1, the default far ground) now draws on the Vulkan view under the all-on RT key and the DDGI
+  key too (two new twins of fo4_cellcsmfgl); before, those keys sent it back to GL by name. ReSTIR GI still refuses by
+  name, and mode 2 ("Live, cached pages") under an RT key still draws on GL (its twins are open).
+- Gate: pixel compare against GL on two seeds, with the far ground's layer texture at anisotropy 1 on both sides
+  (manager ruling 11-16: NVIDIA's GL and Vulkan 8x anisotropic filtering differ on partly covered triangles); the app
+  keeps 8, and a state arm checks every input's sampler state at 8 against GL's. Reds: block offset, ReSTIR rewritten,
+  DDGI atlas one texel off, the other key's twin, anisotropy changed; each FAILS.
+
 ## BATCH1120 (2026-11-16): the glow shoulder acts smoothly over darker backgrounds
 
 Changed, not checked live. Offline: tests/vkframe/toneview.sh `BOTH both add B` (see notes/batch1120/next.md).

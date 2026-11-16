@@ -1669,6 +1669,8 @@ bool wantsFrames( Scene * scene )
 	return it != docs().constEnd() && it->gpu.ready == 3 && it->gpu.busy;
 }
 
+static int farGroundTwinOf( const std::string & d );
+
 /* lane VKGROUND3: a ring-0 shape of mode 2 (Show > Far ground: Live, cached pages; fo4_cellcsmfgp) on the Vulkan view, one
  * crossing a shape (red WW_VKVIEW_FARGROUNDLIVE_RED=1). Its inputs are the cell table and the two page pools: never copied
  * a draw, so the draw waits on GL until they are on the present device (key slots 3..5) */
@@ -1681,6 +1683,7 @@ static bool vkDrawLive( Scene * scene, NifSkopeOpenGLContext::Program * prog, in
 	auto fn = scene->renderer->fn;
 	const char * no = nullptr;
 	unsigned int color = 0;
+	const int v = farGroundTwinOf( prog->wwDefs );	// lane VKGROUND18: 0 base, 1 RT, 2 DG
 	constexpr int kPagesShared = 8 | 16 | 32;	// slots 3, 4, 5: fgCells, fgPagesN, fgPagesF
 	if ( std::string_view( prog->name ) != "fo4_cellcsmfgp.prog" )
 		no = "no sun shadows (fo4_cellfgp.prog): the twin is fo4_cellcsmfgp.prog only";
@@ -1690,8 +1693,10 @@ static bool vkDrawLive( Scene * scene, NifSkopeOpenGLContext::Program * prog, in
 		no = "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan twin";
 	else if ( !prog->wwShadowFrame )
 		no = "WW_FRAME_UBO off: GL's program is not the Vulkan twin";
-	else if ( prog->wwDefs != "WW_CELL_FOGLEAK+WW_FRAME_UBO" )	// RT GI / ReSTIR keys read inputs the twin has no slot for
-		no = "an RT GI / ReSTIR key in GL's program (cellDdgiAtlas, cellRestir, cellGiHalf): the twin is the base key only";
+	else if ( prog->wwDefs.find( "RESTIRGI" ) != std::string::npos )	// lane VKGROUND18: the base, RT and DG keys have twins
+		no = "ReSTIR GI's key in GL's program (no far ground mode 2 twin)";
+	else if ( v < 0 )
+		no = "a key in GL's program with no far ground mode 2 twin (base, RT, DG only)";
 	else if ( idxOff & 1 )
 		no = "an odd element offset";
 	else if ( const auto dit = docs().constFind( scene->nifModel );
@@ -1716,6 +1721,29 @@ static bool vkDrawLive( Scene * scene, NifSkopeOpenGLContext::Program * prog, in
 		WwVkPresent::farGroundLiveSay( true, nullptr );
 		return false;
 	}
+	if ( v > 0 ) {	// lane VKGROUND18: an RT GI key, mode 2's RT / DG twin (kinds 25 / 26), one crossing a shape
+		static WwVkPresent::WaterRun rr;
+		static char rtKeys[2][208];	// the RT / DG twins' keys (key + slot index; farStream at key + 200)
+		rr = WwVkPresent::WaterRun();
+		WwVkPresent::farGroundLiveRtStateOf( fn, prog->id, rr, v );
+		wwCellHdrFrameSize( rr.w, rr.h );
+		rr.color = color;
+		WwVkPresent::WaterCmd c;
+		c.count = std::uint32_t( indexCount );
+		c.instanceCount = 1;
+		c.firstIndex = std::uint32_t( idxOff / 2 );
+		c.baseVertex = baseVertex;
+		rr.cmds.push_back( c );
+		rr.key = reinterpret_cast<std::uintptr_t>( rtKeys[v - 1] );
+		std::string why;
+		const bool ok = WwVkPresent::farGroundLiveRtRun( rr, v, why );	// flushes mode 1's queue first
+		if ( !ok )
+			WwVkPresent::farGroundLiveOnGl( why.c_str() );	// GL draws it
+		else
+			PassTime::countDraw( 1 );
+		WwVkPresent::farGroundLiveSay( true, nullptr );
+		return ok;
+	}
 	static WwVkPresent::WaterRun r;
 	static char keys[192];	// the twins' keys (key + slot index)
 	r = WwVkPresent::WaterRun();
@@ -1739,6 +1767,19 @@ static bool vkDrawLive( Scene * scene, NifSkopeOpenGLContext::Program * prog, in
 	return ok;
 }
 
+/* lane VKGROUND11: GL's program key -> the far ground's (mode 1) twin: 0 the base key, 1 the all-on RT key (ReSTIR + RTDDGI +
+ * cascades), 2 the DG key (the Ray-traced GI row with no RT preset); -1 none (ReSTIR GI and every other key: GL draws) */
+static int farGroundTwinOf( const std::string & d )
+{
+	if ( d == "WW_CELL_FOGLEAK+WW_FRAME_UBO" )
+		return 0;
+	if ( d == "WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO" )
+		return 1;
+	if ( d == "WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO" )
+		return 2;
+	return -1;
+}
+
 bool vkDraw( Scene * scene, NifSkopeOpenGLContext::Program * prog, int block, int indexCount, long long idxOff, int baseVertex )
 {
 	if ( !scene || !scene->renderer || !prog || !ring0( scene->nifModel, block ) )
@@ -1753,6 +1794,7 @@ bool vkDraw( Scene * scene, NifSkopeOpenGLContext::Program * prog, int block, in
 	const std::string_view name( prog->name );
 	const char * no = nullptr;
 	unsigned int color = 0;
+	const int v = farGroundTwinOf( prog->wwDefs );	// lane VKGROUND11
 	if ( name == "fo4_cellcsmfgc.prog" || name == "fo4_cellfgc.prog" )
 		no = "red oldpages (fo4_cellcsmfgc, FARDRAW1's decal-only pages: no Vulkan twin)";
 	else if ( name != "fo4_cellcsmfgl.prog" )
@@ -1763,8 +1805,10 @@ bool vkDraw( Scene * scene, NifSkopeOpenGLContext::Program * prog, int block, in
 		no = "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan twin";
 	else if ( !prog->wwShadowFrame )
 		no = "WW_FRAME_UBO off: GL's program is not the Vulkan twin";
-	else if ( prog->wwDefs != "WW_CELL_FOGLEAK+WW_FRAME_UBO" )	// lane VKFAR15: RT GI / ReSTIR keys read inputs the twin has no slot for
-		no = "an RT GI / ReSTIR key in GL's program (cellDdgiAtlas, cellRestir, cellGiHalf): the twin is the base key only";
+	else if ( prog->wwDefs.find( "RESTIRGI" ) != std::string::npos )	// lane VKGROUND11: the base, RT and DG keys have twins
+		no = "ReSTIR GI's key in GL's program (no far ground twin)";
+	else if ( v < 0 )
+		no = "a key in GL's program with no far ground twin (base, RT, DG only)";
 	else if ( idxOff & 1 )
 		no = "an odd element offset";
 	else if ( const auto dit = docs().constFind( scene->nifModel ); dit == docs().constEnd() || ( dit->gpu.vkShared & 7 ) != 7 ) {
@@ -1790,6 +1834,30 @@ bool vkDraw( Scene * scene, NifSkopeOpenGLContext::Program * prog, int block, in
 		WwVkPresent::farGroundOnGl( no );
 		WwVkPresent::farGroundSay( true, nullptr );
 		return false;
+	}
+	if ( v > 0 ) {	// lane VKGROUND11: an RT GI key, one crossing a shape after the queued base tiles (GL's order)
+		vkFlush();
+		static WwVkPresent::WaterRun rr;
+		static char rtKeys[2][208];	// the RT / DG twins' keys (key + slot index; farStream at key + 200)
+		rr = WwVkPresent::WaterRun();
+		WwVkPresent::farGroundRtStateOf( fn, prog->id, rr, v );
+		wwCellHdrFrameSize( rr.w, rr.h );
+		rr.color = color;
+		WwVkPresent::WaterCmd c;
+		c.count = std::uint32_t( indexCount );
+		c.instanceCount = 1;
+		c.firstIndex = std::uint32_t( idxOff / 2 );
+		c.baseVertex = baseVertex;
+		rr.cmds.push_back( c );
+		rr.key = reinterpret_cast<std::uintptr_t>( rtKeys[v - 1] );
+		std::string why;
+		const bool ok = WwVkPresent::farGroundRtRun( rr, v, why );
+		if ( !ok )
+			WwVkPresent::farGroundOnGl( why.c_str() );	// GL draws it
+		else
+			PassTime::countDraw( 1 );
+		WwVkPresent::farGroundSay( true, nullptr );
+		return ok;
 	}
 	static WwVkPresent::WaterRun r;
 	static char keys[192];	// the twins' keys (key + slot index)

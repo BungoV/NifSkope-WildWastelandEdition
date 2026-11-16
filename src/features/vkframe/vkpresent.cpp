@@ -5754,7 +5754,7 @@ struct Fx
 	VkFence fence = VK_NULL_HANDLE;
 	bool pending = false;
 	// this run's job, written by the drawing thread before the hand
-	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1), 3 the far cards (lane VKFAR2), 4 the water draw (lane VKWATER3), 6 the fog bloom (lane VKFAR2), 8 rain / snow (lane VKFAR2), 9 the far ground (lane VKFAR3), 10 the underwater fog (lane VKWATER4), 11 the TAA mask's reactive pass (lane VKFAR7), 12 the cloud shadow map (lane VKCLOUD3), 13 the cloud map (lane VKCLOUD4), 14 the farthest depth (lane VKSMALL2), 15 the shading rate images (lane VKSMALL3), 16 the soft-effect layer (lane VKSMALL5), 17 the lightning strips' preview (lane VKOBJ15), 18 far ground mode 2 (lane VKGROUND3), 19 the fly box's bake (lane VKCLOUD5), 21 / 22 the far LOD rings' RT / DG twins (lane VKFAR26)
+	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1), 3 the far cards (lane VKFAR2), 4 the water draw (lane VKWATER3), 6 the fog bloom (lane VKFAR2), 8 rain / snow (lane VKFAR2), 9 the far ground (lane VKFAR3), 10 the underwater fog (lane VKWATER4), 11 the TAA mask's reactive pass (lane VKFAR7), 12 the cloud shadow map (lane VKCLOUD3), 13 the cloud map (lane VKCLOUD4), 14 the farthest depth (lane VKSMALL2), 15 the shading rate images (lane VKSMALL3), 16 the soft-effect layer (lane VKSMALL5), 17 the lightning strips' preview (lane VKOBJ15), 18 far ground mode 2 (lane VKGROUND3), 19 the fly box's bake (lane VKCLOUD5), 21 / 22 the far LOD rings' RT / DG twins (lane VKFAR26), 23 / 24 the far ground's RT / DG twins (lane VKGROUND11)
 	VkFramebuffer fbAir = VK_NULL_HANDLE, fbM = VK_NULL_HANDLE, fbR = VK_NULL_HANDLE;
 	int w = 0, h = 0, vp[4] = {}, stencilRef = 1, march = kFxMarch, resolve = kFxResolve, mw = 0, mh = 0, hw = 0, hh = 0;
 	bool blend = false, skipMarch = false;
@@ -6200,7 +6200,7 @@ bool fxWork( std::string & why )
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
 		}
-	} else if ( F.kind == 4 || F.kind == 5 || F.kind == 9 || F.kind == 18 || F.kind == 21 || F.kind == 22 ) {  // lane VKGROUND3: 18 far ground mode 2; lane VKWATER3: the shaded water draw; lane VKFAR2: 5 the far LOD rings; lane VKFAR3: 9 the far ground; VKFAR26: 21 / 22 the rings' RT / DG twins
+	} else if ( F.kind == 4 || F.kind == 5 || F.kind == 9 || F.kind == 18 || F.kind == 21 || F.kind == 22 || F.kind == 23 || F.kind == 24 || F.kind == 25 || F.kind == 26 ) {  // lane VKGROUND18: 25 / 26 mode 2's RT / DG; lane VKGROUND3: 18 far ground mode 2; lane VKWATER3: the shaded water draw; lane VKFAR2: 5 the far LOD rings; lane VKFAR3: 9 the far ground; VKFAR26: 21 / 22 the rings' RT / DG twins
 		if ( !waterRecord( why ) ) {
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
@@ -10409,6 +10409,7 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 #include "features/vkframe/vkwater.inc"  // lane VKWATER1: the water's route and census (row G5)
 #include "features/vkframe/vkfarground.inc"  // lane VKFAR3: the far ground's ring-0 terrain (row G3)
 #include "features/vkframe/vkfarlodrt.inc"  // lane VKFAR26: the far LOD rings' RT GI twins (fxWork kinds 21 / 22)
+#include "features/vkframe/vkfargroundrt.inc"  // lane VKGROUND11: the far ground's RT GI twins (fxWork kinds 23 / 24)
 #include "features/vkframe/vkunder.inc"  // lane VKWATER4 (L7): the underwater fog on the view
 #include "features/vkframe/vktaareactive.inc"  // lane VKFAR7: the TAA mask's reactive pass (taainputs.cpp pass 4)
 #include "features/vkframe/vklamp.inc"  // lane VKLAMP1: the lamps' plain shadow cubes (celllamps.cpp)

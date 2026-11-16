@@ -261,6 +261,13 @@ void farGroundSay( bool wanted, const char * glWhy )
 		.arg( ds.failWhy.empty() ? QString() : QStringLiteral( ": " ) + QString::fromStdString( ds.failWhy ) ).arg( st.gl );
 	if ( !st.glWhy.empty() )
 		line += QStringLiteral( " (refused: %1)" ).arg( QString::fromStdString( st.glWhy ) );
+	for ( int v = 1; v <= 2; v++ ) {  // lane VKGROUND11: the RT GI keys' twins (one crossing a tile)
+		const FxStat rs = takeFarGroundRtDrawStat( v );
+		if ( rs.runs || rs.fails )
+			line += QStringLiteral( "; %1 twin: %2 draws, %3 ms CPU each, %4 copies, %5 fails%6" ).arg( v == 1 ? "RT" : "DG" ).arg( rs.runs )
+				.arg( rs.runs ? rs.cpuMs / rs.runs : 0.0, 0, 'f', 3 ).arg( rs.copies ).arg( rs.fails )
+				.arg( rs.failWhy.empty() ? QString() : QStringLiteral( ": " ) + QString::fromStdString( rs.failWhy ) );
+	}
 	if ( bs.crossings || bs.lost || bs.off )  // lane VKFAR4: the tiles batched into crossings
 		line += QStringLiteral( "; batched: %1 crossings for %2 draws, %3 lost, %4 fence slips%5" ).arg( bs.crossings ).arg( bs.draws )
 			.arg( bs.lost ).arg( bs.slips )
@@ -294,6 +301,13 @@ void farGroundLiveSay( bool wanted, const char * glWhy )
 		.arg( ds.failWhy.empty() ? QString() : QStringLiteral( ": " ) + QString::fromStdString( ds.failWhy ) ).arg( st.gl );
 	if ( !st.glWhy.empty() )
 		line += QStringLiteral( " (refused: %1)" ).arg( QString::fromStdString( st.glWhy ) );
+	for ( int v = 1; v <= 2; v++ ) {  // lane VKGROUND18: the RT GI keys' twins (one crossing a shape)
+		const FxStat rs = takeFarGroundLiveRtDrawStat( v );
+		if ( rs.runs || rs.fails )
+			line += QStringLiteral( "; %1 twin: %2 draws, %3 ms CPU each, %4 copies, %5 fails%6" ).arg( v == 1 ? "RT" : "DG" ).arg( rs.runs )
+				.arg( rs.runs ? rs.cpuMs / rs.runs : 0.0, 0, 'f', 3 ).arg( rs.copies ).arg( rs.fails )
+				.arg( rs.failWhy.empty() ? QString() : QStringLiteral( ": " ) + QString::fromStdString( rs.failWhy ) );
+	}
 	said = line;
 	qInfo().noquote() << line;
 }

@@ -685,6 +685,10 @@ WaterDraw & farGroundD();  // lane VKFAR3 (vkfarground.inc): fxWork's kind 9
 WaterDraw & farGroundPD();  // lane VKGROUND3 (vkfarground.inc): kind 18, far ground mode 2 (cached pages)
 WaterDraw & farLodRtD();  // lane VKFAR26 (vkfarlodrt.inc): fxWork's kind 21, the rings' RT (all-on) twin
 WaterDraw & farLodDgD();  // lane VKFAR26: fxWork's kind 22, the rings' DG twin (Ray-traced GI, no RT preset)
+WaterDraw & farGroundRtD();  // lane VKGROUND11 (vkfargroundrt.inc): fxWork's kind 23, the far ground's RT (all-on) twin
+WaterDraw & farGroundDgD();  // lane VKGROUND11: fxWork's kind 24, the far ground's DG twin
+WaterDraw & farGroundPRtD();  // lane VKGROUND18 (vkfargroundrt.inc): fxWork's kind 25, far ground mode 2's RT twin
+WaterDraw & farGroundPDgD();  // lane VKGROUND18: fxWork's kind 26, far ground mode 2's DG twin
 
 VkFormat waterAttrFormat( const WwVkPresent::WaterAttrib & a )
 {
@@ -1122,7 +1126,7 @@ bool ringsRecord( std::string & why )
 {
 	Vk & v = vk();
 	Fx & F = fx();
-	WaterDraw & D = F.kind == 9 ? farGroundD() : F.kind == 18 ? farGroundPD() : F.kind == 21 ? farLodRtD() : F.kind == 22 ? farLodDgD() : farLodD();  // BATCH1114: the water has its own copy (kind 4 never comes here); VKFAR26: 21 / 22 the rings' RT / DG twins
+	WaterDraw & D = F.kind == 9 ? farGroundD() : F.kind == 18 ? farGroundPD() : F.kind == 21 ? farLodRtD() : F.kind == 22 ? farLodDgD() : F.kind == 23 ? farGroundRtD() : F.kind == 24 ? farGroundDgD() : F.kind == 25 ? farGroundPRtD() : F.kind == 26 ? farGroundPDgD() : farLodD();  // BATCH1114: the water has its own copy (kind 4 never comes here); VKFAR26: 21 / 22 the rings' RT / DG twins; VKGROUND11: 23 / 24 the far ground's
 	if ( !F.fbAir || ( D.recs.empty() && !D.pipe ) ) {
 		why = "no framebuffer / pipeline for the water draw";
 		return false;
@@ -1167,7 +1171,7 @@ bool ringsRecord( std::string & why )
 // shutdown (after fxDrop waited the device): the exported copy is GL's name too
 void ringsDrop()
 {
-	for ( WaterDraw * D : { &farLodD(), &farGroundD(), &farGroundPD(), &farLodRtD(), &farLodDgD() } ) {
+	for ( WaterDraw * D : { &farLodD(), &farGroundD(), &farGroundPD(), &farLodRtD(), &farLodDgD(), &farGroundRtD(), &farGroundDgD(), &farGroundPRtD(), &farGroundPDgD() } ) {
 		if ( !D->geo.buf && !D->host.buf )
 			continue;
 		vk().vkDeviceWaitIdle( vk().dev );
@@ -1183,7 +1187,7 @@ bool waterRecord( std::string & why )
 {
 	Vk & v = vk();
 	Fx & F = fx();
-	if ( F.kind == 5 || F.kind == 9 || F.kind == 18 || F.kind == 21 || F.kind == 22 )  // lane VKFAR3: 9 the far ground, on the rings' copy; VKGROUND3: 18 its mode 2; VKFAR26: 21 / 22 the rings' RT / DG twins
+	if ( F.kind == 5 || F.kind == 9 || F.kind == 18 || F.kind == 21 || F.kind == 22 || F.kind == 23 || F.kind == 24 || F.kind == 25 || F.kind == 26 )  // VKGROUND18: 25 / 26 mode 2's RT / DG; lane VKFAR3: 9 the far ground, on the rings' copy; VKGROUND3: 18 its mode 2; VKFAR26: 21 / 22 the rings' RT / DG twins; VKGROUND11: 23 / 24 the far ground's
 		return farlod::ringsRecord( why );
 	WaterDraw & D = waterD();
 	if ( !D.recFb || !D.recPass || !D.pipe ) {
