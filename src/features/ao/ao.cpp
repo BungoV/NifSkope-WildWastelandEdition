@@ -41,6 +41,7 @@
 #include "features/shared/glstatememo.h"	// lane EMPTY240 R11-2: the obscurance pass's state reads and target checks kept
 #include "gl/cellunirec.h"	// lane PERFFIX1: the cell-uniform class record
 #include "features/vkframe/vkpresent.h"	// lane VKLIGHT1: the AO stages on the present device
+#include "features/vkframe/vkvolmask.h"	// lane VKAO4: the GI volume mask on the present device
 #include <cstring>
 #include "features/clouds/cloudvol.h"	// lane LIGHTNING2: a storm's flash on the exterior ambient (wwLightningGround)
 #include "cellworldanim.h"	// lane NIFXLIGHT3: the world clock a .nifx light's dimmer follows
@@ -211,6 +212,9 @@ struct AoGpu
 	bool giShared = false;	// lane VKWATER3: giHalf.tex and giKey are shared targets of the present device (giShare)
 	bool volOn = false;		// this frame's volumes' mask was drawn
 	AoTarget volMask;		// lane PERF1: full size, the pixel's interior volume's room + 1 (R32F; 0 none)
+	bool volShared = false;	// lane VKAO4: volMask.tex is a shared target of the present device (volShare)
+	int volNoW = 0, volNoH = 0;	// a size the share refused
+	std::shared_ptr<char> volKey;	// its sharedTarget key (a stable address: the AoGpu moves with its hash)
 	GLuint volBuf = 0, volTex = 0, volVao = 0;	// the shapes, 3 RGBA32F texels each (a buffer texture)
 	std::vector<float> volData;	// what volBuf holds
 	bool giUnits = false;	// the GPU has WwCellUnit::GiHalfKey
@@ -326,6 +330,82 @@ void giEcho( const QString & line )
 	std::fprintf( stderr, "cell gi rate: %s\n", qPrintable( line ) );
 }
 
+/* lane VKAO4: while the view is on Vulkan (red WW_VKVIEW_VOLMASK_RED=1) the volume mask is a shared R32F of the present
+ * device, so its route (vkvolmask.inc) draws it in place. The view off (or a refusal): aoAlloc's own texture, as before */
+bool volShare( NifSkopeOpenGLContext::GLFunctions * fn, AoGpu & g, int W, int H, bool want, std::string & why )
+{
+	if ( !g.volKey )
+		g.volKey = std::make_shared<char>( 0 );
+	const std::uintptr_t key = reinterpret_cast<std::uintptr_t>( g.volKey.get() );
+	if ( g.volShared && ( !want || !WwVkPresent::sharedTargetIs( key, g.volMask.tex ) || g.volMask.w != W || g.volMask.h != H ) ) {
+		WwVkPresent::sharedTargetDrop( key );	// the present device's name: dropped there, not deleted here
+		g.volMask.tex = 0;
+		g.volMask.w = g.volMask.h = 0;
+		g.volShared = false;
+	}
+	if ( !want )
+		g.volNoW = g.volNoH = 0;
+	if ( !want || g.volShared )
+		return g.volShared;
+	if ( g.volNoW == W && g.volNoH == H ) {
+		why = "the volume mask's share was refused at this size";
+		return false;
+	}
+	unsigned t = 0;
+	std::string no;
+	if ( !WwVkPresent::sharedTarget( key, 0, W, H, 1, GL_R32F, t, no ) || !t ) {
+		WwVkPresent::sharedTargetDrop( key );
+		g.volNoW = W;
+		g.volNoH = H;
+		why = "the volume mask's share failed: " + no;
+		return false;
+	}
+	if ( g.volMask.tex )
+		fn->glDeleteTextures( 1, &g.volMask.tex );
+	fn->glBindTexture( GL_TEXTURE_2D, t );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	if ( !g.volMask.fbo )
+		fn->glGenFramebuffers( 1, &g.volMask.fbo );
+	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.volMask.fbo );
+	fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t, 0 );
+	g.volMask.tex = t;
+	g.volMask.w = W;
+	g.volMask.h = H;
+	g.volShared = true;
+	return true;
+}
+
+// lane VKAO4: the `vk volmask:` line (on GL: when its reason changes; on Vulkan: the counters every 5 s)
+void volSay( bool onVk, const std::string & glWhy )
+{
+	static std::string said;
+	static QElapsedTimer at;
+	if ( !onVk ) {
+		const std::string line = "vk volmask: on GL (" + glWhy + ")";
+		if ( line != said ) {
+			said = line;
+			std::fprintf( stderr, "%s\n", line.c_str() );
+		}
+		return;
+	}
+	if ( at.isValid() && at.elapsed() < 5000 && said.rfind( "vk volmask: on V", 0 ) == 0 )
+		return;
+	at.start();
+	const WwVkPresent::VolMaskStat st = WwVkPresent::takeVolMaskStat();
+	char b[640];
+	std::snprintf( b, sizeof( b ), "vk volmask: on Vulkan %d runs (%d draws, %d shapes, %d twin copies, %d pipelines in %.1f ms; "
+		"drawing thread %.3f ms, max %.3f; fails %d%s%s; on GL %d%s%s)", st.runs, st.draws, st.shapes, st.twinCopies, st.pipelines,
+		st.buildMs, st.runs > 0 ? st.cpuMs / st.runs : 0.0, st.maxMs, st.fails, st.failWhy.empty() ? "" : ": ", st.failWhy.c_str(),
+		st.gl, st.glWhy.empty() ? "" : ": ", st.glWhy.c_str() );
+	said = b;
+	std::fprintf( stderr, "%s\n", b );
+}
+
 /* lane PERF1: the GI volume mask (the Division deck's D4: the volumes drawn into the stencil). Each interior shape's
  * hull, grown by the bias, back faces only, depth-tested against the shared opaque pass (a hull wholly in front of the
  * surface draws nothing); cell_givol.frag tests the surface's point a bias in front against the shape and writes its
@@ -349,6 +429,21 @@ bool giVolMaskPass( Scene * scene, AoGpu & g, const WwCellGi * G, int W, int H, 
 		fn->glBindBuffer( GL_TEXTURE_BUFFER, 0 );
 		g.volData = G->volShapes;
 	}
+	/* lane VKAO4: behind WW_VKVIEW=1 (red WW_VKVIEW_VOLMASK_RED=1: GL) the pass runs on the present device (vkvolmask.inc)
+	 * into the shared mask, on the AO pass's shared depth; every refusal is named in the `vk volmask:` line and GL draws */
+	const bool vkWant = WwVkPresent::shareWanted( "WW_VKVIEW_VOLMASK_RED" );
+	std::string vkNo;
+	if ( vkWant ) {
+		if ( !g.gbufDepthTex || !g.gbufDepthKey )
+			vkNo = "the opaque depth is GL's renderbuffer (WW_VKVIEW_AODEPTH_RED=1 or its share refused)";
+		else if ( g.gbufDepthTexFmt != GL_DEPTH24_STENCIL8 )
+			vkNo = "the opaque depth is not D24S8 (the pre-pass's format " + std::to_string( g.gbufDepthTexFmt ) + ")";
+		else if ( !g.gbuf.tex )
+			vkNo = "no g-buffer";
+		else
+			vkNo = WwVkPresent::volMaskRefusal();
+	}
+	const bool vkShared = volShare( fn, g, W, H, vkWant && vkNo.empty(), vkNo );
 	aoAlloc( fn, g.volMask, W, H, GL_R32F, GL_RED, false );
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.volMask.fbo );
 	depthAttach( fn, GL_FRAMEBUFFER, g );	// lane VKAO3
@@ -356,16 +451,11 @@ bool giVolMaskPass( Scene * scene, AoGpu & g, const WwCellGi * G, int W, int H, 
 	fn->glDrawBuffers( 1, &one );
 	if ( fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE )
 		return false;
-	NifSkopeOpenGLContext::Program * prog = r->useProgram( "cell_givol.prog" );
-	if ( !prog )
-		return false;
-	fn->glViewport( 0, 0, W, H );
-	const GLfloat zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-	fn->glClearBufferfv( GL_COLOR, 0, zero );
 	// world -> clip (the projection after posView = sc R world + t), and view -> world (cell_lights.glsl cellRow)
 	const Transform & vt = scene->view;
 	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
 	const auto & pm = r->globalUniforms->projectionMatrix;
+	float volClip[4][4], volRow[3][4];	// lane VKAO4: kept for the Vulkan route too
 	for ( int row = 0; row < 4; row++ ) {
 		double e[4] = { 0, 0, 0, double( pm[3][row] ) };
 		for ( int i = 0; i < 3; i++ ) {
@@ -373,16 +463,53 @@ bool giVolMaskPass( Scene * scene, AoGpu & g, const WwCellGi * G, int W, int H, 
 				e[j] += double( pm[i][row] ) * double( vt.rotation( i, j ) ) * double( sc );
 			e[3] += double( pm[i][row] ) * double( vt.translation[i] );
 		}
-		prog->uni4f_l( prog->uniLocation( "volClip[%d]", row ), FloatVector4( float( e[0] ), float( e[1] ), float( e[2] ), float( e[3] ) ) );
+		for ( int j = 0; j < 4; j++ )
+			volClip[row][j] = float( e[j] );
 	}
 	for ( int k = 0; k < 3; k++ ) {
 		float w = 0.0f;
 		for ( int j = 0; j < 3; j++ )
 			w -= vt.rotation( j, k ) * vt.translation[j];
-		prog->uni4f_l( prog->uniLocation( "volRow[%d]", k ), FloatVector4( vt.rotation( 0, k ) / sc, vt.rotation( 1, k ) / sc,
-			vt.rotation( 2, k ) / sc, w / sc ) );
+		volRow[k][0] = vt.rotation( 0, k ) / sc;
+		volRow[k][1] = vt.rotation( 1, k ) / sc;
+		volRow[k][2] = vt.rotation( 2, k ) / sc;
+		volRow[k][3] = w / sc;
 	}
 	const float bias = 0.75f * G->roomsCell;	// the room grid's read (cell_lights.glsl cellGiVolAt)
+	if ( vkShared ) {
+		WwVkPresent::VolMaskRun run;
+		run.w = W;
+		run.h = H;
+		run.gbuf = g.gbuf.tex;
+		run.ds = reinterpret_cast<std::uintptr_t>( g.gbufDepthKey.get() );
+		run.target = reinterpret_cast<std::uintptr_t>( g.volKey.get() );
+		run.shapes = G->volShapes;
+		std::memcpy( run.clip, volClip, sizeof( volClip ) );
+		std::memcpy( run.row, volRow, sizeof( volRow ) );
+		run.bias = bias;
+		run.grow = bias + 1.0f;
+		run.proj[0] = p00;
+		run.proj[1] = p11;
+		if ( WwVkPresent::volMaskRun( run, vkNo ) ) {
+			fn->glViewport( 0, 0, W, H );
+			volSay( true, std::string() );
+			return true;
+		}
+	}
+	if ( vkWant ) {
+		WwVkPresent::volMaskOnGl( vkNo.c_str() );
+		volSay( false, vkNo );
+	}
+	NifSkopeOpenGLContext::Program * prog = r->useProgram( "cell_givol.prog" );
+	if ( !prog )
+		return false;
+	fn->glViewport( 0, 0, W, H );
+	const GLfloat zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	fn->glClearBufferfv( GL_COLOR, 0, zero );
+	for ( int row = 0; row < 4; row++ )
+		prog->uni4f_l( prog->uniLocation( "volClip[%d]", row ), FloatVector4( volClip[row][0], volClip[row][1], volClip[row][2], volClip[row][3] ) );
+	for ( int k = 0; k < 3; k++ )
+		prog->uni4f_l( prog->uniLocation( "volRow[%d]", k ), FloatVector4( volRow[k][0], volRow[k][1], volRow[k][2], volRow[k][3] ) );
 	prog->uni1f( "volBias", bias );
 	prog->uni1f( "volGrow", bias + 1.0f );
 	prog->uni2f( "volProj", p00, p11 );
