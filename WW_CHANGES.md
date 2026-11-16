@@ -1,3 +1,12 @@
+## VKGROUND5 (2026-11-16): the far ground's cached pages on the Vulkan view
+
+Changed, not built, not checked live.
+- With the view on Vulkan (WW_VKVIEW=1) and Show > Far ground: Live, cached pages, the cell table and both page pools
+  are now made on the present device, so the far ground's Vulkan twin reads them in place (no copy a draw). Before, it
+  stayed on GL ("not shared yet"). With the view off, GL makes them as before. Red `WW_VKVIEW_FARGROUNDLIVE_RED=1`.
+- Offline: tests/vkframe/fgpagesdraw (3 inputs shared, 3 copies fewer a run) and tests/vkframe/fargrounddraw (now
+  compared against the HLSL reference terms, as fgpagesdraw is).
+
 ## VKFAR15 (2026-11-15): the far ground and far LOD rings stay on GL while RT GI or ReSTIR is on
 
 Changed, not built, not checked live.
