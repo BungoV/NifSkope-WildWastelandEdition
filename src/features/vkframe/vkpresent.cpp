@@ -6459,6 +6459,8 @@ bool fxBegin( int which, bool & broken, std::string & why )
 	}
 	return true;
 }
+
+std::uintptr_t farSharedOf( unsigned tex );  // vkfardots.inc (lane VKCLOUD8: cloudRun reads shared inputs in place)
 }  // namespace
 
 namespace WwVkPresent
@@ -6580,9 +6582,18 @@ bool cloudRun( const CloudRun & t, std::string & why )
 		VkImageView views[kFxMaxTex] = {};
 		int smp[kFxMaxTex] = {};
 		for ( int k = 0; k < M.ntex; k++ ) {
-			if ( !fxSlot( t.tex[k], views[k], names, S.copies, w ) )
+			// lane VKCLOUD8: a GL name that IS a shared target of this context (the fly's cfSdf = cloudfly's vol[pub]) is read
+			// where it is, as precip / fog bloom / clouds front do; another shape keeps the copy
+			FxTex x = t.tex[k];
+			if ( !x.shared && x.tex && !( t.red & 32 ) ) {
+				const std::uintptr_t sk = farSharedOf( x.tex );
+				const Shared * s = sk ? sharedFind( sk ) : nullptr;
+				if ( s && s->type == x.type && s->samples == 1 && s->levels == std::max( x.levels, 1 ) )
+					x.shared = sk;
+			}
+			if ( !fxSlot( x, views[k], names, S.copies, w ) )
 				return refuse( "the march's input t" + std::to_string( k ) + ": " + w );
-			smp[k] = t.tex[k].sampler;
+			smp[k] = x.sampler;
 		}
 		const int sh = t.fly ? 0 : 1;  // cvShape's slot (the fly: shape detail map ..., the march: map shape detail ...)
 		if ( t.red & 2 ) {  // red: the shape and the detail swapped

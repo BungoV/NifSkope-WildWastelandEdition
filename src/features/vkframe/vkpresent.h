@@ -762,7 +762,7 @@ struct CloudRun
 	std::uint8_t resolve[kT_resolve_aBytes] = {};
 	int red = 0;                    //!< gates only: 1 the resolve's march / history inputs swapped, 2 the march's t1 / t2
 	                                //!< swapped, 4 no march (the caller filled the march targets), 8 the fly's cfSdf and
-	                                //!< cvShape swapped (lane VKCLOUD2)
+	                                //!< cvShape swapped (lane VKCLOUD2), 32 no shared lookup: every slot copied (VKCLOUD8)
 };
 //! GL current: the march (into the shared march targets) and the resolve (into hist[cur]) on Vulkan, one crossing
 bool cloudRun( const CloudRun & t, std::string & why );
