@@ -735,6 +735,7 @@ void fxDrop();
 bool farRecord( std::string & why );  // lane VKFAR1 (vkfardots.inc): fxWork's kind 2
 bool waterRecord( std::string & why );  // lane VKWATER3 (vkwater.inc): fxWork's kind 3
 bool underRecord( std::string & why );  // lane VKWATER4 (vkunder.inc): fxWork's kind 4, the underwater fog
+bool boltRecord( std::string & why );  // lane VKOBJ15 (vkbolt.inc): fxWork's kind 5, the lightning strips' preview
 void waterDrop();
 void underDrop();  // lane VKWATER4 (vkunder.inc)
 void objVelDrop();  // lane VKOBJ12 (vkobjvel.inc)
@@ -5881,6 +5882,11 @@ bool fxWork( std::string & why )
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
 		}
+	} else if ( F.kind == 5 ) {  // lane VKOBJ15: the lightning strips' preview
+		if ( !boltRecord( why ) ) {
+			v.vkEndCommandBuffer( F.cmd );
+			return false;
+		}
 	} else {
 		if ( !F.fbR || ( !F.skipMarch && !F.fbM ) ) {
 			v.vkEndCommandBuffer( F.cmd );
@@ -9192,3 +9198,4 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 #include "features/vkframe/vkwater.inc"  // lane VKWATER1: the water's route and census (row G5)
 #include "features/vkframe/vkunder.inc"  // lane VKWATER4 (L7): the underwater fog on the view
 #include "features/vkframe/vkobjvel.inc"  // lane VKOBJ12: the TAA inputs' step 3 (taa_objvel) on the view
+#include "features/vkframe/vkbolt.inc"  // lane VKOBJ15: the lightning strips' preview (census row 146)

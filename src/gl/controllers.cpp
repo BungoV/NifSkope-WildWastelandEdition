@@ -41,15 +41,21 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/glproperty.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
+#include "features/vkframe/vkbolt.h"	// lane VKOBJ15: the lightning strips' preview on Vulkan
+#include "features/exposure/cellhdr.h"
 #include "glview.h"
 
 #include <QApplication>
 #include <QFile>
 #include <QTextStream>
 #include <QVarLengthArray>
+#include <QDebug>
 #include "model/nifmodel.h"
 
+#include <chrono>
 #include <cmath>
+#include <cstring>
+#include <iterator>
 
 // `NiControllerManager` blocks
 
@@ -2940,6 +2946,94 @@ bool ProcLightningController::buildRibbon( const Vector3 & viewAxis, QVector<Vec
 	return !tris.isEmpty();
 }
 
+const void * wwGlobalUboBytes( const NifSkopeOpenGLContext * ctx );  // glcontext.cpp
+
+/* lane VKOBJ15 (census row 146): the strip on the present device's tone frame, boltstrip's uniforms and GL's state already
+ * set. false: GL draws it (the reason is in the "vk bolt:" line). Red WW_VKVIEW_BOLT_RED=1: GL's strip. */
+static bool boltOnVulkan( Scene * sc, NifSkopeOpenGLContext::Program * prog, int n, const float * const attr[3] )
+{
+	auto fn = sc->renderer->fn;
+	GLint drawFb = 0;
+	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFb );
+	const GLuint color = wwCellHdrVkToneColor( GLuint( drawFb ) );
+	if ( !color )
+		return false;	// not the present device's tone frame: GL's, as before
+	static QString said;
+	static auto at = std::chrono::steady_clock::now();
+	auto say = [&]( const QString & line ) {
+		if ( line == said )
+			return;
+		said = line;
+		at = std::chrono::steady_clock::now();
+		qInfo().noquote() << line;
+	};
+	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_BOLT_RED" ) ) {
+		say( QStringLiteral( "vk bolt: strips on GL (red WW_VKVIEW_BOLT_RED=1 or the view not on Vulkan)" ) );
+		return false;
+	}
+	static WwVkPresent::BoltRun t;
+	t = WwVkPresent::BoltRun();
+	std::string why;
+	bool drew = false;
+	const void * ubo = wwGlobalUboBytes( sc->renderer );
+	if ( !ubo ) {
+		WwVkPresent::boltOnGl( "the global uniform buffer's bytes are not known for this context" );
+	} else {
+		wwCellHdrFrameSize( t.w, t.h );
+		fn->glGetIntegerv( GL_VIEWPORT, t.vp );
+		t.color = color;
+		t.n = n;
+		t.pos = attr[0];
+		t.col = attr[1];
+		t.uv = attr[2];
+		std::memcpy( t.global, ubo, sizeof( t.global ) );
+		WwVkPresent::fxPack( fn, prog->id, WwVkPresent::kT_boltVs, int( std::size( WwVkPresent::kT_boltVs ) ), t.vsLoose );
+		WwVkPresent::fxPack( fn, prog->id, WwVkPresent::kT_boltPs, int( std::size( WwVkPresent::kT_boltPs ) ), t.psLoose );
+		static const char * const kName[2] = { "boltTexture", "GreyscaleMap" };
+		static char twin[2];
+		bool ok = true;
+		for ( int k = 0; k < 2 && ok; k++ ) {
+			ok = WwVkPresent::boltTexOf( fn, prog->id, kName[k], t.tex[k], why );
+			t.tex[k].twin = reinterpret_cast<std::uintptr_t>( &twin[k] );
+		}
+		if ( ok )
+			ok = WwVkPresent::boltStateOf( fn, t, why );
+		if ( !ok )
+			WwVkPresent::boltOnGl( why.c_str() );
+		else
+			drew = WwVkPresent::boltRun( t, why );
+	}
+	const WwVkPresent::FxStat st = WwVkPresent::takeBoltStat();
+	static WwVkPresent::FxStat sum;
+	sum.runs += st.runs;
+	sum.gl += st.gl;
+	sum.fails += st.fails;
+	sum.cpuMs += st.cpuMs;
+	sum.maxMs = std::max( sum.maxMs, st.maxMs );
+	sum.copies += st.copies;
+	sum.pipelines = st.pipelines;
+	sum.buildMs = st.buildMs;
+	if ( !st.glWhy.empty() )
+		sum.glWhy = st.glWhy;
+	if ( !st.failWhy.empty() )
+		sum.failWhy = st.failWhy;
+	if ( std::chrono::duration<double>( std::chrono::steady_clock::now() - at ).count() >= 5.0 || !said.startsWith( QStringLiteral( "vk bolt: strips on V" ) ) ) {
+		QString line = sum.runs > 0
+			? QStringLiteral( "vk bolt: strips on Vulkan %1 draws (%2 vertices, boltstrip into the tone frame, one crossing; "
+				"%3 pipelines built in %4 ms; %5 input copies; drawing thread %6 ms, max %7)" ).arg( sum.runs ).arg( t.n ).arg( sum.pipelines )
+				.arg( sum.buildMs, 0, 'f', 1 ).arg( sum.copies ).arg( sum.cpuMs / sum.runs, 0, 'f', 3 ).arg( sum.maxMs, 0, 'f', 3 )
+			: QStringLiteral( "vk bolt: strips on Vulkan wanted, 0 draws" );
+		if ( sum.gl > 0 )
+			line += QStringLiteral( ", on GL %1 draws (last: %2)" ).arg( sum.gl ).arg( QString::fromStdString( sum.glWhy ) );
+		if ( sum.fails > 0 )
+			line += QStringLiteral( ", refused %1 (last: %2)" ).arg( sum.fails ).arg( QString::fromStdString( sum.failWhy ) );
+		said.clear();
+		say( line );
+		sum = WwVkPresent::FxStat();
+	}
+	return drew;
+}
+
 void ProcLightningController::drawPreview()
 {
 	if ( !( visible && target && target->scene ) )
@@ -3007,6 +3101,11 @@ void ProcLightningController::drawPreview()
 	glDepthMask( GL_FALSE );
 
 	const float * attrData[3] = { &( tris.constFirst()[0] ), &( cols.constFirst()[0] ), &( uvs.constFirst()[0] ) };
+	if ( boltOnVulkan( sc, prog, int( tris.size() ), attrData ) ) {
+		glDepthMask( GL_TRUE );
+		glDisable( GL_BLEND );
+		return;
+	}
 	sc->renderer->bindShape( (unsigned int) tris.size(), 0x0243ULL, 0, attrData, nullptr );
 	sc->renderer->fn->glDrawArrays( GL_TRIANGLES, 0, GLsizei( tris.size() ) );
 
