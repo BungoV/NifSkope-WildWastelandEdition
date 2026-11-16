@@ -74,8 +74,8 @@
  * app's key, as the shipped twins (VKWATER3 ruling 1). */
 static int gColTwin = 0;  // colPrintf: 1 prints `BLVIEW colourcsm` for `BLVIEW colour`
 static const char * gColTag = "";  // the plain row: `BLVIEW colour plain`; the RT row: `BLVIEW colour rt`
-static int gColKind = 0;  // lane VKOBJ5: 1 ` skin`, 2 ` alpha`, 3 ` single`, 4 ` own` after it; lane VKWATER3: 5 ` ao`
-static const char * kColKindName[6] = { "", " skin", " alpha", " single", " own", " ao" };
+static int gColKind = 0;  // lane VKOBJ5: 1 ` skin`, 2 ` alpha`, 3 ` single`, 4 ` own` after it; lane VKWATER3: 5 ` ao`; VKOBJ19: 6 ` fade`
+static const char * kColKindName[7] = { "", " skin", " alpha", " single", " own", " ao", " fade" };
 /* lane VKWATER3 (manager ruling 11-15, the AO note; stated before its first run, never widened): kind 5 `ao` runs the main arm
  * on the app's key with a GL R32F texture on cellAo (half the view, a ramp in y and a 7-texel saw in x, bilinear, clamped),
  * cellAoOn 1, cellAoRect the frame. GL probe: cellAoOn 0 moves GL's colour on >= 20 % of the covered pixels. Ruling item 3:
@@ -83,6 +83,17 @@ static const char * kColKindName[6] = { "", " skin", " alpha", " single", " own"
  * bytes (half the view, 4 bytes a texel). Reds: standin (ObjBlShade.standInRed: no copy twin, the old stand-in) and copy (red 26 =
  * objBlShade's 8: copied from one texel on in x) must FAIL. Check: the same texture on cellSsgi (GL's own, no twin) must refuse
  * naming cellSsgi (`REFUSED OK`). */
+/* lane VKOBJ19 (11-16; stated before its first run, never widened): kind 6 `fade` is bsshape.cpp's decal-fade band on the bl route
+ * (vkBlDraw tried in the band loop). Kind 3's singles (a crossing a piece, its shape's row, rowsAtBase), alphaFlags 8 (the blend
+ * bit only: rigid, no test, no skin), GL_BLEND on with SRC_ALPHA / ONE_MINUS_SRC_ALPHA, each shape's alpha a0 = 1, 0.9, 0.8 in turn.
+ * Each shape's command is split by triangles: the first 2/5 kept at a0, the rest three band pieces (the last takes the remainder)
+ * at a0 x 0.75, 0.5, 0.25 (a shape under 4 triangles stays whole); GL's loose alpha is set before each piece on both sides (the bl
+ * row holds no alpha: objBlLoose mirrors GL's alpha at each crossing). Bars as the main arm (depth EXACT or BOUND, colour EXACT or
+ * BOUND 4e-3 of max(1, |GL|), lit >= 0.9 of covered), crossing one run a piece, 0 failed. The frame is the main arm's 1 sample (no
+ * 4x blend merge). GL probe: every fade 1 (the bands at a0) moves GL's colour on >= 20 % of the covered pixels. Red fade (red 27:
+ * Vulkan's band crossings at a0, unscaled) must FAIL and move the Vulkan colour off its base. Check: the band's constant-alpha mode
+ * (glBlendFunc CONSTANT_ALPHA / ONE_MINUS_CONSTANT_ALPHA, effect programs) must refuse naming the constant (`REFUSED OK`). The
+ * harness calls objBlShade, not vkBlDraw: vkBlDraw's admission of a blended rigid band is the app's, read in the census. */
 void colPrintf( const char * fmt, ... )
 {
 	std::string f2( fmt );
@@ -333,6 +344,8 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		put( "alphaFlags", { 4 } );
 		put( "alphaThreshold", { 0.5f } );
 	}
+	if ( kind == 6 )  // lane VKOBJ19: the blend bit only (a rigid blended decal)
+		put( "alphaFlags", { 8 } );
 	// gap 4: the sun cascades on a shared D16 2D array (cascade 0: u = 0.5 + x / 80, v = 0.5 + y / 80, depth 0.5)
 	static int csmKeyAt = 0;
 	const std::uintptr_t csmKey = reinterpret_cast<std::uintptr_t>( &csmKeyAt );
@@ -663,6 +676,37 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		f.bufferData( 0x8F3F, std::ptrdiff_t( single.size() * 4 ), single.data(), 0x88E4 );
 		f.bindBuffer( 0x8F3F, 0 );
 	}
+	// lane VKOBJ19 kind 6: each single split into the kept piece (fade 1) and three band pieces (0.75, 0.5, 0.25)
+	std::vector<std::uint32_t> fadeCmd;
+	std::vector<float> fadeMul;
+	std::vector<std::size_t> fadeShape;
+	std::size_t fadeKept = 0, fadeBands = 0;
+	auto fadeA0 = []( std::size_t c ) { return 1.0f - 0.1f * float( c % 3 ); };
+	bool fadeProbe = false;  // GL probe: every piece at a0
+	bool fadeConst = false;  // check: the band's constant-alpha blend
+	GLuint fadeInd = 0;
+	if ( kind == 6 ) {
+		static const float kFade[3] = { 0.75f, 0.5f, 0.25f };
+		for ( std::size_t c = 0; c < single.size() / 5; c++ ) {
+			const std::uint32_t n = single[c * 5] / 3, first = single[c * 5 + 2], bv = single[c * 5 + 3];
+			const std::uint32_t kept = n < 4 ? n : std::max<std::uint32_t>( 1u, 2u * n / 5u ), rest = n - kept;
+			const std::uint32_t piece[4] = { kept, rest / 3, rest / 3, rest - 2 * ( rest / 3 ) };
+			std::uint32_t at = 0;
+			for ( int k = 0; k < 4; k++ ) {
+				if ( !piece[k] )
+					continue;
+				fadeCmd.insert( fadeCmd.end(), { piece[k] * 3, 1u, first + at * 3, bv, 0u } );
+				fadeMul.push_back( k ? kFade[k - 1] : 1.0f );
+				fadeShape.push_back( c );
+				( k ? fadeBands : fadeKept )++;
+				at += piece[k];
+			}
+		}
+		f.genBuffers( 1, &fadeInd );
+		f.bindBuffer( 0x8F3F, fadeInd );
+		f.bufferData( 0x8F3F, std::ptrdiff_t( fadeCmd.size() * 4 ), fadeCmd.data(), 0x88E4 );
+		f.bindBuffer( 0x8F3F, 0 );
+	}
 	f.bindBuffer( 0x8893, sx.pool.ebo );
 	f.bindVertexArray( 0 );
 	f.bindBuffer( 0x8892, 0 );
@@ -675,6 +719,10 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		sf.drawBuffers( nBufs, dbs );
 		glViewport( 0, 0, kSW, kSH );
 		glDisable( GL_BLEND );
+		if ( kind == 6 ) {  // lane VKOBJ19: the band blends by its own alpha (check: by a constant alpha)
+			glEnable( GL_BLEND );
+			glBlendFunc( fadeConst ? 0x8003 : GL_SRC_ALPHA, fadeConst ? 0x8004 : GL_ONE_MINUS_SRC_ALPHA );
+		}
 		glDisable( GL_SCISSOR_TEST );
 		glDisable( GL_STENCIL_TEST );
 		glEnable( GL_DEPTH_TEST );
@@ -748,6 +796,18 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 				e = e == GL_NO_ERROR ? e1 : e;
 			}
 			put( "wwDrawBase", { float( sx.base ) } );
+		} else if ( kind == 6 ) {  // lane VKOBJ19: a draw a piece, wwDrawBase its shape's row, alpha a0 x the piece's fade
+			f.bindBuffer( 0x8F3F, fadeInd );
+			for ( std::size_t p = 0; p < fadeMul.size(); p++ ) {
+				const std::size_t c = fadeShape[p];
+				put( "wwDrawBase", { float( sx.base + sx.cmds[c * 5 + 4] ) } );
+				put( "alpha", { fadeA0( c ) * ( fadeProbe ? 1.0f : fadeMul[p] ) } );
+				sf.multiDrawElementsIndirect( GL_TRIANGLES, GL_UNSIGNED_SHORT, reinterpret_cast<const void *>( p * 20 ), 1, 20 );
+				const GLenum e1 = glGetError();
+				e = e == GL_NO_ERROR ? e1 : e;
+			}
+			put( "wwDrawBase", { float( sx.base ) } );
+			put( "alpha", { 1 } );
 		} else {
 			f.bindBuffer( 0x8F3F, sx.ind );
 			sf.multiDrawElementsIndirect( GL_TRIANGLES, GL_UNSIGNED_SHORT, nullptr, GLsizei( sx.cmds.size() / 5 ), 20 );
@@ -947,6 +1007,30 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		colPrintf( "BLVIEW colour GL ao probe %s: cellAoOn 0 moves GL's colour on %zu of %zu covered pixels (bar >= 20 %%)\n",
 			kindReach ? "OK" : "FAIL", moved, cov );
 	}
+	if ( kind == 6 ) {  // lane VKOBJ19: the band's fade reaches GL's colour (every fade 1: the bands at a0)
+		ColOut g2;
+		fadeProbe = true;
+		shadeClear();
+		frameState();
+		glDraws();
+		frameOff();
+		shadeRead( g2.depth, &g2.c0, &g2.c1 );
+		fadeProbe = false;
+		std::size_t cov = 0, moved = 0;
+		for ( std::size_t i = 0; i < gl.depth.size(); i++ ) {
+			if ( !( gl.depth[i] < 1.0f ) )
+				continue;
+			cov++;
+			bool mv = false;
+			for ( int ch = 0; ch < 4; ch++ )
+				mv = mv || gl.c0[i * 4 + ch] != g2.c0[i * 4 + ch];
+			moved += mv;
+		}
+		kindReach = cov > 0 && double( moved ) >= 0.2 * double( cov );
+		colPrintf( "BLVIEW colour fade pieces: kept %zu, band %zu (fades 0.75 0.5 0.25), a0 1 / 0.9 / 0.8 by shape\n", fadeKept, fadeBands );
+		colPrintf( "BLVIEW colour GL fade probe %s: every fade 1 moves GL's colour on %zu of %zu covered pixels (bar >= 20 %%)\n",
+			kindReach ? "OK" : "FAIL", moved, cov );
+	}
 	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
 		colPrintf( "BLVIEW colour FAIL (GL error 0x%x reading GL's fo4_cellbl draw)\n", unsigned( e ) );
 		return false;
@@ -996,6 +1080,25 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 				}
 			}
 			put( "wwDrawBase", { float( sx.base ) } );
+		} else if ( kind == 6 ) {  // lane VKOBJ19: a crossing a piece, GL's alpha set first (red 27 fade: at a0, unscaled)
+			for ( std::size_t p = 0; p < fadeMul.size(); p++ ) {
+				const std::size_t c = fadeShape[p];
+				const std::size_t row = std::size_t( sx.base ) + sx.cmds[c * 5 + 4];
+				put( "wwDrawBase", { float( row ) } );
+				put( "alpha", { fadeA0( c ) * ( red == 27 ? 1.0f : fadeMul[p] ) } );
+				s.cmds = &fadeCmd[p * 5];
+				s.nCmds = 1;
+				s.rows = rows.data() + row * kBlRowBytes;
+				s.nRows = 1;
+				s.rowsAtBase = true;
+				std::string w1;
+				if ( !objBlShade( glProc, s, w1 ) && ran ) {
+					ran = false;
+					w = w1;
+				}
+			}
+			put( "wwDrawBase", { float( sx.base ) } );
+			put( "alpha", { 1 } );
 		} else {
 			if ( kind == 4 )
 				f.bindVertexArray( vao );
@@ -1069,7 +1172,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		const DepthCmp dc = depthCmp( vk0.depth, gl.depth );
 		const ColCmp cc = colCmp( vk0 );
 		const bool litOk = cc.both >= 2000 && double( cc.lit ) >= 0.9 * double( cc.both );
-		const bool crossOk = rs.runs == ( kind == 3 ? int( single.size() / 5 ) : 1 ) && rs.fails == 0;
+		const bool crossOk = rs.runs == ( kind == 3 ? int( single.size() / 5 ) : kind == 6 ? int( fadeMul.size() ) : 1 ) && rs.fails == 0;
 		colPrintf( "BLVIEW colour state: %d samplers on their own units, %d values with no active location; set 0 units: %d shared, %d GL-only, "
 			"%d GL texel buffers; crossing %s (%d runs, %d failed)\n", units, inactive, rs.shared, rs.glOwn, rs.texelGl, crossOk ? "OK" : "FAIL",
 			rs.runs, rs.fails );
@@ -1102,8 +1205,8 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 	const char * kindRedName[5] = { " bone (bone i reads bone i + 1's transform)", " flags (the mirrored alphaFlags 0)",  // lane VKOBJ5
 		" base (rowsAtBase off: the mirrored wwDrawBase kept)", " offset (every attribute read from offset 0)",
 		" half (the halves read as 16-bit unorm)" };
-	const int redLo = kind == 0 ? 1 : kind == 4 ? 14 : kind == 5 ? 25 : 10 + kind;
-	const int redHi = kind == 0 ? ( twin ? 3 : 2 ) : kind == 4 ? 15 : kind == 5 ? 26 : 10 + kind;
+	const int redLo = kind == 0 ? 1 : kind == 4 ? 14 : kind == 5 ? 25 : kind == 6 ? 27 : 10 + kind;
+	const int redHi = kind == 0 ? ( twin ? 3 : 2 ) : kind == 4 ? 15 : kind == 5 ? 26 : kind == 6 ? 27 : 10 + kind;
 	for ( int r = redLo; r <= redHi; r++ ) {
 		ColOut o;
 		std::string rw;
@@ -1121,7 +1224,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			passes = ( dc.exact() || dc.bound() ) && ( cc.exact() || cc.bound() );
 		}
 		colPrintf( "BLVIEW RED colour%s %s (%zu values over the bound, %zu Vulkan colour values moved off the Vulkan base%s%s)\n",
-			r == 25 ? " standin (no copy twin: GL's own cellAo texture stood in)" : r == 26 ? " copy (cellAo copied from one texel on in x)"
+			r == 27 ? " fade (the band crossings at a0, unscaled)" : r == 25 ? " standin (no copy twin: GL's own cellAo texture stood in)" : r == 26 ? " copy (cellAo copied from one texel on in x)"
 			: r > 10 ? kindRedName[r - 11] : redName[r - 1],
 			passes ? "PASSED" : vch ? "FAIL" : "TESTS NOTHING", over, vch, rr ? "" : "; refused: ", rr ? "" : rw.c_str() );
 		ok = ok && !passes && vch > 0;
@@ -1136,6 +1239,16 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		ownUnit = -1;
 		colPrintf( "BLVIEW colour check cellSsgi (GL's own texture, no twin) %s (%s)\n", refused ? "REFUSED OK" : "FAIL",
 			rw.empty() ? "no unit for cellSsgi, or it drew" : rw.c_str() );
+		ok = ok && refused;
+	}
+	if ( kind == 6 ) {  // lane VKOBJ19: the band's constant-alpha blend must refuse, naming the constant
+		fadeConst = true;
+		std::string rw;
+		ColOut o;
+		const bool refused = !vkRun( 0, o, rw ) && rw.find( "constant" ) != std::string::npos;
+		fadeConst = false;
+		colPrintf( "BLVIEW colour check fade constant alpha (CONSTANT_ALPHA / ONE_MINUS_CONSTANT_ALPHA): %s (%s)\n", refused ? "REFUSED OK" : "FAIL",
+			rw.empty() ? "it drew" : rw.c_str() );
 		ok = ok && refused;
 	}
 	if ( kind == 4 ) {  // lane VKOBJ5 round 2: location 5 disabled with a current value other than (0,0,0,1) must refuse
@@ -1188,7 +1301,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			sharedTargetDrop( csmKey );
 		if ( aoTex )
 			glDeleteTextures( 1, &aoTex );
-		if ( rt || kind == 5 )
+		if ( rt || kind == 5 || kind == 6 )
 			colPrintf( "BLVIEW colour %s\n", ok ? "OK" : "FAILED" );
 		gColTwin = gColKind = 0;
 		gColTag = "";

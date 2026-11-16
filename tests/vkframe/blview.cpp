@@ -1143,10 +1143,11 @@ int main( int argc, char ** argv )
 	const bool colRt = twinOk && ( pfxOnly || colourGate( spvDir + "/spvrt/spirv", handles, anisoAt, aniso1H, 0, 0, std::string(), true ) );
 	const bool colCsmRt = twinOk && ( pfxOnly || colourGate( spvDir + "/spvrt/spirv", handles, anisoAt, aniso1H, 1, 0, std::string(), true ) );
 	// lane VKOBJ5 (G4): skinned (kind 1), alpha-tested (kind 2), single rigid (kind 3), own VAO (kind 4) through both bl twins,
-	// GL on the app's key as the shipped twins (VKWATER3 ruling 1); lane VKWATER3 kind 5 `ao`: GL's own cellAo must refuse
+	// GL on the app's key as the shipped twins (VKWATER3 ruling 1); lane VKWATER3 kind 5 `ao`: GL's own cellAo must refuse;
+	// lane VKOBJ19 kind 6 `fade`: the decal-fade band on the bl route (kept piece at a0, band pieces at a0 x fade)
 	bool kindOk = true;
 	for ( int tw = 0; tw < 2 && !pfxOnly; tw++ )
-		for ( int kd = 1; kd <= 5; kd++ )
+		for ( int kd = 1; kd <= 6; kd++ )
 			kindOk = ( twinOk && colourGate( spvDir + "/spvapp/spirv", handles, anisoAt, aniso1H, tw, kd ) ) && kindOk;
 	ok = kindOk && ok;
 	ok = colOk && colCsmOk && colPlain && colCsmPlain && colRt && colCsmRt && ok;
