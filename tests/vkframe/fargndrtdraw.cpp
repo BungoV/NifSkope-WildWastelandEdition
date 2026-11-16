@@ -27,6 +27,10 @@
 //   3 copies more a run than on the shared ones (the three read in place; the RT buffers never copied).
 // - reds that must FAIL: red 1 (pixel block one vec4 off), restir (rewritten after GL drew, RT only), atlas (shifted one texel
 //   after GL drew); red key (the other twin: RT key on the DG twin, DG key on the base twin) FAILS or is REFUSED.
+// - fgLtex anisotropy (manager ruling 11-16, the reason at kLtexAnisoPix): every pixel compare runs it at 1 on both sides; the
+//   state arm (seed 1) sets the app's 8 and checks every census input's sampling state side by side, GL's own texture state
+//   on the unit vs the twin's sampler / view from the slot farGroundRtStateOf fills: filter, wrap, compare, levels, LOD,
+//   anisotropy all equal, fgLtex 8 on both; red: the twin's fgLtex anisotropy 4 must differ.
 // - all-on arm (seed 1): cellGiHalfOn 1 on the rtImgShare'd cellGiHalf / cellGiHalfKey (W x H); key >= 1000 texels on the
 //   ground, >= 90 % decode to a unit normal; GL probes cellGiHalfOn 0 / cellGiHalf reseeded each move >= 20 %; clean BOUND,
 //   then after EACH red a clean run BOUND (6 clean); reds: not shared (REFUSED naming cellGiHalf:), wrong image (FAIL or
@@ -53,6 +57,8 @@ const float kOx = 4300.0f, kOy = 7000.0f, kSpacing = 128.0f, kBin = 512.0f, kTil
 const int kDdgiDims[4] = { 9, 7, 8, 9 * 7 * 8 };
 const size_t kProbes = size_t( 9 * 7 * 8 ), kAtlasTexels = 193 * kProbes;
 const float kWx = 5000.0f, kWy = 7000.0f, kWz = 300.0f;	// world = (x + kWx, -z + kWy, y + kWz)
+// manager ruling 11-16: NV GL vs NV VK 8x anisotropic filtering differs on partly covered primitives (VKGROUND15 proof); pixel compare at 1, state checked at 8
+const float kLtexAnisoPix = 1.0f, kLtexAnisoApp = 8.0f;	// fgLtex: the pixel compare's (both sides), the app's (cellfarground.cpp, the state arm)
 
 size_t differ( const std::vector<std::uint8_t> & a, const std::vector<std::uint8_t> & b )
 {
@@ -761,7 +767,7 @@ int main( int argc, char ** argv )
 			glTexParameteri( tg, GL_TEXTURE_WRAP_T, mip ? GL_REPEAT : 0x812F );
 			glTexParameteri( tg, fMaxLevel, s.levels - 1 );
 			if ( k == 1 )
-				glTexParameterf( tg, 0x84FE /* GL_TEXTURE_MAX_ANISOTROPY */, 8.0f );
+				glTexParameterf( tg, 0x84FE /* GL_TEXTURE_MAX_ANISOTROPY */, kLtexAnisoPix );	// manager ruling 11-16 (fgrt_consts: the reason)
 		}
 		glBindTexture( tg, 0 );
 	}
@@ -838,7 +844,7 @@ int main( int argc, char ** argv )
 				return fatal( "texture " + s.name );
 		}
 		glBindTexture( 0x8C1A, smp[size_t( iLtex )].tex );
-		glTexParameterf( 0x8C1A, 0x84FE /* GL_TEXTURE_MAX_ANISOTROPY */, 8.0f );
+		glTexParameterf( 0x8C1A, 0x84FE /* GL_TEXTURE_MAX_ANISOTROPY */, kLtexAnisoPix );	// manager ruling 11-16 (fgrt_consts: the reason)
 		glBindTexture( 0x8C1A, 0 );
 		std::mt19937 rngFg( 4242u + std::uint32_t( seed ) );
 		const std::vector<std::uint32_t> grid = gridData( rngFg, false );
@@ -1299,6 +1305,129 @@ int main( int argc, char ** argv )
 			std::printf( "FARGNDRTDRAW %s seed 1 copies a run: %d on the shared inputs, %d on plain ones (%s)\n", tag, copiesShared, copiesPlain,
 				fewer ? "fgGrid, fgLtex, fgAtlas read in place" : "NOT three fewer" );
 			gateOk = gateOk && fewer;
+		}
+
+		// lane VKGROUND16, the state arm (seed 1; manager ruling 11-16, fgrt_consts): fgLtex at the app's anisotropy 8, every census
+		// input's sampling state side by side: GL's own texture state on the input's unit vs the twin's VkSampler / view, derived from
+		// the census slot farGroundRtStateOf fills (the app's path) by waterSampler's rules (vkwater.inc) and the device's anisotropy.
+		// Filter, wrap, compare, levels, LOD and anisotropy must match exactly; red: the twin's fgLtex anisotropy changed must FAIL.
+		if ( seed == 1 ) {
+#ifdef WW_VK_FARGNDRT
+			glBindTexture( 0x8C1A, smp[size_t( iLtex )].tex );
+			glTexParameterf( 0x8C1A, 0x84FE /* GL_TEXTURE_MAX_ANISOTROPY */, kLtexAnisoApp );
+			glBindTexture( 0x8C1A, 0 );
+			before( fbFrame );
+			drawState( fbFrame, scissor );
+			WwVkPresent::WaterRun sr;
+			WwVkPresent::farGroundRtStateOf( &gw, pFg, sr, kv );
+			auto stateTable = [&]( const WwVkPresent::WaterRun & r, bool print, int & nAniso, float & ltexGl, float & ltexVk ) {
+				static const unsigned kTg[5] = { 0x0DE1, 0x806F, 0x8C1A, 0x8513, 0x9009 }, kBd[5] = { 0x8069, 0x806A, 0x8C1D, 0x8514, 0x900A };
+				GLint act = 0;
+				gw.glGetIntegerv( 0x84E0, &act );
+				auto mag = []( unsigned m ) { return m == 0x2600 ? "NEAREST" : "LINEAR"; };
+				auto minf = []( unsigned m ) { return m == 0x2600 || m == 0x2700 || m == 0x2702 ? "NEAREST" : "LINEAR"; };
+				auto isMip = []( unsigned m ) { return m >= 0x2700 && m <= 0x2703; };
+				auto mipm = [&]( unsigned m ) { return !isMip( m ) ? "none" : m == 0x2702 || m == 0x2703 ? "LINEAR" : "NEAREST"; };
+				auto addr = []( unsigned w ) { return w == 0x2901 ? "REPEAT" : w == 0x8370 ? "MIRROR" : w == 0x812D ? "BORDER" : "EDGE"; };
+				int diff = 0, seen = 0, skipped = 0;
+				nAniso = 0;
+				ltexGl = ltexVk = -1.0f;
+				for ( const WwVkPresent::WaterSlot & s : r.census.inputs ) {
+					if ( s.kind < 0 || s.kind > 4 || s.unit < 0 || !s.tex ) {
+						skipped++;
+						if ( print )
+							std::printf( "FARGNDRTDRAW %s state %-16s kind %d unit %d tex %u: no sampler state to check (buffer, other or unbound)\n", tag,
+								s.name.c_str(), s.kind, s.unit, s.tex );
+						continue;
+					}
+					seen++;
+					// GL: the texture on the input's unit, read here (not through the census)
+					gw.glActiveTexture( 0x84C0u + unsigned( s.unit ) );
+					const unsigned tg = kTg[s.kind], lt = s.kind == 3 ? 0x8515u : tg;
+					GLint name = 0, sobj = 0, gMag = 0, gMin = 0, gW[3] = {}, gCm = 0, gCf = 0, gBase = 0, gMax = 0;
+					float gAn = 1.0f, gBias = 0.0f, gMinL = 0.0f, gMaxL = 0.0f;
+					gw.glGetIntegerv( kBd[s.kind], &name );
+					gw.glGetIntegerv( 0x8919, &sobj );
+					gw.glGetTexParameteriv( tg, 0x2800, &gMag );
+					gw.glGetTexParameteriv( tg, 0x2801, &gMin );
+					gw.glGetTexParameteriv( tg, 0x2802, &gW[0] );
+					gw.glGetTexParameteriv( tg, 0x2803, &gW[1] );
+					gw.glGetTexParameteriv( tg, 0x8072, &gW[2] );
+					gw.glGetTexParameteriv( tg, 0x884C, &gCm );
+					gw.glGetTexParameteriv( tg, 0x884D, &gCf );
+					gw.glGetTexParameteriv( tg, 0x813C, &gBase );
+					gw.glGetTexParameteriv( tg, 0x813D, &gMax );
+					gw.glGetTexParameterfv( tg, 0x84FE, &gAn );
+					gw.glGetTexParameterfv( tg, 0x8501, &gBias );
+					gw.glGetTexParameterfv( tg, 0x813A, &gMinL );
+					gw.glGetTexParameterfv( tg, 0x813B, &gMaxL );
+					const bool gMip = isMip( unsigned( gMin ) );
+					int gLv = 1;	// the levels a mipmapped sample can reach: level 0 .. max level, while a level exists
+					while ( gMip && gLv <= gMax && gLv < 16 ) {
+						GLint lw = 0;
+						gw.glGetTexLevelParameteriv( lt, gLv, 0x1000, &lw );
+						if ( lw < 1 )
+							break;
+						gLv++;
+					}
+					const float gLo = gMip ? std::max( gMinL, 0.0f ) : 0.0f, gHi = gMip ? std::min( gMaxL, float( gLv - 1 ) ) : 0.0f;
+					// the twin: waterSampler's VkSamplerCreateInfo from the slot (plain only without a slot / under red 2) + the view
+					const bool vMip = isMip( s.minF ), vAnOn = s.aniso > 1.0f && vk().anisotropy;
+					const float vAn = vAnOn ? std::min( s.aniso, vk().maxAniso ) : 1.0f;
+					const bool vCmp = s.cmpMode == 0x884E, gCmp = gCm == 0x884E;
+					const float vHi = vMip ? float( s.levels - 1 ) : 0.0f;	// maxLod NONE: the view's last level
+					char gl[256], vv[256];
+					std::snprintf( gl, sizeof( gl ), "mag %s min %s mip %s addr %s %s %s cmp %d %x levels %d base %d lod %g..%g bias %g aniso %g smpobj %d",
+						mag( unsigned( gMag ) ), minf( unsigned( gMin ) ), mipm( unsigned( gMin ) ), addr( unsigned( gW[0] ) ), addr( unsigned( gW[1] ) ),
+						addr( unsigned( gW[2] ) ), int( gCmp ), gCmp ? unsigned( gCf ) - 0x0200u : 0u, gMip ? gLv : 1, gBase, double( gLo ), double( gHi ),
+						double( gBias ), double( gAn ), int( sobj != 0 ) );
+					std::snprintf( vv, sizeof( vv ), "mag %s min %s mip %s addr %s %s %s cmp %d %x levels %d base %d lod %g..%g bias %g aniso %g smpobj %d",
+						mag( s.magF ), minf( s.minF ), mipm( s.minF ), addr( s.wrap[0] ), addr( s.wrap[1] ), addr( s.wrap[2] ), int( vCmp ),
+						vCmp ? s.cmpFunc - 0x0200u : 0u, vMip ? s.levels : 1, s.baseLevel, 0.0, double( vHi ), 0.0, double( vAn ), 0 );
+					const bool same = std::strcmp( gl, vv ) == 0 && unsigned( name ) == s.tex;
+					if ( !same )
+						diff++;
+					if ( gAn > 1.0f || vAn > 1.0f )
+						nAniso++;
+					if ( s.name == "fgLtex" )
+						ltexGl = gAn, ltexVk = vAn;
+					if ( print || !same )
+						std::printf( "FARGNDRTDRAW %s state %-16s GL tex %u %s\nFARGNDRTDRAW %s state %-16s VK tex %u %s : %s\n", tag, s.name.c_str(),
+							unsigned( name ), gl, tag, s.name.c_str(), s.tex, vv, same ? "same" : "DIFFERS" );
+				}
+				gw.glActiveTexture( GLenum( act ) );
+				if ( print )
+					std::printf( "FARGNDRTDRAW %s state: %d inputs checked, %d without sampler state, %d anisotropic, %d differ\n", tag, seen, skipped,
+						nAniso, diff );
+				return seen > 0 ? diff : -1;
+			};
+			int nAn = 0;
+			float lg = 0.0f, lv = 0.0f;
+			const int sDiff = stateTable( sr, true, nAn, lg, lv );
+			const bool sOk = sDiff == 0 && lg == kLtexAnisoApp && lv == kLtexAnisoApp && nAn >= 1;
+			std::printf( "FARGNDRTDRAW %s seed 1 state arm (fgLtex anisotropy GL %g / twin %g, the app's %g): %s\n", tag, double( lg ), double( lv ),
+				double( kLtexAnisoApp ), sOk ? "OK" : "FAIL" );
+			gateOk = gateOk && sOk;
+			{	// red: the twin's fgLtex anisotropy other than GL's (the slot the twin's VkSampler is made from)
+				WwVkPresent::WaterRun bad( sr );
+				int hit = 0;
+				for ( WwVkPresent::WaterSlot & s : bad.census.inputs )
+					if ( s.name == "fgLtex" )
+						s.aniso = 4.0f, hit++;
+				const int rDiff = hit == 1 ? stateTable( bad, false, nAn, lg, lv ) : -1;
+				const bool rFails = rDiff > 0;
+				std::printf( "FARGNDRTDRAW %s seed 1 state red aniso (twin's fgLtex 4, GL 8): %d differ%s\n", tag, rDiff,
+					rFails ? " -> red FAILS as it must" : " -> red PASSES: the state arm is blind" );
+				gateOk = gateOk && rFails;
+			}
+			stateEnd();
+			glBindTexture( 0x8C1A, smp[size_t( iLtex )].tex );
+			glTexParameterf( 0x8C1A, 0x84FE /* GL_TEXTURE_MAX_ANISOTROPY */, kLtexAnisoPix );
+			glBindTexture( 0x8C1A, 0 );
+#else
+			std::printf( "FARGNDRTDRAW %s seed 1 state arm: FAIL (no twin: WW_VK_FARGNDRT undefined)\n", tag );
+			gateOk = false;
+#endif
 		}
 
 		// the all-on arm (seed 1): cellGiHalfOn 1 on the shared screen GI images
