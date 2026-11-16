@@ -769,6 +769,39 @@ bool cloudRun( const CloudRun & t, std::string & why );
 void cloudOnGl( const char * why );
 FxStat takeCloudStat();
 
+// lane VKCLOUD4: the fly-through box's bake (cloudfly.cpp runPass): cloud_flybake_ps / cloud_flysdf_ps's b31 (reflected)
+// kT_flybake: 14 fields, 672 bytes (spirv-cross --reflect of the shipped SPIR-V; tools: notes/vkair1/tools/reflect_table.py)
+inline constexpr FxField kT_flybake[] = {
+	{ "cvBands.baseKm", 0, 3, 1, 0, 0 }, { "cvBands.topKm", 16, 3, 1, 0, 0 }, { "cvBands.density", 32, 3, 1, 0, 0 },
+	{ "cvBands.coverage", 48, 3, 1, 0, 0 }, { "cvBands.sheet", 60, 1, 1, 0, 0 }, { "cvBands.mapRect", 64, 4, 1, 0, 0 },
+	{ "cvBands.windKm", 80, 3, 1, 0, 0 }, { "cvCal", 96, 1, 34, 0, 0 }, { "cfOrgKm", 640, 3, 1, 0, 0 },
+	{ "cfCellKm", 652, 1, 1, 0, 0 }, { "cfLayer", 656, 1, 1, 1, 0 }, { "cfMargin", 660, 1, 1, 0, 0 },
+	{ "cfSlackKm", 664, 1, 1, 0, 0 }, { "cfProbe", 668, 1, 1, 1, 0 },
+};
+inline constexpr int kT_flybakeBytes = 672;
+inline constexpr int kT_flybakeLayerAt = 656;
+// kT_flysdf: 3 fields, 28 bytes (spirv-cross --reflect of the shipped SPIR-V; tools: notes/vkair1/tools/reflect_table.py)
+inline constexpr FxField kT_flysdf[] = {
+	{ "cfAxis", 0, 1, 1, 1, 0 }, { "cfLayer", 4, 1, 1, 1, 0 }, { "cfDim", 16, 3, 1, 0, 0 },
+};
+inline constexpr int kT_flysdfBytes = 32;
+inline constexpr int kT_flysdfLayerAt = 4;
+inline constexpr int kFlyBakeTex = 3;  //!< cloud_flybake_ps's t0 cvShape, t1 cvDetail, t2 cvMap; cloud_flysdf_ps's t0 cfSrc
+struct FlyBakeRun
+{
+	int pass = 0;                   //!< 0 the occupancy bake (cloud_flybake), 1..3 the distance field along x, y, z (cloud_flysdf)
+	int from = 0, to = 0;           //!< the slices drawn, [from, to)
+	std::uintptr_t dst = 0;         //!< the written volume's sharedTarget key (3D R8, made with slices)
+	std::uintptr_t src = 0;         //!< passes 1..3: the read volume's sharedTarget key
+	FxTex tex[kFlyBakeTex];         //!< pass 0: the density's inputs (fxTexOf over GL's program)
+	std::uint8_t loose[kT_flybakeBytes] = {};  //!< b31 packed from GL's program (fxPack, kT_flybake or kT_flysdf); cfLayer is set here
+	int red = 0;                    //!< gates only: 1 every slice into slice 0, 2 slice k into k + 1, 4 the other pass's program
+};
+//! GL current: one pass over slices [from, to) of t.dst on Vulkan (one render pass a slice), one crossing; false: why, GL draws it
+bool flyBakeRun( const FlyBakeRun & t, std::string & why );
+void flyBakeOnGl( const char * why );
+FxStat takeFlyBakeStat();
+
 // lane VKFAR1 (row G3): the far bulb dots (cell_fardots_ps__WW_CELL_FOGLEAK's b31, reflected)
 inline constexpr FxField kT_fardots[] = {
 	{ "fogNightHue", 0, 1, 1, 0, 0 }, { "fogNight", 16, 4, 1, 0, 0 }, { "atAp", 32, 4, 1, 0, 0 },

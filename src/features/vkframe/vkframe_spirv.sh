@@ -90,6 +90,9 @@ fx cloud_resolve_a_view_ps clouds/cloud_resolve_a_view_ps
 # lane VKCLOUD3: through their view entries (NV GL's float forms, WW_VK_NVGL_FORMS)
 fx cloud_fly_view_ps clouds/cloud_fly_view_ps
 fx cloud_fly_a_view_ps clouds/cloud_fly_a_view_ps
+# lane VKCLOUD4: the fly-through box's occupancy bake and distance field (cloudfly.cpp runPass; kT_flybake / kT_flysdf)
+fx cloud_flybake_view_ps clouds/cloud_flybake_ps
+fx cloud_flysdf_view_ps clouds/cloud_flysdf_ps
 # lane VKFAR1: the far bulb dots as instanced quads; the vertex stage with fx()'s shifts (its block is b1)
 fxv() {
 	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main -fvk-b-shift 0 0 -fvk-t-shift 64 0 -fvk-s-shift 128 0 -fvk-u-shift 192 0 -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
