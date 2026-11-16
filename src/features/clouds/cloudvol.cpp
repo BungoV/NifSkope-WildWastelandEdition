@@ -918,8 +918,9 @@ bool resolvePass( Renderer * r, CvGpu & g, const CvRedo & d )
 
 /* lane VKAIR1 (row L6): the march and the resolve on the present device into the shared march / history targets, one
  * crossing (the programs set up as GL's, their state read back). false: GL draws both (the reason counted in the
- * "vk clouds:" line, one a 5 s window). Cloud Variety stays GL's (cloud_march_v has no Vulkan twin); the fly-through box's march runs here since lane
- * VKCLOUD2 (cloud_fly / cloud_fly_a twins; red WW_VKVIEW_CLOUDFLY_RED=1: GL's). */
+ * "vk clouds:" line, one a 5 s window). Cloud Variety stays GL's (cloud_march_v has no Vulkan twin); the fly-through box's march
+ * stays GL's too: its twins (cloud_fly / cloud_fly_a, lane VKCLOUD2) fail tests/vkframe/cloudview.sh (cloud_f / cloud_fa past
+ * MARCH_RULE), so the route is held until that gate passes. */
 bool cvOnVulkan( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f, const WwCloudMap & m, GLuint sceneTex )
 {
 	static std::string said;
@@ -973,12 +974,12 @@ bool cvOnVulkan( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & 
 	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_CLOUD_RED" ) )
 		return false;	// GL's (red or the view not on Vulkan): ensure() said where the targets live
 	bool drew = false;
-	const bool flyOn = wwCloudFlyActive( r );	// lane VKCLOUD2: the march with the box runs on Vulkan too
+	const bool flyOn = wwCloudFlyActive( r );	// lane VKCLOUD2: the march with the box (held on GL, see above)
 	std::string glWhy;
 	if ( !g.march.shared || !g.hist[0].shared || !g.hist[1].shared ) {
 		WwVkPresent::cloudOnGl( ( glWhy = "the march / history targets are GL's own" ).c_str() );
-	} else if ( flyOn && wwEnvInt( "WW_VKVIEW_CLOUDFLY_RED" ) == 1 ) {
-		WwVkPresent::cloudOnGl( ( glWhy = "the fly-through box (red WW_VKVIEW_CLOUDFLY_RED=1)" ).c_str() );
+	} else if ( flyOn ) {
+		WwVkPresent::cloudOnGl( ( glWhy = "the fly-through box (cloud_fly twin fails the cloudview gate)" ).c_str() );
 	} else if ( d.b.variety ) {
 		WwVkPresent::cloudOnGl( ( glWhy = "Cloud Variety (no Vulkan twin of cloud_march_v)" ).c_str() );
 	} else {
