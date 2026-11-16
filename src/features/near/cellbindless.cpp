@@ -833,8 +833,8 @@ bool vkPfxDraw( const NifSkopeOpenGLContext::Program * prog, const float * pos, 
 {
 	QOpenGLContext * qc = QOpenGLContext::currentContext();
 	if ( !vkShadeOn() || !prog || !n || !pos || !qc || std::string_view( prog->name ) != "particles_cell.prog" )
-		return zoneWhy( !vkShadeOn() ? std::string( "WW_VKOBJ_SHADE=0: the twins are off" ) : prog ? "no twin: " + std::string( prog->name )
-			: std::string( "no program" ), false ), false;	// lane VKFLIGHT6
+		return !vkShadeOn() ? zoneWhy( "WW_VKOBJ_SHADE=0: the twins are off", false ) : prog ? zoneWhy( "no twin: "
+			+ std::string( prog->name ), false ) : zoneWhy( "no program", false ), false;	// lane VKFLIGHT6
 	pfxTried++;
 	GLboolean mask[4] = {};
 	qc->functions()->glGetBooleanv( GL_COLOR_WRITEMASK, mask );
@@ -1377,6 +1377,7 @@ void frame()
 	// lane VKFLIGHT6: the sorted pass's twin draws and GL's draws by the refusal before them (said in the view, below)
 	const std::string sortedLine = zoneLine( ZoneSorted, "sorted" );
 	zoneReset();
+	gz.tally = WwVkPresent::shareWanted( nullptr );	// the reasons only in the Vulkan view (no per-draw string or map work outside it)
 	if ( ctxs().empty() )
 		return;
 	Ctx & c = cx();

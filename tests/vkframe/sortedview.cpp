@@ -88,6 +88,17 @@ int main( int argc, char ** argv )
 	WwBl::zoneReset();
 	row( z.vk[WwBl::ZoneSorted] == 0 && z.whyN[WwBl::ZoneSorted].empty() && z.draws[WwBl::ZoneSorted] == 0 && z.why.empty(),
 		"zoneReset clears the zone" );
+	// 8. outside the Vulkan view (tally off): GL's draws still counted for the guard, no reason kept or tallied
+	z.tally = false;
+	WwBl::glZoneSet( WwBl::ZoneSorted );
+	WwBl::zoneWhy( "a blended rigid shape (the opaque route only)", true );
+	gl( 3 );
+	WwBl::glZoneSet( prev );
+	row( z.draws[WwBl::ZoneSorted] == 3 && z.whyN[WwBl::ZoneSorted].empty() && z.why.empty(),
+		"tally off: GL draws " + std::to_string( z.draws[WwBl::ZoneSorted] ) + " (want 3), reasons " +
+		std::to_string( z.whyN[WwBl::ZoneSorted].size() ) + " (want 0)" );
+	z.tally = true;
+	WwBl::zoneReset();
 	std::printf( "SORTEDVIEW %s (%d rows compared, %d failed)%s\n", fails ? "FAILED" : "OK", n, fails, red ? " RED stale-why" : "" );
 	return fails ? 1 : 0;
 }

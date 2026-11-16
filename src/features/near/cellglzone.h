@@ -36,6 +36,8 @@ struct GlZones
 	std::string why;                                  // the refusal of the draw on hand (the twins ask before GL draws it)
 	bool whyNamed = false;                            // a twin's own reason (else the program has no twin)
 	std::map<std::string, long long> whyN[ZoneCount];  // GL's draw calls by the refusal before them
+	bool tally = true;                                // the reasons are kept (frame(): the Vulkan view only; outside it no string
+	                                                  // or map work a draw)
 };
 inline GlZones & glZones()
 {
@@ -46,6 +48,8 @@ inline void countGl( long long calls )
 {
 	GlZones & z = glZones();
 	z.draws[z.cur] += calls;
+	if ( !z.tally )
+		return;
 	static const std::string none( "no twin tried" );
 	z.whyN[z.cur][z.why.empty() ? none : z.why] += calls;
 	z.why.clear();
@@ -53,13 +57,17 @@ inline void countGl( long long calls )
 }
 /* lane VKFLIGHT6: a twin refused the draw on hand. named = the twin's own reason (it took the program and could not draw
  * it); a weak one (the program has no twin here, the twins are off) never replaces a named one, and the first weak stays */
-inline void zoneWhy( const std::string & w, bool named )
+inline void zoneWhy( const char * w, bool named )
 {
 	GlZones & z = glZones();
-	if ( named || ( !z.whyNamed && z.why.empty() ) ) {
+	if ( z.tally && ( named || ( !z.whyNamed && z.why.empty() ) ) ) {
 		z.why = w;
 		z.whyNamed = named;
 	}
+}
+inline void zoneWhy( const std::string & w, bool named )
+{
+	zoneWhy( w.c_str(), named );
 }
 inline void zoneVk( long long draws )	// a twin drew the draw on hand
 {

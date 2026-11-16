@@ -186,6 +186,9 @@ struct AoGpu
 	int gbufDepthTexW = 0, gbufDepthTexH = 0, gbufDepthNoW = 0, gbufDepthNoH = 0;	// its shape; a shape the share refused
 	GLenum gbufDepthTexFmt = 0, gbufDepthNoFmt = 0;
 	std::shared_ptr<char> gbufDepthKey;	// its sharedTarget key (a stable address: the AoGpu moves with its hash)
+	bool gbufShared = false;	// lane VKFLIGHT6: gbuf.tex is a shared RGBA32F of the present device (gbufShare)
+	int gbufNoW = 0, gbufNoH = 0;	// a size the share refused
+	std::shared_ptr<char> gbufKey;	// its sharedTarget key
 	GLuint preFbo = 0, preDs = 0;	// MODULES1: the depth pre-pass, multisampled as the linear frame
 	int preW = 0, preH = 0, preS = 0;
 	GLenum preFmt = 0;
@@ -270,6 +273,57 @@ bool depthShare( AoGpu & g, int W, int H, GLenum fmt )
 	g.gbufDepthTexH = H;
 	g.gbufDepthTexFmt = fmt;
 	g.gbufDepthOn = 0;
+	g.gbufOkKey = 0;
+	return true;
+}
+
+/* lane VKFLIGHT6: while the view is on Vulkan (red WW_VKVIEW_AOGBUF_RED=1) the g-buffer's colour (view normal + linear depth,
+ * RGBA32F) is a shared texture of the present device beside the shared depth (depthShare), so the obscurance pass's draws
+ * (probe 20) take the object twins (objBlFrameRead takes shared targets only). The view off (or a refusal): aoAlloc's own
+ * texture, as before */
+bool gbufShare( NifSkopeOpenGLContext::GLFunctions * fn, AoGpu & g, int W, int H, bool depthTex )
+{
+	if ( !g.gbufKey )
+		g.gbufKey = std::make_shared<char>( 0 );
+	const std::uintptr_t key = reinterpret_cast<std::uintptr_t>( g.gbufKey.get() );
+	const bool want = depthTex && WwVkPresent::shareWanted( "WW_VKVIEW_AOGBUF_RED" );
+	if ( g.gbufShared && ( !want || !WwVkPresent::sharedTargetIs( key, g.gbuf.tex ) || g.gbuf.w != W || g.gbuf.h != H ) ) {
+		WwVkPresent::sharedTargetDrop( key );	// the present device's name: dropped there, not deleted here
+		g.gbuf.tex = 0;	// aoAlloc makes GL's own again and attaches it
+		g.gbuf.w = g.gbuf.h = 0;
+		g.gbufShared = false;
+		g.gbufOkKey = 0;
+	}
+	if ( !want )
+		g.gbufNoW = g.gbufNoH = 0;
+	if ( !want || g.gbufShared || ( g.gbufNoW == W && g.gbufNoH == H ) )
+		return g.gbufShared;
+	unsigned t = 0;
+	std::string why;
+	if ( !WwVkPresent::sharedTarget( key, 0, W, H, 1, GL_RGBA32F, t, why ) || !t ) {
+		WwVkPresent::sharedTargetDrop( key );
+		g.gbufNoW = W;
+		g.gbufNoH = H;
+		qInfo().noquote() << "vk aogbuf: the g-buffer stays GL's texture (" << QString::fromStdString( why ) << ")";
+		return false;
+	}
+	if ( g.gbuf.tex )
+		fn->glDeleteTextures( 1, &g.gbuf.tex );
+	fn->glBindTexture( GL_TEXTURE_2D, t );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	if ( !g.gbuf.fbo )
+		fn->glGenFramebuffers( 1, &g.gbuf.fbo );
+	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.gbuf.fbo );
+	fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t, 0 );
+	g.gbuf.tex = t;
+	g.gbuf.w = W;
+	g.gbuf.h = H;
+	g.gbufShared = true;
 	g.gbufOkKey = 0;
 	return true;
 }
@@ -1310,6 +1364,7 @@ void wwCellAoPass( Scene * scene, bool run )
 	const bool depthTex = depthShare( g, W, H, gbufFmt );	// lane VKAO3: the shared twin while the view is on Vulkan
 
 	// the targets
+	gbufShare( fn, g, W, H, depthTex );	// lane VKFLIGHT6: the colour shared too while the depth is
 	aoAlloc( fn, g.gbuf, W, H, GL_RGBA32F, GL_RGBA, false );
 	if ( !g.gbufDepth )
 		fn->glGenRenderbuffers( 1, &g.gbufDepth );
