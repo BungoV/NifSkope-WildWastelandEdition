@@ -46,5 +46,8 @@ bool wwAirAtlasAllRed();
  * nearest first, binds the atlas on unit AirLampAtlas and the table on AirLampTable. Returns the lamps in the table
  * (0 = nothing bound: the air reads the walk). Leaves the GL state as it found it, except the program (none bound). */
 int wwAirLampAtlasFrame( Scene * scene, const WwCellLighting * L, const float cam[3], float p11, int viewH, float farD );
+//! lane VKAIR17: the atlas is a shared target of the present device while wanted (the air view's readers on Vulkan; set a
+//! frame before wwAirLampAtlasFrame); a flip makes it again (airlampatlasshare.h)
+void wwAirLampAtlasShare( bool wanted );
 
 #endif

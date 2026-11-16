@@ -30,11 +30,23 @@
 // unbound while volLampHistOk (GL's unbound sampler reads (0,0,0,1), Vulkan's zero view 0: the N > 0.5 tap would part), named
 // "volLampHist"; gate 512 (rt only) a GL-owned RGBA32F texture buffer on cellDdgiAtlas, named "cellDdgiAtlas".
 // Coverage limit: the app's own s4Share branches (cellvolair.cpp) run only in the app; this gate drives the helper they call.
+// Lane VKAIR17 (2026-11-16), arm "def frame 2 atlas" (appended after the three arms above; their lines stay byte-equal): the
+// lamps' depth atlas (airlampatlas.cpp) made by the app's helper (airlampatlasshare.h airAtlasEnsure, wished: a shared D16 2D
+// target) at the app's size (8192), its tiles filled by scissored depth clears through the helper's FBO (GL's own writes, as the
+// app's tile clears), the table (4 RGBA32F texels a lamp: face origins, tile size, ready) a GL texture buffer; volLampVis 1,
+// volLampN 2, volLampAtlasRed 0 (the fixture lamps carry the shadow flag and no cube slot: every lamp reads the atlas).
+// Bar (set before the first run, never widened): make check: shared, FBO complete, farSharedOf(atlas) == the helper's key, size
+// 8192, and the fill read back through the FBO within 1 D16 unit of the cleared depth (0 misses over a tile); probes (LIVE >= 50
+// moved): "atlas off" (volLampVis 0), "atlas rewritten", "table rewritten"; Vulkan vs GL the same bar as the other arms; stat: 1 run, 64 draws,
+// image copies 0 (the atlas read in place), buffer copies 2 (the light list and the table). Reds, each must FAIL: gate 2048 a
+// GL-owned atlas (the helper's red 1: the share skipped) bound, named "volLampAtlas"; gate 4096 the atlas rewritten after GL's
+// draw; gate 8192 the table rewritten after GL's draw (tile size 32: read each run). Plus every red of the arms above.
 // Last line `AIRLAMPVIEW GATE OK` or `AIRLAMPVIEW GATE FAILED`.
 #define FLD_NO_MAIN
 #include "farloddraw.cpp"
 #undef FLD_NO_MAIN
 #include "features/air/cellvolairshare.h"
+#include "features/air/airlampatlasshare.h"
 
 namespace alv
 {
@@ -44,6 +56,7 @@ using namespace fld;
 const int kLvCols = 21, kLvRows = 12, kLvSlices = 64, kLvLive = 50, kLvMask = 128, kLvMaskD = 64, kLvLights = 2, kLvTpl = 8;
 const float kLvSentinel = 7.0f;
 const std::uint16_t kLvSentinelH = 0x4700;	// 7.0 in half
+int gAtlasOn = 0;	// lane VKAIR17: 0: stage4 leaves the atlas uniforms alone (the old arms); 1: volLampVis 1; -1: volLampVis 0
 const GLenum kLvRgba = 0x1908, kLv3d = 0x806F, kLv2da = 0x8C1A, kLvUbyte = 0x1401, kLvHalf = 0x140B, kLvTb = 0x8C2A;
 
 struct At
@@ -55,6 +68,8 @@ struct At
 	void( WINAPI * clearTexImage )( GLuint, GLint, GLenum, GLenum, const void * ) = nullptr;
 	void( WINAPI * clearTexSubImage )( GLuint, GLint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei, GLenum, GLenum, const void * ) = nullptr;
 	void( WINAPI * framebufferTextureLayer )( GLenum, GLenum, GLuint, GLint, GLint ) = nullptr;
+	void( WINAPI * framebufferTexture2D )( GLenum, GLenum, GLenum, GLuint, GLint ) = nullptr;
+	void( WINAPI * deleteFramebuffers )( GLsizei, const GLuint * ) = nullptr;
 };
 At at;
 
@@ -63,7 +78,8 @@ bool loadAt()
 	return load( at.vertexAttribPointer, "glVertexAttribPointer" ) && load( at.enableVertexAttribArray, "glEnableVertexAttribArray" )
 		&& load( at.genVertexArrays, "glGenVertexArrays" ) && load( at.bindVertexArray, "glBindVertexArray" )
 		&& load( at.clearTexImage, "glClearTexImage" ) && load( at.clearTexSubImage, "glClearTexSubImage" )
-		&& load( at.framebufferTextureLayer, "glFramebufferTextureLayer" );
+		&& load( at.framebufferTextureLayer, "glFramebufferTextureLayer" ) && load( at.framebufferTexture2D, "glFramebufferTexture2D" )
+		&& load( at.deleteFramebuffers, "glDeleteFramebuffers" );
 }
 
 struct GateFn
@@ -76,6 +92,18 @@ struct GateFn
 	{
 		f.texImage3D( a, l, fmt, w, h, d, b, pf, ty, px );
 	}
+	// lane VKAIR17: the atlas helper's calls (airlampatlasshare.h)
+	void glTexImage2D( GLenum a, GLint l, GLint fmt, GLsizei w, GLsizei h, GLint b, GLenum pf, GLenum ty, const void * px )
+	{
+		::glTexImage2D( a, l, fmt, w, h, b, pf, ty, px );
+	}
+	void glGetIntegerv( GLenum p, GLint * v ) { ::glGetIntegerv( p, v ); }
+	void glGenFramebuffers( GLsizei n, GLuint * t ) { f.genFramebuffers( n, t ); }
+	void glDeleteFramebuffers( GLsizei n, const GLuint * t ) { at.deleteFramebuffers( n, t ); }
+	void glBindFramebuffer( GLenum a, GLuint t ) { f.bindFramebuffer( a, t ); }
+	void glFramebufferTexture2D( GLenum a, GLenum p, GLenum tg, GLuint t, GLint l ) { at.framebufferTexture2D( a, p, tg, t, l ); }
+	void glDrawBuffer( GLenum b ) { ::glDrawBuffer( b ); }
+	GLenum glCheckFramebufferStatus( GLenum a ) { return f.checkFramebufferStatus( a ); }
 };
 GateFn gfn;
 
@@ -314,12 +342,18 @@ std::string stage4( GLuint p, int histOk, int layer, int frame, std::string * ab
 			if ( absent )
 				*absent += std::string( " " ) + u.n;
 		}
+	if ( gAtlasOn != 0 ) {	// lane VKAIR17: the atlas arm
+		for ( const U & u : std::vector<U> { { "volLampVis", { gAtlasOn > 0 ? 1.0 : 0.0 }, true }, { "volLampN", { double( kLvLights ) }, true },
+				  { "volLampAtlasRed", { 0 }, true } } )
+			if ( !setU( p, u.n, u.v ) )
+				return u.n;
+	}
 	return "";
 }
 
 struct Units
 {
-	int now = -1, hist = -1, stbn = -1, lights = -1, ddgi = -1;
+	int now = -1, hist = -1, stbn = -1, lights = -1, ddgi = -1, atlas = -1, table = -1;
 };
 
 std::string setupProg( GLuint p, const char * tag, Units & u )
@@ -358,7 +392,7 @@ std::string setupProg( GLuint p, const char * tag, Units & u )
 			x = unit++;
 		const std::string n( nm );
 		int * slot = n == "volLampNow" ? &u.now : n == "volLampHist" ? &u.hist : n == "volStbn" ? &u.stbn : n == "cellLights" ? &u.lights
-			: n == "cellDdgiAtlas" ? &u.ddgi : nullptr;
+			: n == "cellDdgiAtlas" ? &u.ddgi : n == "volLampAtlas" ? &u.atlas : n == "volLampTable" ? &u.table : nullptr;
 		if ( slot )
 			*slot = us[0];
 		f.uniform1iv( f.getUniformLocation( p, nm ), GLsizei( us.size() ), us.data() );
@@ -367,8 +401,11 @@ std::string setupProg( GLuint p, const char * tag, Units & u )
 	std::printf( "AIRLAMPVIEW %s: %d blocks zero, %d loose uniforms seeded, %d samplers on units 1..%d (volLampNow %d volLampHist %d volStbn %d "
 				 "cellLights %d cellDdgiAtlas %d)\n",
 		tag, nb, seeded, samplers, unit - 1, u.now, u.hist, u.stbn, u.lights, u.ddgi );
+	std::printf( "AIRLAMPVIEW %s: volLampAtlas %d volLampTable %d\n", tag, u.atlas, u.table );
 	if ( u.now < 0 || u.hist < 0 || u.stbn < 0 || u.lights < 0 )
 		return "no volLampNow / volLampHist / volStbn / cellLights sampler";
+	if ( u.atlas < 0 || u.table < 0 )
+		return "no volLampAtlas / volLampTable sampler";
 	if ( unit > 160 )
 		return "more sampler units than the gate binds";
 	return "";
@@ -394,6 +431,72 @@ std::vector<float> lampTexels( int salt )
 		t[17] = 1.0f;
 	}
 	return L;
+}
+
+// lane VKAIR17: the atlas arm. The app's size; tiles of kAtTile px, lamp i face f at ((6 i + f + 1) kAtTile, kAtTile)
+const int kAtSize = 8192, kAtTile = 64, kAtBlock = 8;
+char gAtlasKey, gAtlasPlainKey;
+
+float atDepth( int i, int fc, int bx, int by, int pattern )
+{
+	static const float lv[4] = { 0.12f, 0.35f, 0.6f, 1.0f };
+	const unsigned h = unsigned( i * 131 + fc * 31 + bx * 7 + by * 13 + pattern * 5 ) * 2654435761u;
+	return lv[( h >> 13 ) & 3u];
+}
+
+//! the tiles by scissored depth clears through the atlas's FBO (GL's own writes, as the app's tile clears)
+void fillAtlas( GLuint fbo, int pattern )
+{
+	f.bindFramebuffer( fFb, fbo );
+	glDepthMask( GL_TRUE );
+	glDisable( GL_SCISSOR_TEST );
+	glClearDepth( 1.0 );
+	glClear( GL_DEPTH_BUFFER_BIT );
+	glEnable( GL_SCISSOR_TEST );
+	for ( int i = 0; i < kLvLights; i++ )
+		for ( int fc = 0; fc < 6; fc++ )
+			for ( int by = 0; by < kAtTile / kAtBlock; by++ )
+				for ( int bx = 0; bx < kAtTile / kAtBlock; bx++ ) {
+					glScissor( ( 6 * i + fc + 1 ) * kAtTile + bx * kAtBlock, kAtTile + by * kAtBlock, kAtBlock, kAtBlock );
+					glClearDepth( atDepth( i, fc, bx, by, pattern ) );
+					glClear( GL_DEPTH_BUFFER_BIT );
+				}
+	glDisable( GL_SCISSOR_TEST );
+	glClearDepth( 1.0 );
+	f.bindFramebuffer( fFb, 0 );
+	glFinish();
+}
+
+//! lamp 0 face 0's tile read back through the FBO: texels more than 1 D16 unit off the cleared depth
+int atlasMisses( GLuint fbo, int pattern )
+{
+	std::vector<std::uint16_t> px( static_cast<size_t>( kAtTile ) * kAtTile );
+	f.bindFramebuffer( 0x8CA8 /* GL_READ_FRAMEBUFFER */, fbo );
+	glReadPixels( kAtTile, kAtTile, kAtTile, kAtTile, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, px.data() );
+	f.bindFramebuffer( 0x8CA8, 0 );
+	int miss = 0;
+	for ( int y = 0; y < kAtTile; y++ )
+		for ( int x = 0; x < kAtTile; x++ ) {
+			const int want = int( std::lround( atDepth( 0, 0, x / kAtBlock, y / kAtBlock, pattern ) * 65535.0 ) );
+			miss += std::abs( int( px[static_cast<size_t>( y ) * kAtTile + x] ) - want ) > 1;
+		}
+	return miss;
+}
+
+//! the table (airlampatlas.cpp's layout: texels 0..2 the face origins xy / zw, texel 3 (tile size, ready))
+std::vector<float> atlasTable( int tile )
+{
+	std::vector<float> t( static_cast<size_t>( kLvLights ) * 16, 0.0f );
+	for ( int i = 0; i < kLvLights; i++ ) {
+		float * q = &t[static_cast<size_t>( i ) * 16];
+		for ( int fc = 0; fc < 6; fc++ ) {
+			q[( fc >> 1 ) * 4 + ( fc & 1 ) * 2] = float( ( 6 * i + fc + 1 ) * kAtTile );
+			q[( fc >> 1 ) * 4 + ( fc & 1 ) * 2 + 1] = float( kAtTile );
+		}
+		q[12] = float( tile );
+		q[13] = 1.0f;
+	}
+	return t;
 }
 }  // namespace alv
 
@@ -467,6 +570,36 @@ int main( int argc, char ** argv )
 	glBindTexture( kLvTb, lightTex );
 	ex.texBuffer( kLvTb, GLenum( fRgba32f ), lightBuf );
 	glBindTexture( kLvTb, 0 );
+	// lane VKAIR17: the atlas by the app's helper (wished: shared) and its table (a GL texture buffer)
+	GLuint atlasTex = 0, atlasFbo = 0, tableBuf = 0, tableTex = 0;
+	bool atlasFboOk = false;
+	AirAtlasShare atlasSh;
+	const std::uintptr_t atlasKeyV = reinterpret_cast<std::uintptr_t>( &gAtlasKey );
+	{
+		const int made = airAtlasEnsure( &gfn, atlasKeyV, kAtSize, true, atlasTex, atlasFbo, atlasFboOk, atlasSh );
+		const int again = airAtlasEnsure( &gfn, atlasKeyV, kAtSize, true, atlasTex, atlasFbo, atlasFboOk, atlasSh );
+		fillAtlas( atlasFbo, 1 );
+		const int miss = atlasMisses( atlasFbo, 1 );
+		const bool found = farSharedOf( atlasTex ) == atlasKeyV;
+		const bool ok = made == 1 && again == 0 && atlasSh.shared && atlasFboOk && found && atlasSh.size == kAtSize && miss == 0;
+		std::printf( "AIRLAMPVIEW atlas make: made %d again %d shared %d fbo %s farSharedOf %s size %d fill misses %d: %s\n", made, again,
+			int( atlasSh.shared ), atlasFboOk ? "complete" : "INCOMPLETE", found ? "== key" : "NOT the key", atlasSh.size, miss, ok ? "OK" : "FAIL" );
+		std::printf( "AIRLAMPVIEW %s\n", airAtlasSay( kAtSize, true, atlasFboOk, atlasSh ).c_str() );
+		if ( !ok )
+			return fatal( "the atlas make check" );
+	}
+	f.genBuffers( 1, &tableBuf );
+	auto setTable = [&]( int tile ) {
+		const std::vector<float> t = atlasTable( tile );
+		f.bindBuffer( kLvTb, tableBuf );
+		f.bufferData( kLvTb, std::ptrdiff_t( t.size() * 4 ), t.data(), fStatic );
+		f.bindBuffer( kLvTb, 0 );
+	};
+	setTable( kAtTile );
+	glGenTextures( 1, &tableTex );
+	glBindTexture( kLvTb, tableTex );
+	ex.texBuffer( kLvTb, GLenum( fRgba32f ), tableBuf );
+	glBindTexture( kLvTb, 0 );
 	GLuint fb = 0;
 	f.genFramebuffers( 1, &fb );
 	GLuint vao = 0, vb = 0, ib = 0;
@@ -503,18 +636,27 @@ int main( int argc, char ** argv )
 	struct Bound
 	{
 		GLuint now, hist, stbn;
+		GLuint atlas = 0;	// lane VKAIR17: the atlas arm only (then the table too)
 	};
 	auto bindInputs = [&]( const Units & u, const Bound & b ) {
 		bindUnit( u.now, kLv3d, b.now );
 		bindUnit( u.hist, kLv3d, b.hist );
 		bindUnit( u.stbn, kLv2da, b.stbn );
 		bindUnit( u.lights, kLvTb, lightTex );
+		if ( b.atlas ) {
+			bindUnit( u.atlas, GL_TEXTURE_2D, b.atlas );
+			bindUnit( u.table, kLvTb, tableTex );
+		}
 	};
 	auto unbindInputs = [&]( const Units & u ) {
 		bindUnit( u.now, kLv3d, 0 );
 		bindUnit( u.hist, kLv3d, 0 );
 		bindUnit( u.stbn, kLv2da, 0 );
 		bindUnit( u.lights, kLvTb, 0 );
+		if ( gAtlasOn != 0 ) {
+			bindUnit( u.atlas, GL_TEXTURE_2D, 0 );
+			bindUnit( u.table, kLvTb, 0 );
+		}
 	};
 	// GL's stage 4 as vaPassInner draws it (64 layers, MRT 2) into outHist / outNow (the sentinel first)
 	auto glDraw = [&]( int key, int histOk, int frame, GLuint outHist, GLuint outNow, const Bound & b, std::string & err, bool layerStuck = false ) {
@@ -549,7 +691,7 @@ int main( int argc, char ** argv )
 	auto makeHistory = [&]( std::string & err ) {
 		clearVol( in.hist[1], 0.0f );
 		clearVol( in.now[1], 0.0f );
-		( void )glDraw( 0, 0, 4, in.hist[0], in.now[0], Bound { in.now[1], in.hist[1], in.stbn }, err );
+		( void )glDraw( 0, 0, 4, in.hist[0], in.now[0], Bound { in.now[1], in.hist[1], in.stbn, gAtlasOn > 0 ? atlasTex : 0u }, err );
 	};
 	std::string err;
 	makeHistory( err );
@@ -559,14 +701,19 @@ int main( int argc, char ** argv )
 	struct Arm
 	{
 		int key, histOk;
+		bool atlas = false;	// lane VKAIR17: lamps' shadows from the shared atlas (volLampVis 1), its own history
 	};
-	const Arm arms[3] = { { 0, 0 }, { 0, 1 }, { 1, 1 } };
+	const Arm arms[4] = { { 0, 0 }, { 0, 1 }, { 1, 1 }, { 0, 1, true } };
 	int fails = 0, probesDead = 0, redsRun = 0, redsFired = 0;
 	for ( const Arm & a : arms ) {
 		const int key = a.key, hk = a.histOk;
-		const std::string arm = std::string( keyName[key] ) + " frame " + ( hk ? "2" : "1" );
+		const std::string arm = std::string( keyName[key] ) + " frame " + ( hk ? "2" : "1" ) + ( a.atlas ? " atlas" : "" );
 		const char * an = arm.c_str();
-		const Bound b0 { in.now[0], in.hist[0], in.stbn };
+		if ( a.atlas ) {
+			gAtlasOn = 1;
+			makeHistory( err );	// frame 1 of the atlas world
+		}
+		const Bound b0 { in.now[0], in.hist[0], in.stbn, a.atlas ? atlasTex : 0u };
 		const Pair g = glDraw( key, hk, 5, glHist, glNow, b0, err );
 		if ( !err.empty() )
 			return fatal( arm + ": " + err );
@@ -604,6 +751,17 @@ int main( int argc, char ** argv )
 			clearVol( in.now[0], 0.0f );
 			probe( "lvNow in rewritten", glDraw( key, hk, 5, glHist, glNow, b0, err ) );
 			makeHistory( err );
+		}
+		if ( a.atlas ) {
+			gAtlasOn = -1;
+			probe( "atlas off", glDraw( key, hk, 5, glHist, glNow, b0, err ) );
+			gAtlasOn = 1;
+			fillAtlas( atlasFbo, 2 );
+			probe( "atlas rewritten", glDraw( key, hk, 5, glHist, glNow, b0, err ) );
+			fillAtlas( atlasFbo, 1 );
+			setTable( kAtTile / 2 );
+			probe( "table rewritten", glDraw( key, hk, 5, glHist, glNow, b0, err ) );
+			setTable( kAtTile );
 		}
 		if ( !err.empty() )
 			return fatal( arm + " (probes): " + err );
@@ -657,8 +815,17 @@ int main( int argc, char ** argv )
 			std::printf( "AIRLAMPVIEW %s stat: runs %d draws %d copies %d buffer copies %d (want 1 run, %d draws, 0 copies) %s\n", an, st.runs, st.draws,
 				st.copies, st.bufCopies, kLvSlices, cp ? "OK" : "FAIL" );
 			fails += !cp;
+			if ( a.atlas ) {
+				const bool bc = st.bufCopies == 2;
+				std::printf( "AIRLAMPVIEW %s atlas stat: buffer copies %d (want 2: the lights and the table; the atlas read in place) %s\n", an,
+					st.bufCopies, bc ? "OK" : "FAIL" );
+				fails += !bc;
+			}
 		}
-		for ( int red : { 1, 2, 4, 1024, 8, 16, 32, 64, 128, 256, 512 } ) {
+		std::vector<int> redList { 1, 2, 4, 1024, 8, 16, 32, 64, 128, 256, 512 };
+		if ( a.atlas )
+			redList.insert( redList.end(), { 2048, 4096, 8192 } );
+		for ( int red : redList ) {
 			if ( ( red == 8 || red == 16 || red == 256 ) && !hk )
 				continue;	// frame 2 only: frame 1 reads no history
 			if ( red == 512 && ( key != 1 || units[key].ddgi < 0 ) )
@@ -698,6 +865,24 @@ int main( int argc, char ** argv )
 				glBindTexture( kLvTb, 0 );
 				bindUnit( units[key].ddgi, kLvTb, atlas );
 			}
+			// lane VKAIR17 reds: 2048 the app helper's GL-owned branch (the share skipped), 4096 the atlas and 8192 the table
+			// rewritten after GL's draw
+			GLuint plainAt = 0, plainFbo = 0;
+			bool plainOk = false;
+			AirAtlasShare plainSh;
+			const std::uintptr_t plainKey = reinterpret_cast<std::uintptr_t>( &gAtlasPlainKey );
+			if ( red == 2048 ) {
+				airAtlasRed() = 1;
+				( void )airAtlasEnsure( &gfn, plainKey, kAtSize, true, plainAt, plainFbo, plainOk, plainSh );
+				airAtlasRed() = 0;
+				fillAtlas( plainFbo, 1 );
+				b.atlas = plainAt;
+				std::printf( "AIRLAMPVIEW %s red 2048 atlas: shared %d fbo %s\n", an, int( plainSh.shared ), plainOk ? "complete" : "INCOMPLETE" );
+			}
+			if ( red == 4096 )
+				fillAtlas( atlasFbo, 2 );
+			if ( red == 8192 )
+				setTable( kAtTile / 2 );
 			std::string rw;
 			WwVkPresent::AirLampStat rs;
 			Pair rv;
@@ -714,10 +899,16 @@ int main( int argc, char ** argv )
 				makeHistory( err );
 			if ( plain )
 				glDeleteTextures( 1, &plain );
+			if ( plainAt )
+				airAtlasRelease( &gfn, plainKey, plainAt, plainFbo, plainSh );
+			if ( red == 4096 )
+				fillAtlas( atlasFbo, 1 );
+			if ( red == 8192 )
+				setTable( kAtTile );
 			bool fired = false;
 			VolV jv;
 			const char * name = red == 32 ? "key" : red == 64 ? "feedback" : red == 128 ? "volStbn" : red == 256 ? "volLampHist"
-				: red == 512 ? "cellDdgiAtlas" : nullptr;
+				: red == 512 ? "cellDdgiAtlas" : red == 2048 ? "volLampAtlas" : nullptr;
 			if ( name )
 				fired = !ran && rw.find( name ) != std::string::npos;
 			else if ( ran ) {
