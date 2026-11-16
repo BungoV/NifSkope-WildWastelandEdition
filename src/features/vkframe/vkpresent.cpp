@@ -6200,7 +6200,7 @@ bool fxWork( std::string & why )
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
 		}
-	} else if ( F.kind == 4 || F.kind == 5 || F.kind == 9 || F.kind == 18 || F.kind == 21 || F.kind == 22 || F.kind == 23 || F.kind == 24 ) {  // lane VKGROUND3: 18 far ground mode 2; lane VKWATER3: the shaded water draw; lane VKFAR2: 5 the far LOD rings; lane VKFAR3: 9 the far ground; VKFAR26: 21 / 22 the rings' RT / DG twins
+	} else if ( F.kind == 4 || F.kind == 5 || F.kind == 9 || F.kind == 18 || F.kind == 21 || F.kind == 22 || F.kind == 23 || F.kind == 24 || F.kind == 25 || F.kind == 26 ) {  // lane VKGROUND18: 25 / 26 mode 2's RT / DG; lane VKGROUND3: 18 far ground mode 2; lane VKWATER3: the shaded water draw; lane VKFAR2: 5 the far LOD rings; lane VKFAR3: 9 the far ground; VKFAR26: 21 / 22 the rings' RT / DG twins
 		if ( !waterRecord( why ) ) {
 			v.vkEndCommandBuffer( F.cmd );
 			return false;

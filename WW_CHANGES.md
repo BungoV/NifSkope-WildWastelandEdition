@@ -1,3 +1,13 @@
+## VKGROUND17..18 (2026-11-16): far ground mode 2 under the RT GI keys on the Vulkan view
+
+Changed, not checked live. Offline: tests/vkframe/fargndrtdraw.sh passes (GATE OK, 4 of 4 keys: both modes, both keys).
+
+- Mode 2 ("Live, cached pages", fo4_cellcsmfgp) now draws on the Vulkan view under the all-on RT key and the DDGI key too
+  (two new twins, fxWork kinds 25 / 26); before, those keys sent it back to GL by name. ReSTIR GI and any other key still
+  refuse by name. The frame line of mode 2 now names the RT / DG twins' draws, copies and fails.
+- Gate: as mode 1's, with mode 2's page pools at anisotropy 1 for the pixel compare (manager ruling 11-16) and the state
+  arm at 8; the DDGI atlas red is seeded one texel off (bar unchanged). Each red FAILS.
+
 ## VKGROUND9..16 (2026-11-16): the far ground's live ring under the RT GI keys on the Vulkan view
 
 Changed, not checked live. Offline: tests/vkframe/fargndrtdraw.sh passes (GATE OK, both keys).

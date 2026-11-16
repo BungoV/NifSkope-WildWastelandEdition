@@ -166,12 +166,14 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 VKFRAME_FXR_ARGS = VKFRAME_FXG_ARGS + ['-D', 'WW_CELL_RESTIR=1', '-D', 'WW_CELL_RTDDGI=1', '-D', 'WW_CELL_RTDDGI_CASCADES=1']
 VKFRAME_FXR = {'reflrelight_view_rt_ps': 'reflections/cell_reflrelight_ps',
 	'farlod_view_rt_ps': 'core/fo4_cellcsm_ps',	# lane VKFAR25: the far LOD rings under the all-on key
-	'fargnd_view_rt_ps': 'far-ground/fo4_cellcsmfgl_ps'}	# lane VKGROUND11: the far ground (mode 1) under the all-on key
+	'fargnd_view_rt_ps': 'far-ground/fo4_cellcsmfgl_ps',	# lane VKGROUND11: the far ground (mode 1) under the all-on key
+	'fargndp_view_rt_ps': 'far-ground/fo4_cellcsmfgp_ps'}	# lane VKGROUND18: far ground mode 2 under the all-on key
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXR]
 # lane VKFAR25: the `fxdg <name> <dir/file>` lines, fxg's flags + RTDDGI + RTDDGI_CASCADES (the RT GI row without an RT preset)
 VKFRAME_FXDG_ARGS = VKFRAME_FXG_ARGS + ['-D', 'WW_CELL_RTDDGI=1', '-D', 'WW_CELL_RTDDGI_CASCADES=1']
 VKFRAME_FXDG = {'farlod_view_dg_ps': 'core/fo4_cellcsm_ps',
-	'fargnd_view_dg_ps': 'far-ground/fo4_cellcsmfgl_ps'}	# lane VKGROUND11: the far ground (mode 1) under the DG key
+	'fargnd_view_dg_ps': 'far-ground/fo4_cellcsmfgl_ps',	# lane VKGROUND11: the far ground (mode 1) under the DG key
+	'fargndp_view_dg_ps': 'far-ground/fo4_cellcsmfgp_ps'}	# lane VKGROUND18: far ground mode 2 under the DG key
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXDG]
 # lane VKAIR5: the air inject's `fxa` / `fxar` lines, fxg's / fxr's flags + the air program's AIR_SKYVIEW (its default key)
 VKFRAME_FXA_ARGS = VKFRAME_FXG_ARGS + ['-D', 'WW_CELL_AIR_SKYVIEW=1']
