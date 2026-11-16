@@ -736,4 +736,30 @@ FgPaintStat takeFgPaintStat()
 	S.st.buildMs = build;
 	return s;
 }
+
+#ifndef WW_VKPRESENT_NO_QT
+/* lane VKGROUND7: the `vk fgpaint:` line of cellfarground.cpp paintJobs; said at once when the GL reason changes, else at most
+ * every 5 s, and (force) at the paint's settle so a fill's last jobs are said; true when said (the caller zeroes its counts) */
+bool fgPaintSay( int jobs, int vkN, int glN, const char * glWhy, bool red, bool force )
+{
+	static std::string said;
+	static double at = 0.0;
+	const std::string why = glWhy ? glWhy : "";
+	const double now = nowMs();
+	if ( why == said && !force && now - at < 5000.0 )
+		return false;
+	said = why;
+	at = now;
+	const FgPaintStat st = takeFgPaintStat();
+	QString line = QStringLiteral( "vk fgpaint: jobs=%1 vk=%2 gl=%3 copies=%4" ).arg( jobs ).arg( vkN ).arg( glN ).arg( st.copies );
+	if ( st.fails )
+		line += QStringLiteral( " fails=%1 (%2)" ).arg( st.fails ).arg( QString::fromStdString( st.failWhy ) );
+	if ( !why.empty() )
+		line += QStringLiteral( " glWhy=%1" ).arg( QString::fromStdString( why ) );
+	if ( red )
+		line += QStringLiteral( " RED" );
+	qInfo().noquote() << line;
+	return true;
+}
+#endif
 }  // namespace WwVkPresent

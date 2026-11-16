@@ -45,6 +45,8 @@ bool fgPaintRunState( const FgPaintRun & r, WaterRun & s, std::string & why );
 std::string fgPaintRefusal();
 void fgPaintOnGl( const char * why );
 FgPaintStat takeFgPaintStat();
+//! lane VKGROUND7: the `vk fgpaint: jobs= vk= gl= copies= [glWhy=] [RED]` line (vkfgpaint.inc); true when said
+bool fgPaintSay( int jobs, int vkN, int glN, const char * glWhy, bool red, bool force );
 //! the route's WaterRun (big: the loose blocks), in its own state; GL's thread only
 WaterRun & fgPaintScratch();
 //! the GL name of the route's shared RGBA8 scratch page of that side (every level), 0 before its first run

@@ -22,6 +22,7 @@ BSD License - see nifskope.h
 #include "features/vkframe/vkpresent.h"	// lane VKFAR3: ring 0 on the Vulkan view (row G3)
 #include "features/vkframe/vkfarcards.h"	// lane VKGROUND5: the BC1 page pools as far twins
 #include "features/vkframe/vkwater.h"
+#include "features/vkframe/vkfgpaint.h"	// lane VKGROUND7: the page paint on the present device
 
 #include <QElapsedTimer>
 #include <QHash>
@@ -105,6 +106,9 @@ struct Gpu
 	// lane VKFAR3: the live lookup's grid, layers and atlas on the present device (bits 1, 2, 4; key slot vkSlot), no copy a draw
 	int vkSlot = -1, vkShared = 0, vkFailed = 0;
 	std::string vkWhy;
+	// lane VKGROUND7: the page paint's committed jobs / on Vulkan / on GL since the last `vk fgpaint:` line, the last GL reason
+	int fgJobs = 0, fgVk = 0, fgGl = 0;
+	std::string fgWhy;
 };
 
 struct Doc
@@ -990,8 +994,14 @@ bool paintJobs( Renderer * r, Doc & d, const std::vector<FgSched::Job> & jobs, Q
 	Gpu & g = d.gpu;
 	if ( !d.pics )
 		loadPictures( d );
-	uploadBase( fn, d );
-	uploadDecals( fn, d );
+	/* lane VKGROUND7: the paint's grid, layers and atlas (slots 0-2) follow the view as the live lookup's do; reshare clears
+	 * every failed bit, so the pools' (8 | 16 | 32, cachedPass's) are kept */
+	const bool vkShare = WwVkPresent::shareWanted( "WW_VKVIEW_FGPAINT_RED" ), vkKeep = WwVkPresent::shareKept( "WW_VKVIEW_FGPAINT_RED" );
+	const int poolFail = g.vkFailed & ( 8 | 16 | 32 );
+	reshare( fn, g, vkShare, vkKeep );
+	g.vkFailed |= poolFail;
+	uploadBase( fn, d, vkShare );
+	uploadDecals( fn, d, vkShare );
 	if ( !g.height ) {
 		g.height = tex2D( fn, GL_R32F, d.nx, d.ny, GL_RED, GL_FLOAT, d.height.data(), true, false );
 		g.bHeight = qint64( d.height.size() ) * 4;
@@ -1027,6 +1037,19 @@ bool paintJobs( Renderer * r, Doc & d, const std::vector<FgSched::Job> & jobs, Q
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
 	const float * attrs = q;
 	const GLenum one = GL_COLOR_ATTACHMENT0;
+	// lane VKGROUND7: a page on Vulkan (vkfgpaint.inc) skips GL's draw, mips and encode; a refusal paints it on GL
+	std::string glWhy;
+	if ( !vkShare )
+		glWhy = "red WW_VKVIEW_FGPAINT_RED=1 or the view not on Vulkan";
+	else if ( !g.compressed )
+		glWhy = "red nocompress: the route writes BC1 pools";
+	else if ( !vkIs( g, 4, g.pagesN ) || !vkIs( g, 5, g.pagesF ) )
+		glWhy = "a page pool is not a far twin";
+	else if ( ( g.vkShared & 7 ) != 7 )
+		glWhy = "the grid, layers or atlas not shared";
+	else
+		glWhy = WwVkPresent::fgPaintRefusal();
+	bool vk = glWhy.empty();
 	for ( const FgSched::Job & j : jobs ) {
 		const int side = j.pool == 1 ? g.sideN : g.sideF;
 		const GLuint scr = j.pool == 1 ? g.scratchN : g.scratchF;
@@ -1049,6 +1072,26 @@ bool paintJobs( Renderer * r, Doc & d, const std::vector<FgSched::Job> & jobs, Q
 		p->uni1i( "fgPageDecals", g.decalsOn ? 1 : 0 );
 		const FgSched::Cell & c = g.sched.cells[size_t( j.cell )];
 		p->uni2f( "fgStampCell", float( c.wx ) * kCell, float( c.wy ) * kCell );
+		int layer = -1;
+		if ( vk ) {
+			layer = g.sched.commit( j );
+			if ( layer < 0 )
+				continue;
+			g.fgJobs++;
+			WwVkPresent::FgPaintRun run;
+			run.prog = p->id;
+			run.wwDefs = p->wwDefs;
+			run.side = side;
+			run.layer = layer;
+			run.poolKey = vkKeyOf( g, j.pool == 1 ? 4 : 5 );
+			if ( WwVkPresent::fgPaintRun( run, *fn, glWhy ) ) {
+				g.fgVk++;
+				g.painted++;
+				continue;
+			}
+			vk = false;	// this layer and the frame's rest on GL
+			WwVkPresent::fgPaintOnGl( glWhy.c_str() );
+		}
 		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.fbo );
 		fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, scr, 0 );
 		fn->glDrawBuffers( 1, &one );
@@ -1063,9 +1106,13 @@ bool paintJobs( Renderer * r, Doc & d, const std::vector<FgSched::Job> & jobs, Q
 		fn->glBindTexture( GL_TEXTURE_2D, scr );
 		fn->glGenerateMipmap( GL_TEXTURE_2D );
 
-		const int layer = g.sched.commit( j );
-		if ( layer < 0 )
-			continue;
+		if ( layer < 0 ) {
+			layer = g.sched.commit( j );
+			if ( layer < 0 )
+				continue;
+			g.fgJobs++;
+		}
+		g.fgGl++;
 		const GLuint dst = j.pool == 1 ? g.pagesN : g.pagesF;
 		const int nl = FgSched::levels( side );
 		if ( g.compressed ) {
@@ -1113,6 +1160,9 @@ bool paintJobs( Renderer * r, Doc & d, const std::vector<FgSched::Job> & jobs, Q
 		g.painted++;
 	}
 	r->stopProgram();
+	g.fgWhy = glWhy;
+	if ( WwVkPresent::fgPaintSay( g.fgJobs, g.fgVk, g.fgGl, glWhy.c_str(), wwEnvInt( "WW_VKVIEW_FGPAINT_RED" ) == 1, false ) )
+		g.fgJobs = g.fgVk = g.fgGl = 0;
 	return true;
 }
 
@@ -1268,6 +1318,8 @@ bool cachedPass( Scene * scene, Doc & d, const State & s, QString * extra )
 		g.settledSaid = true;
 		qInfo().noquote() << QStringLiteral( "far ground pages: settled after %1 frames, %2 pages painted (budget %3 texels a frame)" )
 			.arg( g.fillFrames ).arg( g.painted ).arg( v.budget );
+		if ( g.fgJobs && WwVkPresent::fgPaintSay( g.fgJobs, g.fgVk, g.fgGl, g.fgWhy.c_str(), wwEnvInt( "WW_VKVIEW_FGPAINT_RED" ) == 1, true ) )
+			g.fgJobs = g.fgVk = g.fgGl = 0;	// lane VKGROUND7: a fill's last jobs said at its settle
 	}
 	g.busy = fading || g.idle < kSettleFrames;
 	uploadCells( fn, d, share );
