@@ -30,7 +30,9 @@
 // unbound while volLampHistOk (GL's unbound sampler reads (0,0,0,1), Vulkan's zero view 0: the N > 0.5 tap would part), named
 // "volLampHist"; gate 512 (rt only) a GL-owned RGBA32F texture buffer on cellDdgiAtlas, named "cellDdgiAtlas".
 // Coverage limit: the app's own s4Share branches (cellvolair.cpp) run only in the app; this gate drives the helper they call.
-// Lane VKAIR17 (2026-11-16), arm "def frame 2 atlas" (appended after the three arms above; their lines stay byte-equal): the
+// Lane VKAIR17 (2026-11-16), arm "rt frame 2 atlas" (appended after the three arms above; their lines stay byte-equal; the RT
+// GI key, because only WW_AIR_LEAK = WW_CELL_FOGLEAK && WW_CELL_RTDDGI samples the atlas: run 1 found the def program without
+// it, so setupProg now FAILS if the def key samples volLampAtlas / volLampTable or the rt key does not): the
 // lamps' depth atlas (airlampatlas.cpp) made by the app's helper (airlampatlasshare.h airAtlasEnsure, wished: a shared D16 2D
 // target) at the app's size (8192), its tiles filled by scissored depth clears through the helper's FBO (GL's own writes, as the
 // app's tile clears), the table (4 RGBA32F texels a lamp: face origins, tile size, ready) a GL texture buffer; volLampVis 1,
@@ -404,8 +406,12 @@ std::string setupProg( GLuint p, const char * tag, Units & u )
 	std::printf( "AIRLAMPVIEW %s: volLampAtlas %d volLampTable %d\n", tag, u.atlas, u.table );
 	if ( u.now < 0 || u.hist < 0 || u.stbn < 0 || u.lights < 0 )
 		return "no volLampNow / volLampHist / volStbn / cellLights sampler";
-	if ( u.atlas < 0 || u.table < 0 )
+	// WW_AIR_LEAK = WW_CELL_FOGLEAK && WW_CELL_RTDDGI: only the RT GI key samples the atlas; the default key must not
+	const bool rtKey = std::string( tag ) == "rt";
+	if ( rtKey && ( u.atlas < 0 || u.table < 0 ) )
 		return "no volLampAtlas / volLampTable sampler";
+	if ( !rtKey && ( u.atlas >= 0 || u.table >= 0 ) )
+		return "the default key samples volLampAtlas / volLampTable (the census's default column assumes it does not)";
 	if ( unit > 160 )
 		return "more sampler units than the gate binds";
 	return "";
@@ -653,7 +659,7 @@ int main( int argc, char ** argv )
 		bindUnit( u.hist, kLv3d, 0 );
 		bindUnit( u.stbn, kLv2da, 0 );
 		bindUnit( u.lights, kLvTb, 0 );
-		if ( gAtlasOn != 0 ) {
+		if ( gAtlasOn != 0 && u.atlas >= 0 ) {
 			bindUnit( u.atlas, GL_TEXTURE_2D, 0 );
 			bindUnit( u.table, kLvTb, 0 );
 		}
@@ -691,7 +697,7 @@ int main( int argc, char ** argv )
 	auto makeHistory = [&]( std::string & err ) {
 		clearVol( in.hist[1], 0.0f );
 		clearVol( in.now[1], 0.0f );
-		( void )glDraw( 0, 0, 4, in.hist[0], in.now[0], Bound { in.now[1], in.hist[1], in.stbn, gAtlasOn > 0 ? atlasTex : 0u }, err );
+		( void )glDraw( 0, 0, 4, in.hist[0], in.now[0], Bound { in.now[1], in.hist[1], in.stbn }, err );
 	};
 	std::string err;
 	makeHistory( err );
@@ -703,16 +709,14 @@ int main( int argc, char ** argv )
 		int key, histOk;
 		bool atlas = false;	// lane VKAIR17: lamps' shadows from the shared atlas (volLampVis 1), its own history
 	};
-	const Arm arms[4] = { { 0, 0 }, { 0, 1 }, { 1, 1 }, { 0, 1, true } };
+	const Arm arms[4] = { { 0, 0 }, { 0, 1 }, { 1, 1 }, { 1, 1, true } };	// the atlas arm on the RT GI key (the only one that samples it)
 	int fails = 0, probesDead = 0, redsRun = 0, redsFired = 0;
 	for ( const Arm & a : arms ) {
 		const int key = a.key, hk = a.histOk;
 		const std::string arm = std::string( keyName[key] ) + " frame " + ( hk ? "2" : "1" ) + ( a.atlas ? " atlas" : "" );
 		const char * an = arm.c_str();
-		if ( a.atlas ) {
+		if ( a.atlas )
 			gAtlasOn = 1;
-			makeHistory( err );	// frame 1 of the atlas world
-		}
 		const Bound b0 { in.now[0], in.hist[0], in.stbn, a.atlas ? atlasTex : 0u };
 		const Pair g = glDraw( key, hk, 5, glHist, glNow, b0, err );
 		if ( !err.empty() )
