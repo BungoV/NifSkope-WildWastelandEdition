@@ -457,6 +457,11 @@ struct CsmDraw
 	bool remap = false;
 	int src = 0, srcX = 0, srcY = 0, srcW = 0, srcH = 0;
 	float zScale = 1.0f, zBias = 0.0f;
+	/* lane VKSHADOW7: atTex != 0 (mesh draws only): alpha-tested (lookdev_csmdepth_at.frag), a fragment is discarded where
+	 * texture( atTex, uv * uvScale + uvOffset ).a * atAlpha < atRef. atTex = a texture cache BC twin's GL name (objTexMake),
+	 * sampled with the GL texture's own sampler state (read at csmRun); every mesh the draws use needs CsmMesh::uv */
+	unsigned atTex = 0;
+	float uvScale[2] = { 1.0f, 1.0f }, uvOffset[2] = { 0.0f, 0.0f }, atAlpha = 1.0f, atRef = 0.0f;
 };
 /* Lane VKSHADOW4 (item 3 part 1): a per-draw caster (sunshadow.cpp drawShape, the whole shape or its cullIdx ranges) as a
  * mesh csmRun keeps on the device while (key, gen) and its sizes match (vklamp.inc lampPool's law): key = the shape,
@@ -469,6 +474,7 @@ struct CsmMesh
 	std::uint32_t verts = 0;
 	const std::uint16_t * idx = nullptr;  //!< triangle list, mesh-local
 	std::uint32_t indices = 0;
+	const float * uv = nullptr;           //!< lane VKSHADOW7: vec2 per vertex (alpha-tested draws; gen covers it too)
 };
 struct CsmRun
 {
@@ -506,6 +512,8 @@ struct CsmStat
 	int requeues = 0;
 	//! lane VKSHADOW6: remap draws run, and of those on the gates-only red pipeline (WW_VKCSM_REMAP_RED=1: GL_ALWAYS)
 	int remaps = 0, remapRed = 0;
+	//! lane VKSHADOW7: alpha-tested draws run, the distinct textures they bound in the run
+	int alphaDraws = 0, alphaTex = 0;
 	double copyKb = 0.0;
 };
 CsmStat takeCsmStat();
