@@ -17,6 +17,12 @@
 //      same texture. Then cvShape's and cvDetail's twins vs GL at every level (cfProbe 0: the bake never reads cvDetail).
 //      Job checks: fxTexOf gives cvShape and cvDetail >= 3 levels; M's GL bake 0 < occ < total; M and M2 unlike GL's bake on
 //      an all-zero shape.
+//   Q  lane VKCLOUD9, the full build in ONE crossing (flyBakeRunN: the four passes in one command buffer, a barrier between
+//      passes, a descriptor set and b31 slot range a pass) in the app's ping-pong (cloudfly.cpp runPass: bake -> S0, x S0 -> S1,
+//      y S1 -> S0, z S0 -> S2 = vol[back]: pass 2 overwrites what pass 0 wrote and pass 1 read). Q4 = the four single runs
+//      (flyBakeRun, today's path), Q1 = the batch. After each: S1 vs gv1, S0 vs gv2, S2 vs gv3. Crossings and runs are read off
+//      the bake's own stat (before / after, no take; the counter moves where fxCross returned true).
+//      Bars: Q4 4 crossings and 4 runs (the counter counts); Q1 1 crossing and 4 runs; Q1's three volumes byte-EXACT vs Q4's.
 // Bar (set before the first run, never widened): every arm EXACT (0 texels differ), read twice equal, no GL error.
 // Job checks (else the job cannot judge): 0 < occupancy < total, gv0 holds only 0 / 255, gv1..gv3 only 0..15, each pass
 // changes its input, some slice differs from slice 0 and at least one adjacent slice pair differs.
@@ -27,6 +33,9 @@
 //   glwrites the route with redGlWrites (GL draws after Vulkan): GL_SAMPLES_PASSED > 0
 //   nomip    (lane VKCLOUD7) M's run with cvShape read from a twin of level 0 only, levels 1.. cleared to 0 (FxTex.shared):
 //            must FAIL and equal GL's all-zero-shape bake; the same red on the job's own chain is INFO (not judged)
+//   perpass  (lane VKCLOUD9) Q1 with red 16: flyBakeRunN crosses once a pass (today's submit): must FAIL the crossing bar
+//            (4, want 1); its texels are INFO
+//   oneset   (lane VKCLOUD9) Q1 with red 32: every pass records with pass 0's descriptor set and b31 slots: texels must differ
 //   swap     the other pass's program (red 4: cloud_flysdf, b31 zero but cfLayer), run LAST
 // Last line `FLYBAKEVIEW GATE OK` or `FLYBAKEVIEW GATE FAILED`.
 #define main fxview_main
@@ -244,8 +253,9 @@ int main( int argc, char ** argv )
 		f.copyImageSubData( gv[g], fT3D, 0, 0, 0, 0, st[k], fT3D, 0, 0, 0, 0, nxy, nxy, nz );
 		glFinish();
 	};
-	auto vkRun = [&]( int pass, int srcK, int dstK, int from, int to, int red ) -> bool {
-		WwVkPresent::FlyBakeRun t;
+	// one run's job from GL's program state (lane VKCLOUD9: split from vkRun so the batch arm Q1 can queue four)
+	auto vkJob = [&]( int pass, int srcK, int dstK, int from, int to, int red, WwVkPresent::FlyBakeRun & t ) -> bool {
+		t = WwVkPresent::FlyBakeRun();
 		t.pass = pass;
 		t.from = from;
 		t.to = to;
@@ -270,6 +280,12 @@ int main( int argc, char ** argv )
 			u1i( pSdf, "cfAxis", pass - 1 );
 			WwVkPresent::fxPack( &ga, pSdf, WwVkPresent::kT_flysdf, int( std::size( WwVkPresent::kT_flysdf ) ), t.loose );
 		}
+		return true;
+	};
+	auto vkRun = [&]( int pass, int srcK, int dstK, int from, int to, int red ) -> bool {
+		WwVkPresent::FlyBakeRun t;
+		if ( !vkJob( pass, srcK, dstK, from, to, red, t ) )
+			return false;
 		if ( !WwVkPresent::flyBakeRun( t, why ) ) {
 			std::printf( "FLYBAKEVIEW flyBakeRun refused: %s\n", why.c_str() );
 			return false;
@@ -438,6 +454,66 @@ int main( int argc, char ** argv )
 			same ? "EXACT" : "FAIL" );
 		ok = ok && same;
 	}
+	// ---- lane VKCLOUD9: the full build in one crossing, the app's ping-pong (S0 vol[0], S1 vol[1], S2 vol[back])
+	struct QOut
+	{
+		bool ran = false;
+		int crossings = 0, runs = 0;
+		Res r[3];                           // S0 vs gv2, S1 vs gv1, S2 vs gv3
+		std::vector<std::uint8_t> v[3];
+	};
+	auto qRun = [&]( bool batch, int red ) {
+		static const int kSrc[4] = { -1, 0, 1, 0 }, kDst[4] = { 0, 1, 0, 2 }, kWant[3] = { 2, 1, 3 };
+		QOut o;
+		for ( int k = 0; k < 3; k++ )
+			sentinel( k );
+		const WwVkPresent::FxStat & S = flyBakeJob().st;
+		const int c0 = S.crossings, r0 = S.runs;
+		o.ran = true;
+		if ( batch ) {
+			WwVkPresent::FlyBakeRun t[4];
+			for ( int p = 0; p < 4 && o.ran; p++ )
+				o.ran = vkJob( p, kSrc[p], kDst[p], 0, nz, p == 0 ? red : 0, t[p] );
+			if ( o.ran && !WwVkPresent::flyBakeRunN( t, 4, why ) ) {
+				std::printf( "FLYBAKEVIEW flyBakeRunN refused: %s\n", why.c_str() );
+				o.ran = false;
+			}
+			o.ran = o.ran && glGetError() == GL_NO_ERROR;
+		} else {
+			for ( int p = 0; p < 4 && o.ran; p++ )
+				o.ran = vkRun( p, kSrc[p], kDst[p], 0, nz, 0 );
+		}
+		o.crossings = S.crossings - c0;
+		o.runs = S.runs - r0;
+		for ( int k = 0; k < 3; k++ ) {
+			o.r[k] = judgeVol( k, ref[kWant[k]] );
+			o.v[k] = read( st[k] );
+		}
+		return o;
+	};
+	{
+		const char * vol[3] = { "S0 (y, vol[0]) vs GL gv2", "S1 (x, vol[1]) vs GL gv1", "S2 (z, vol[back]) vs GL gv3" };
+		const QOut q4 = qRun( false, 0 );
+		for ( int k = 0; k < 3; k++ )
+			arm( std::string( "Q4 four crossings, " ) + vol[k], q4.r[k], q4.ran );
+		const bool c4 = q4.ran && q4.crossings == 4 && q4.runs == 4;
+		std::printf( "FLYBAKEVIEW Q4 counts: %d crossings, %d runs (want 4, 4): %s\n", q4.crossings, q4.runs, c4 ? "OK" : "FAIL" );
+		const QOut q1 = qRun( true, 0 );
+		for ( int k = 0; k < 3; k++ )
+			arm( std::string( "Q1 one crossing, " ) + vol[k], q1.r[k], q1.ran );
+		const bool c1 = q1.ran && q1.crossings == 1 && q1.runs == 4;
+		std::printf( "FLYBAKEVIEW Q1 counts: %d crossings, %d runs (want 1, 4): %s\n", q1.crossings, q1.runs, c1 ? "OK" : "FAIL" );
+		bool same = q4.ran && q1.ran;
+		size_t d = 0;
+		for ( int k = 0; k < 3; k++ ) {
+			same = same && !q1.v[k].empty() && q1.v[k].size() == q4.v[k].size();
+			for ( size_t i = 0; same && i < q1.v[k].size(); i++ )
+				d += q1.v[k][i] != q4.v[k][i];
+		}
+		same = same && d == 0;
+		std::printf( "FLYBAKEVIEW Q1 vs Q4 (the 4-crossing path), S0 S1 S2: %zu texels differ: %s\n", d, same ? "EXACT" : "FAIL" );
+		ok = ok && c4 && c1 && same;
+	}
 	{
 		const WwVkPresent::FxStat st0 = WwVkPresent::takeFlyBakeStat();
 		std::printf( "FLYBAKEVIEW stat: %d runs, %d failed (%s), %d pipelines built in %.1f ms, %d input copies\n", st0.runs, st0.fails,
@@ -497,6 +573,26 @@ int main( int argc, char ** argv )
 		std::printf( "FLYBAKEVIEW INFO nomip on the job's own chain (not judged): %zu of %zu texels differ, %zu unwritten%s\n", rj.diff, rj.total,
 			rj.unwritten, ranJ ? "" : ", the run was refused" );
 		WwVkPresent::sharedTargetDrop( keyOf( nomipKey ) );
+	}
+	{  // lane VKCLOUD9: perpass (red 16) must fail the crossing bar; oneset (red 32) must move texels
+		const QOut qp = qRun( true, 16 );
+		const bool bit = qp.ran && qp.crossings != 1;
+		std::printf( "FLYBAKEVIEW red perpass (a crossing a pass): %s (%d crossings, %d runs, want 1 crossing; INFO texels differ S0 %zu S1 %zu S2 %zu)\n",
+			bit ? "FAIL" : "EXACT", qp.crossings, qp.runs, qp.r[0].diff, qp.r[1].diff, qp.r[2].diff );
+		if ( !bit ) {
+			std::printf( "FLYBAKEVIEW red perpass PASSED: the gate cannot see it\n" );
+			ok = false;
+		}
+		const QOut qs = qRun( true, 32 );
+		Res r;
+		r.twice = true;
+		for ( const Res & x : qs.r ) {
+			r.diff += x.diff;
+			r.unwritten += x.unwritten;
+			r.total += x.total;
+			r.twice = r.twice && x.twice;
+		}
+		redArm( "oneset (every pass on pass 0's descriptor set and b31 slots; S0 S1 S2)", r, qs.ran );
 	}
 	{  // last: a pipeline of the other program
 		sentinel( 0 );

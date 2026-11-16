@@ -9,11 +9,16 @@ Reads src/features/clouds/cloudfly.cpp. Checks (all on the base text):
     under it), `bool wantVk = g.shared` count == 1, `g.shared = true` count == 1;
   4 every GL slice draw `quad( r );` sits inside the `auto glSlice = [` lambda (draws > 0, all inside), and glSlice is
     named exactly twice (its definition and the route call): GL draws a slice only when the route hands it back.
+  5 (lane VKCLOUD9) the full build crosses once: the build loop hands runPass the queue (`p.nz, &q, nullptr, &qWhy )` once),
+    vkRun queues (`queue->push_back( t );` once, inside vkRun), the one crossing `WwVkPresent::flyBakeRunN(` once, and the
+    flush after the loop (`flyQueueRun( q, qWhy );` once).
 Reds (in memory, never on disk), each must FAIL:
   glwrites  the route's `false` (GL after Vulkan) replaced by `true`;
   unguarded a `quad( r );` added before the route call (a GL draw outside the refusal path);
   redkey    the red key dropped (`shareWanted( nullptr )`);
-  nowant    `bool wantVk = g.shared` replaced by `bool wantVk = true` (Vulkan tried on GL's own volumes).
+  nowant    `bool wantVk = g.shared` replaced by `bool wantVk = true` (Vulkan tried on GL's own volumes);
+  perpass   (lane VKCLOUD9) the build loop without the queue (a crossing a pass);
+  noflush   (lane VKCLOUD9) the flush after the loop dropped (the queued passes never drawn).
 Last line `FLYBAKESITE OK` or `FLYBAKESITE FAILED`.
 """
 import os
@@ -21,6 +26,9 @@ import sys
 
 ROUTE = 'wwFlyBakeRoute( wantVk, false, vkRun, glSlice,'
 RED_KEY = 'shareWanted( "WW_VKVIEW_CLOUDFLYBAKE_RED" )'
+QUEUED = 'p.nz, &q, nullptr, &qWhy )'
+PUSH = 'queue->push_back( t );'
+FLUSH = 'flyQueueRun( q, qWhy );'
 
 
 def lambda_span(lines, head):
@@ -52,11 +60,20 @@ def check(text, label):
     draws = [i for i, ln in enumerate(lines) if 'quad( r );' in ln]
     draws_in = sum(1 for i in draws if gl and gl[0] <= i <= gl[1])
     names = sum(ln.count('glSlice') for ln in lines)
+    # lane VKCLOUD9: one crossing a full build
+    queued = text.count(QUEUED)
+    pushes = text.count(PUSH)
+    pushes_in = sum(1 for i, ln in enumerate(lines) if PUSH in ln and vk and vk[0] <= i <= vk[1])
+    batch = text.count('WwVkPresent::flyBakeRunN(')
+    flush = text.count(FLUSH)
     ok = (routes == 1 and runs == 1 and runs_in == 1 and reds == 1 and wants == 1 and shares == 1
-          and len(draws) > 0 and draws_in == len(draws) and names == 2)
+          and len(draws) > 0 and draws_in == len(draws) and names == 2
+          and queued == 1 and pushes == 1 and pushes_in == 1 and batch == 1 and flush == 1)
     print('FLYBAKESITE %s: route calls %d, vulkan calls %d (in vkRun %d), red key %d, wantVk from shared %d, shared set %d, '
-          'GL slice draws %d (in glSlice %d), glSlice named %d: %s'
-          % (label, routes, runs, runs_in, reds, wants, shares, len(draws), draws_in, names, 'OK' if ok else 'FAIL'))
+          'GL slice draws %d (in glSlice %d), glSlice named %d; build queued %d, queue pushes %d (in vkRun %d), one-crossing calls %d, '
+          'flush after the loop %d: %s'
+          % (label, routes, runs, runs_in, reds, wants, shares, len(draws), draws_in, names, queued, pushes, pushes_in, batch, flush,
+             'OK' if ok else 'FAIL'))
     return ok
 
 
@@ -71,6 +88,8 @@ def main():
         ('unguarded', text.replace('ok = wwFlyBakeRoute(', 'quad( r );\n\tok = wwFlyBakeRoute(')),
         ('redkey', text.replace(RED_KEY, 'shareWanted( nullptr )')),
         ('nowant', text.replace('bool wantVk = g.shared', 'bool wantVk = true')),
+        ('perpass', text.replace(QUEUED, 'p.nz, nullptr, nullptr, &qWhy )')),
+        ('noflush', text.replace(FLUSH, 'qWhy.clear();')),
     ]
     fired = 0
     for name, t in reds:
