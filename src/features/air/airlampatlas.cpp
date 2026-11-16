@@ -18,6 +18,7 @@
 #include "gl/celllights.h"
 #include "features/lights/cubefacecull.h"
 #include "features/air/airlampmover.h"	// lane AIRPERF1 A5: when a moved caster redraws a lamp
+#include "features/air/airlampatlasshare.h"	// lane VKAIR17: the atlas as a shared target while the air view is on Vulkan
 #include "gl/glscene.h"
 #include "gl/glshape.h"
 #include "gl/renderer.h"
@@ -36,6 +37,20 @@
 
 namespace {
 int g_lampVisRow = -1;	// the menu row's mode (QSettings WW/AirLampVis), read once
+// lane VKAIR17: the share wish (cellvolair.cpp, a frame), the atlas's ownership (kept across release: the refusal latch)
+// and its heap key (a static, never inside the atlas's state)
+bool g_atlasWish = false;
+AirAtlasShare g_atlasShare;
+char g_atlasKey;
+std::uintptr_t atlasKey()
+{
+	return reinterpret_cast<std::uintptr_t>( &g_atlasKey );
+}
+}
+
+void wwAirLampAtlasShare( bool wanted )
+{
+	g_atlasWish = wanted;
 }
 
 bool wwAirLampVisPinned()
@@ -237,10 +252,7 @@ void release( Renderer * r )
 {
 	State & s = st();
 	auto fn = r->fn;
-	if ( s.tex )
-		fn->glDeleteTextures( 1, &s.tex );
-	if ( s.fbo )
-		fn->glDeleteFramebuffers( 1, &s.fbo );
+	airAtlasRelease( fn, atlasKey(), s.tex, s.fbo, g_atlasShare );	// lane VKAIR17: a shared atlas goes back to the present device
 	if ( s.tbo )
 		fn->glDeleteTextures( 1, &s.tbo );
 	if ( s.buf )
@@ -330,31 +342,18 @@ int wwAirLampAtlasFrame( Scene * scene, const WwCellLighting * L, const float ca
 		fn->glGetIntegerv( GL_MAX_TEXTURE_SIZE, &maxTex );
 		if ( maxTex < kAtlas )
 			return 0;
-		fn->glGenTextures( 1, &s.tex );
-		fn->glBindTexture( GL_TEXTURE_2D, s.tex );
-		fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT16, kAtlas, kAtlas, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, nullptr );
-		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
-		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
-		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
-		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
-		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
-		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE );
-		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL );
-		fn->glBindTexture( GL_TEXTURE_2D, 0 );
-		GLint prevDraw = 0;
-		fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw );
-		fn->glGenFramebuffers( 1, &s.fbo );
-		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, s.fbo );
-		fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, s.tex, 0 );
-		fn->glDrawBuffer( GL_NONE );
-		s.fboOk = fn->glCheckFramebufferStatus( GL_DRAW_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
-		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevDraw ) );
-		fn->glGenBuffers( 1, &s.buf );
-		fn->glGenTextures( 1, &s.tbo );
+	}
+	// lane VKAIR17: made (or made again on a share flip / a dropped shared name) by the helper both the app and the gates call
+	if ( airAtlasEnsure( fn, atlasKey(), kAtlas, g_atlasWish, s.tex, s.fbo, s.fboOk, g_atlasShare ) ) {
+		if ( !s.buf )
+			fn->glGenBuffers( 1, &s.buf );
+		if ( !s.tbo )
+			fn->glGenTextures( 1, &s.tbo );
 		s.buddy.reset();
-		s.key = 0;
+		s.key = 0;	// every tile is drawn again
 		std::fprintf( stderr, "air lamp atlas: made %d px depth16 (%d MB) fbo %s\n", kAtlas, kAtlas / 1024 * kAtlas / 1024 * 2,
 			s.fboOk ? "ok" : "INCOMPLETE" );
+		std::fprintf( stderr, "%s\n", airAtlasSay( kAtlas, g_atlasWish, s.fboOk, g_atlasShare ).c_str() );
 	}
 	if ( !s.fboOk )
 		return 0;

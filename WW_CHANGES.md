@@ -95,6 +95,72 @@ Changed, not checked in the app.
   `vk far: LOD rings` line. Offline gate tests/vkframe/farlodrtdraw.sh: the all-on arm matches GL; the not shared, wrong image
   and stale image checks each fail as they must.
 
+## VKAIR19 + VKAIR20 (2026-11-16): the far air grid's inject runs on Vulkan
+
+Changed, not built, not checked in the app. Offline: tests/vkframe/airtemporalview.sh (GATE OK, 79 of 79 reds fired; the
+near arms print the same lines as before), tests/vkframe/airlampview.sh, tests/vkframe/rtbufview.sh and SPVSYNC pass.
+- With the view on Vulkan, the far air grid's stage 1 (the layers past the near grid, a run of them a frame while the
+  view holds still) is drawn on the present device in one crossing, with the same twins as the near grid's stage 1.
+  If the route refuses, GL draws the layers as before and the reason shows in a new `vk airfar:` log line.
+  Red WW_VKVIEW_AIRFAR_RED=1 keeps GL.
+- The gate gained far arms (default and all-on, whole grid and a spread run) with reds for the layer, the base, the run's
+  bounds, the key, feedback and the RT GI inputs. Not covered: the far cascades, the terrain shadow map and the clouds
+  (the gate binds them empty).
+
+## VKAIR18 (2026-11-16): the air's lamp and temporal stages read the RT GI inputs on Vulkan (all-on)
+
+Changed, not built, not checked in the app. Offline: tests/vkframe/airlampview.sh (GATE OK, 59 of 59 reds fired),
+tests/vkframe/airtemporalview.sh (GATE OK, 53 of 53 reds fired) and tests/vkframe/rtbufview.sh (GATE OK) pass.
+- With the view on Vulkan and the all-on route (RT GI + ReSTIR), the air's stage 4 (lamp volume) and stage 1 temporal
+  now ask for the RT GI cascades and ReSTIR's buffer by name (vkrtbuf.h rtBufOf) and read them in place, where they
+  used to refuse ReSTIR's buffer and stay on GL. If the owner has nothing fresh, or GL's program reads another buffer,
+  the stage refuses by name and GL draws it as before.
+- Both gates gained an all-on arm: Vulkan matches GL, each name is looked up once a run, and reds
+  WW_VKVIEW_RTBUF_RED=1, a stale owner and a GL-owned buffer each refuse by name.
+- A comment in res/shaders/hlsl/air/cell_volair_ps.hlsl now says the fog leak fix is compiled unless WW_CELL_FOGLEAK=0.
+
+## VKAIR17 (2026-11-16): the lamp shadow atlas is shared with Vulkan while the air runs there
+
+Changed, not built, not checked in the app. Offline: tests/vkframe/airlampview.sh (GATE OK, 42 of 42 reds fired) and
+tests/vkframe/airtemporalview.sh (GATE OK, 39 of 39 reds fired) pass; their old arms print the same lines as VKAIR16's.
+- With the view on Vulkan (WW_VKVIEW=1), the air's stage 1 on Vulkan and an air program that samples the atlas (fog
+  leak fix + RT GI, the all-on route), the lamps' 8192 x 8192 shadow atlas (airlampatlas.cpp) is made as a shared target
+  on the present device, so the air's Vulkan stages read it in place
+  instead of refusing ("volLampAtlas: bound and not shared"). Otherwise it stays GL's own texture, as before. The light
+  table is copied each run. The new `vk airatlas:` line says where the atlas landed.
+- Only the RT GI program (all-on) samples the atlas: the default air program does not, so the default route never met
+  that refusal. The all-on route still stays on GL for these stages while ReSTIR's buffer is GL-owned.
+- Red `WW_VKVIEW_AIRTEMPORAL_RED=1` keeps the atlas GL's own.
+
+## VKAIR16 (2026-11-16): the air's lamp volume walk (stage 4, 64 slices, two outs) draws on Vulkan
+
+Changed, not built, not checked in the app. Offline: tests/vkframe/airlampview.sh passes (GATE OK, 28 of 28 reds fired).
+- With the view on Vulkan (WW_VKVIEW=1), stage 4 of the air (cellvolair.cpp vaPassInner: the lamps' in-scatter a froxel,
+  blended with last frame's) draws on the present device: one render pass a slice over both shared outs (the lamp
+  history RGBA16F and this frame's term + light-set hash RGBA32F), each slice its own descriptor set and b31 copy
+  (volLayer = k), all 64 in one hand-off to the worker (Work k = -1, no new work kind). Twins: the air inject's own (no
+  new SPIR-V). GL's tail (the attachment cleared, one draw buffer, this frame's term rebound for stage 1) runs either way.
+- Stage 4's own inputs (the blue noise, the lamp history) are now shared targets while this runs (vaStage4Reader on).
+- Refused to GL by name, in the new `vk airlamp:` line: an out not shared, a key the twin was not built for, an input
+  that is an out (feedback), the lamp history unbound or not shared while it is used (GL's unbound sampler reads
+  (0,0,0,1), Vulkan's 0), the blue noise not shared, the DDGI atlas or ReSTIR's buffer bound as GL-owned texel buffers
+  (ReSTIR's is always GL-owned today, so the all-on route stays on GL for this stage), a lamp atlas not shared.
+- Red `WW_VKVIEW_AIRLAMP_RED=1` keeps GL and stage 4's GL-own inputs.
+
+## VKAIR14 (2026-11-16): the air's temporal inject (stage 1, 64 layers) draws on Vulkan
+
+Changed, not built, not checked in the app. Offline: tests/vkframe/airtemporalview.sh passes (GATE OK, 28 of 28 reds fired).
+- With the view on Vulkan (WW_VKVIEW=1), stage 1 of the air with a history (cellvolair.cpp vaPassInner) draws on the
+  present device: one render pass a slice over the shared inject and the other strata history, every slice its own
+  descriptor set and b31 copy (volLayer = k), all 64 in one hand-off to the worker (Work k = -1, no new work kind).
+  Twins: the air inject's own (no new SPIR-V). Stage 1's inputs are now shared targets while this runs
+  (vaStage1Reader on); stage 4's (the blue noise, the lamp history) stay GL's own (vaStage4Reader off).
+- Refused to GL by name, in the new `vk airtemporal:` line: the history in not shared, an input that is a target the pass
+  draws (feedback), a key the twin was not built for, the DDGI atlas or ReSTIR's buffer bound as GL-owned texel buffers
+  (ReSTIR's is always GL-owned today, so the all-on route stays on GL for this stage). The DDGI cascades' buffer is read
+  in place when it is the present device's.
+- Red `WW_VKVIEW_AIRTEMPORAL_RED=1` keeps GL and GL's own inputs.
+
 ## VKFAR15 (2026-11-15): the far ground and far LOD rings stay on GL while RT GI or ReSTIR is on
 
 Changed, not built, not checked live.
