@@ -20,11 +20,11 @@ inline bool vaStage1Reader()
 	return true;
 }
 
-//! stage 4's reader (the lamp volume's walk) on Vulkan exists: until it lands its own inputs (the blue noise, lvHist) stay
-//! GL's own while stage 1's are shared
+//! stage 4's reader (the lamp volume's walk) on Vulkan exists (lane VKAIR16: vkairlamp.inc, gate
+//! tests/vkframe/airlampview.sh): its own inputs (the blue noise, lvHist) are shared while stage 1's are
 inline bool vaStage4Reader()
 {
-	return false;
+	return true;
 }
 
 //! one input's storage: type 1 a 3D texture, 2 a 2D array (sharedTarget's types); fmt GL's internal format, pf / ty the

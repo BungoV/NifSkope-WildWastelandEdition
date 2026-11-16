@@ -1,3 +1,18 @@
+## VKAIR16 (2026-11-16): the air's lamp volume walk (stage 4, 64 slices, two outs) draws on Vulkan
+
+Changed, not built, not checked in the app. Offline: tests/vkframe/airlampview.sh passes (GATE OK, 28 of 28 reds fired).
+- With the view on Vulkan (WW_VKVIEW=1), stage 4 of the air (cellvolair.cpp vaPassInner: the lamps' in-scatter a froxel,
+  blended with last frame's) draws on the present device: one render pass a slice over both shared outs (the lamp
+  history RGBA16F and this frame's term + light-set hash RGBA32F), each slice its own descriptor set and b31 copy
+  (volLayer = k), all 64 in one hand-off to the worker (Work k = -1, no new work kind). Twins: the air inject's own (no
+  new SPIR-V). GL's tail (the attachment cleared, one draw buffer, this frame's term rebound for stage 1) runs either way.
+- Stage 4's own inputs (the blue noise, the lamp history) are now shared targets while this runs (vaStage4Reader on).
+- Refused to GL by name, in the new `vk airlamp:` line: an out not shared, a key the twin was not built for, an input
+  that is an out (feedback), the lamp history unbound or not shared while it is used (GL's unbound sampler reads
+  (0,0,0,1), Vulkan's 0), the blue noise not shared, the DDGI atlas or ReSTIR's buffer bound as GL-owned texel buffers
+  (ReSTIR's is always GL-owned today, so the all-on route stays on GL for this stage), a lamp atlas not shared.
+- Red `WW_VKVIEW_AIRLAMP_RED=1` keeps GL and stage 4's GL-own inputs.
+
 ## VKAIR14 (2026-11-16): the air's temporal inject (stage 1, 64 layers) draws on Vulkan
 
 Changed, not built, not checked in the app. Offline: tests/vkframe/airtemporalview.sh passes (GATE OK, 28 of 28 reds fired).

@@ -52,6 +52,7 @@ BSD License - see nifskope.h
 #include "features/vkframe/vkfog.h"	// lane VKFAR2: the integrate on the present device
 #include "features/vkframe/vkairinject.h"	// lane VKAIR5: the air inject's stage 0 on the present device
 #include "features/vkframe/vkairtemporal.h"	// lane VKAIR14: the air inject's stage 1 (the temporal reader) on the present device
+#include "features/vkframe/vkairlamp.h"	// lane VKAIR16: the air's stage 4 (the lamp volume's walk) on the present device
 
 const void * wwGlobalUboBytes( const NifSkopeOpenGLContext * ctx );	// glcontext.cpp: b0's bytes (lane VKAIR1)
 
@@ -1898,6 +1899,49 @@ static void vaAtSayLine( bool wanted )
 	qInfo().noquote() << line;
 }
 
+/* lane VKAIR16: the `vk airlamp:` line (one a 5 s window, or when it changes off Vulkan): runs = stage 4 walks with its
+ * inputs shared, drawn = by the twin (64 slices, two outs, one crossing), gl = refused to GL (glWhy the last), copies /
+ * bufCopies = inputs copied (0 / the light list when every image is shared), ms = the drawing thread's mean a run; RED when
+ * WW_VKVIEW_AIRLAMP_RED=1 keeps GL and stage 4's GL-own inputs */
+static VaAiSay & vaAlSay()
+{
+	static VaAiSay s;
+	return s;
+}
+
+static void vaAlSayLine( bool wanted )
+{
+	VaAiSay & A = vaAlSay();
+	const bool red = qEnvironmentVariableIntValue( "WW_VKVIEW_AIRLAMP_RED" ) == 1;
+	if ( !wanted ) {
+		const QString line = QStringLiteral( "vk airlamp: on GL (%1)%2" )
+			.arg( red ? QStringLiteral( "red" ) : QStringLiteral( "the view not on Vulkan" ) )
+			.arg( red ? QStringLiteral( " [RED WW_VKVIEW_AIRLAMP_RED=1]" ) : QString() );
+		if ( line != A.said ) {
+			A.said = line;
+			qInfo().noquote() << line;
+		}
+		A.runs = A.drawn = 0;
+		return;
+	}
+	static QElapsedTimer clock;
+	if ( !clock.isValid() )
+		clock.start();
+	const double now = double( clock.elapsed() );
+	if ( now - A.at < 5000.0 && !A.said.isEmpty() && !A.said.contains( QStringLiteral( "on GL (" ) ) )
+		return;
+	A.at = now;
+	const WwVkPresent::AirLampStat st = WwVkPresent::takeAirLampStat();
+	QString line = QStringLiteral( "vk airlamp: runs=%1 drawn=%2 gl=%3 copies=%4 bufCopies=%5 ms=%6" )
+		.arg( A.runs ).arg( A.drawn ).arg( st.gl ).arg( st.copies ).arg( st.bufCopies )
+		.arg( st.runs > 0 ? st.cpuMs / st.runs : 0.0, 0, 'f', 3 );
+	if ( !st.glWhy.empty() )
+		line += QStringLiteral( " glWhy=%1" ).arg( QString::fromStdString( st.glWhy ) );
+	A.said = line;
+	A.runs = A.drawn = 0;
+	qInfo().noquote() << line;
+}
+
 static void vaPassInner( Scene * scene, bool run )
 {
 	if ( !scene || !scene->renderer )
@@ -2372,9 +2416,10 @@ static void vaPassInner( Scene * scene, bool run )
 	 * shared targets of the present device, made and filled by the helper (cellvolairshare.h); otherwise GL's own, the
 	 * calls as before (a shared one dropped first, its sizes forgotten so the old check makes it again) */
 	const bool s1Share = vaStage1Reader() && WwVkPresent::shareWanted( "WW_VKVIEW_AIRTEMPORAL_RED" );
-	/* lane VKAIR14: stage 4 (the lamp volume's walk) stays on GL: its own inputs (the blue noise, the lamp history) stay
-	 * GL's own until its reader lands (vaStage4Reader); the lamp volume stage 1 reads (lvNow) rides s1Share */
-	const bool s4Share = vaStage4Reader() && s1Share;
+	/* lane VKAIR14 / VKAIR16: stage 4 (the lamp volume's walk) on Vulkan: its own inputs (the blue noise, the lamp history)
+	 * are shared targets while its reader runs (vaStage4Reader; red WW_VKVIEW_AIRLAMP_RED keeps GL and GL's own inputs); the
+	 * lamp volume stage 1 reads (lvNow) rides s1Share */
+	const bool s4Share = vaStage4Reader() && s1Share && WwVkPresent::shareWanted( "WW_VKVIEW_AIRLAMP_RED" );
 	if ( s1Share && temporal ) {
 		const VaShareSpec hs { 1, GL_RGBA32F, GL_RGBA, GL_FLOAT, cols, rows, strata * kSlices, true, false };
 		int made = 0;
@@ -3230,7 +3275,36 @@ static void vaPassInner( Scene * scene, bool run )
 		fn->glDrawBuffers( 2, bufs );
 		PassTime::subBegin( PassTime::AirLampVol );
 		lampRan = true;
-		for ( int k = 0; k < kSlices; k++ ) {
+		/* lane VKAIR16: while stage 4's inputs are shared the walk draws its 64 slices on the present device (vkairlamp.inc:
+		 * GL's program, uniforms and units as set above, one crossing, both outs); a refusal (named in the vk airlamp line)
+		 * draws GL's loop. GL's tail below runs either way */
+		bool alVk = false;
+		if ( s4Share ) {
+			std::string why;
+			const int oi = g.histCur ^ 1;
+			const std::uintptr_t histKey = g.vkKeys.at( VaVkKeys::LvHist0 + oi ), nowKey = g.vkKeys.at( VaVkKeys::LvNow0 + oi );
+			if ( !WwVkPresent::sharedTargetIs( histKey, g.lvHist[oi] ) )
+				why = "the out lvHist is not a shared target";
+			else if ( !WwVkPresent::sharedTargetIs( nowKey, g.lvNow[oi] ) )
+				why = "the out lvNow is not a shared target";
+			else {
+				WwVkPresent::AirLampRun run;
+				run.prog = prog->id;
+				run.wwDefs = prog->wwDefs;
+				run.rt = prog->wwDefs.find( "WW_CELL_RTDDGI" ) != std::string::npos;
+				run.cols = cols;
+				run.rows = rows;
+				run.slices = kSlices;
+				run.histOutKey = histKey;
+				run.nowOutKey = nowKey;
+				alVk = WwVkPresent::airLampRun( run, *fn, why );
+			}
+			if ( !alVk )
+				WwVkPresent::airLampOnGl( why.c_str() );
+			vaAlSay().runs++;
+			vaAlSay().drawn += alVk ? 1 : 0;
+		}
+		for ( int k = 0; k < kSlices && !alVk; k++ ) {
 			fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, g.lvHist[g.histCur ^ 1], 0, k );
 			fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, g.lvNow[g.histCur ^ 1], 0, k );
 			if ( k == 0 && !fbComplete( 5 ) ) {
@@ -3492,6 +3566,7 @@ static void vaPassInner( Scene * scene, bool run )
 	WwVkPresent::fogSay( fogShare, "red WW_VKVIEW_FOG_RED=1 or WW_VKVIEW_AIR_RED=1, or the view not on Vulkan" );	// lane VKFAR2
 	vaAiSayLine( aiShare );	// lane VKAIR5
 	vaAtSayLine( s1Share );	// lane VKAIR14
+	vaAlSayLine( s4Share );	// lane VKAIR16
 	PassTime::subBegin( PassTime::AirPost );
 	// the numbers the dump echoes, read before the program stops
 	float cellRowV[3][4], cellDirColV[3] = { 0, 0, 0 }, cellDirToV[3] = { 0, 0, 0 };
