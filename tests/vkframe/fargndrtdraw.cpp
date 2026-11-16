@@ -17,6 +17,8 @@
 // Seed 1 zeroes the vec4-earlier neighbours of the four int loop bounds (red 1 reads the block one vec4 off: a seeded bound
 // hung the device on VKFAR29), read by offset from vkfargroundrt_tables.h for both keys: cellCenter.y (-> cellAmboCount),
 // cellRoomsDims.y (-> cellGiFineN), cellCtRect.y (-> cellGiLoop8), cellClusterLog.x (-> cellDdgiCount).
+// Seed 1 also sets the grade's contrast (cellIsCine.y) to 1 (VKGROUND16): its seeded 0.156 squeezed every lighting change ~6x,
+// so the DDGI reds (atlas one texel off, DG key on the base twin) stayed under 1e-2 although Vulkan read the wrong data.
 //
 // The bar, per key (seeds 1, 2; reds on seed 1):
 // - cellRestir (RT only) and cellDdgiAtlas are rtBufShare'd buffers GL binds by name; each seed reads the shared bytes back
@@ -969,6 +971,17 @@ int main( int argc, char ** argv )
 			}
 			std::printf( "FARGNDRTDRAW %s seed 1: %d of 4 loop-bound neighbours zeroed (cellCenter.y, cellRoomsDims.y, cellCtRect.y, "
 				"cellClusterLog.x)\n", tag, zeroed );
+		}
+		if ( seed == 1 ) {	// lane VKGROUND16: the grade's contrast 1 on seed 1 (header: Seeding; the reds are seed 1's)
+			const GLint l = f.getUniformLocation( pFg, "cellIsCine" );
+			float c[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+			if ( l >= 0 ) {
+				f.getUniformfv( pFg, l, c );
+				c[1] = 1.0f;
+				f.uniform3fv( l, 1, c );
+			}
+			std::printf( "FARGNDRTDRAW %s seed 1: cellIsCine contrast 1 (location %d; saturation %g, z %g kept)\n", tag, l, double( c[0] ),
+				double( c[2] ) );
 		}
 		for ( const Smp & s : smp )	// light 0: a shadow-casting omni over the ground (world), radius 5000, flat radial
 			if ( s.name == "cellLights" ) {
