@@ -1334,13 +1334,21 @@ bool makeSlot( Slot & s, int w, int h, std::string & why )
 	return exportSem( s.glDone, s.glDoneGl, why ) && exportSem( s.vkDone, s.vkDoneGl, why );
 }
 
+// lane VKAIR9: a gate-only red (tests/vkframe/slice3d.cpp), never set by the app: 3D images made without 2D_ARRAY_COMPATIBLE
+int & sharedSliceRed()
+{
+	static int r = 0;
+	return r;
+}
+
 /* round 10: one image the present device makes and GL imports (the view's colour or depth / stencil), GENERAL on both
  * sides; samples 1 = a plain 2D texture. The route's other shared targets (the LUT, TAA's history and vectors, the
  * overlay) take the same steps: this is the one place they are written. Lane VKSHARE1: type 3D (d deep) or a 2D array
  * (layers), single-sample, GL_TEXTURE_3D / GL_TEXTURE_2D_ARRAY through glTexStorageMem3DEXT; one mip level always. */
 bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj, VkFormat fmt, GLenum glFmt, int samples, int w,
 	int h, bool depth, double & mb, std::string & why, VkImageType type = VK_IMAGE_TYPE_2D, int d = 1, int layers = 1, int levels = 1,
-	bool cube = false )  // lane VKOBJ4: a cube array (layers = 6 per cube; GL_TEXTURE_CUBE_MAP_ARRAY), the lamps' shadow cubes
+	bool cube = false,  // lane VKOBJ4: a cube array (layers = 6 per cube; GL_TEXTURE_CUBE_MAP_ARRAY), the lamps' shadow cubes
+	bool * slices = nullptr )  // lane VKAIR9: out, a 3D colour image whose slices take 2D views (render targets)
 {
 	levels = ( samples == 1 && !depth ) ? std::max( levels, 1 ) : 1;  // lanes VKLIGHT1 / VKAIR1: a mipped 2D, 2D array or 3D input
 	Vk & v = vk();
@@ -1365,7 +1373,12 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 		why = "a cube array is square, 2D and six layers a cube";
 		return false;
 	}
-	const VkImageCreateFlags flags = cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0;
+	VkImageCreateFlags flags = cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0;
+	// lane VKAIR9: a 3D colour image is 2D_ARRAY_COMPATIBLE, so one slice can be a colour attachment (GL's
+	// glFramebufferTextureLayer on a 3D texture: the air inject and its history strata); dropped only when the device
+	// refuses the format with it (then the slices are sampled / copied only)
+	if ( is3d && !depth && !sharedSliceRed() )
+		flags |= VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT;
 	VkImageFormatProperties ip {};
 	auto offered = [&]() {
 		return v.vkGetPhysicalDeviceImageFormatProperties( v.phys, fmt, type, VK_IMAGE_TILING_OPTIMAL, usage, flags, &ip ) == VK_SUCCESS
@@ -1376,6 +1389,16 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 	if ( !ok && ( usage & VK_IMAGE_USAGE_STORAGE_BIT ) ) {  // a format without storage (R8 / RG16F on some devices): sampled only
 		usage &= ~VkImageUsageFlags( VK_IMAGE_USAGE_STORAGE_BIT );
 		ok = offered();
+		if ( !ok )
+			usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+	}
+	if ( !ok && ( flags & VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT ) ) {  // lane VKAIR9: the old 3D image (no slice views)
+		flags &= ~VkImageCreateFlags( VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT );
+		ok = offered();
+		if ( !ok && ( usage & VK_IMAGE_USAGE_STORAGE_BIT ) ) {
+			usage &= ~VkImageUsageFlags( VK_IMAGE_USAGE_STORAGE_BIT );
+			ok = offered();
+		}
 	}
 	if ( !ok ) {
 		why = std::string( depth ? "depth / stencil" : "colour" ) + " format " + std::to_string( int( fmt ) ) + " at " + std::to_string( samples )
@@ -1487,6 +1510,8 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 			+ ", the storage " + std::to_string( errStorage ) + "; " + std::to_string( r.size ) + " bytes)";
 		return false;
 	}
+	if ( slices )
+		*slices = ( flags & VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT ) != 0;
 	return true;
 }
 
@@ -1511,6 +1536,7 @@ struct Shared
 	VkFormat fmt = VK_FORMAT_UNDEFINED;
 	double mb = 0.0;
 	bool borrowed = false;  // lane VKOBJ4 open item 3: another owner's images (the tone frame), found by key, never freed here
+	bool slices = false;  // lane VKAIR9: a 3D colour target made 2D_ARRAY_COMPATIBLE (sliceView works)
 };
 
 std::map<std::uintptr_t, Shared> & shareds()
@@ -1580,6 +1606,36 @@ const Shared * sharedFind( std::uintptr_t key )
 {
 	auto it = shareds().find( key );
 	return it != shareds().end() && it->second.glCtx == gl().ctx ? &it->second : nullptr;
+}
+
+/* lane VKAIR9: a 2D colour view of slice z of a 3D shared target (level 0), a render pass attachment as GL's
+ * glFramebufferTextureLayer( 3D, z ); the caller destroys it. Refused unless the image was made 2D_ARRAY_COMPATIBLE. */
+VkImageView sliceView( const Shared & s, int z, std::string & why )
+{
+	if ( s.type != 1 || !s.img ) {
+		why = "a slice view of a shared target that is not 3D";
+		return VK_NULL_HANDLE;
+	}
+	if ( !s.slices ) {
+		why = "the 3D shared target was made without 2D_ARRAY_COMPATIBLE (no slice view)";
+		return VK_NULL_HANDLE;
+	}
+	if ( z < 0 || z >= s.d ) {
+		why = "slice " + std::to_string( z ) + " of a 3D shared target " + std::to_string( s.d ) + " deep";
+		return VK_NULL_HANDLE;
+	}
+	Vk & v = vk();
+	VkImageViewCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+	ci.image = s.img;
+	ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	ci.format = s.fmt;
+	ci.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, std::uint32_t( z ), 1 };
+	VkImageView out = VK_NULL_HANDLE;
+	if ( v.vkCreateImageView( v.dev, &ci, nullptr, &out ) != VK_SUCCESS ) {
+		why = "vkCreateImageView (a 3D slice) failed";
+		return VK_NULL_HANDLE;
+	}
+	return out;
 }
 
 void dropView( bool glAlive )
@@ -4122,7 +4178,7 @@ bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned g
 	const VkImageType vt = type == 1 ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
 	const int layers = type >= 2 ? d : 1;  // lane VKOBJ4: type 3 = a cube array of d layers, 6 a cube (farTwin's count)
 	if ( !makeShared( s.img, s.mem, s.tex, s.obj, fmt, GLenum( glFmt ), samples, w, h, depth, s.mb, why, vt, type == 1 ? d : 1, layers, levels,
-			type == 3 ) ) {
+			type == 3, &s.slices ) ) {
 		sharedFree( s, true );
 		return fail( why );
 	}
