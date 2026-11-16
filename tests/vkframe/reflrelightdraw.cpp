@@ -17,6 +17,12 @@
 // Reds (each must FAIL, never pass): red 1 rpTile one pixel off (the Vulkan side's b31), red 2 cellRestir rewritten from
 // texel 1 on after GL's draw (RT key; a twin that does not read it passes), red 4 cellDdgiAtlas shifted one texel after
 // GL's draw (RT key), red 8 the base twin asked for the RT program (wwDefs key): must REFUSE, named "key".
+// Bar addendum (lane VKFAR17, 2026-11-16, set before the run; thresholds and reds 1-8 unchanged): red 16 wrong cube layer
+// (Vulkan's rpLayer one cube on: k + 1), red 32 stuck face (after GL's draw every todo cube's face 0 is copied over its
+// faces 1-5 in BOTH shared G-buffer cubes, then put back: a twin that read one face, or a stale copy, passes). Both keys,
+// both must FAIL by the same per-tile judge; each prints its moved words (vs GL) and its clear-word count beside the
+// verdict. "RT key ignored" is reds 2 / 4 (RT inputs read) + red 8 (a key mismatch refuses); "GL left writing" is the
+// app site check tests/vkframe/reflrelightsite.py run by the .sh (its own red strips `!vkDrawn` in memory).
 // Seeding (VKFAR20, coordinator ruling 11-15; thresholds, red definitions and red count unchanged): VKFAR19's run had reds 2
 // and 4 dead (Vulkan moved 0 words) because neither input was reached on either side: seedUnis left cellRestirSize at
 // floats 0.05..1 (W, H in {0, 1}: only texel 0), cellLights all zero (no light, so no shadow factor was asked), and every
@@ -167,6 +173,18 @@ int main( int argc, char ** argv )
 	glBindTexture( GL_TEXTURE_2D, glAtlas );
 	xf.texStorage2D( GL_TEXTURE_2D, kLevels, 0x8C3A, kAtW, kAtH );
 	glBindTexture( GL_TEXTURE_2D, 0 );
+	GLuint albBak = 0, ndBak = 0;	// lane VKFAR17: red 32's copies of the shared G-buffer cubes
+	glGenTextures( 1, &albBak );
+	glBindTexture( 0x9009, albBak );
+	xf.texStorage3D( 0x9009, 1, 0x8058, kFace, kFace, kLayers );
+	glGenTextures( 1, &ndBak );
+	glBindTexture( 0x9009, ndBak );
+	xf.texStorage3D( 0x9009, 1, 0x881A, kFace, kFace, kLayers );
+	glBindTexture( 0x9009, 0 );
+	const auto copyImg = reinterpret_cast<void( WINAPI * )( GLuint, GLenum, GLint, GLint, GLint, GLint, GLuint, GLenum, GLint, GLint, GLint,
+		GLint, GLsizei, GLsizei, GLsizei )>( glProc( "glCopyImageSubData" ) );
+	if ( !copyImg )
+		return fatal( "no glCopyImageSubData" );
 	{	// the G-buffer: albedo alpha 0 on a strip of every face (the miss branch) and on its border ring (a direction with
 		// |x| == |y| > |z| ties two cube faces at their edge texels and the drivers break the tie apart: with a lit hit
 		// branch the two faces' random texels differed on the tile diagonals), distance 50..500
@@ -406,6 +424,15 @@ int main( int argc, char ** argv )
 				f.bufferData( 0x8C2A, std::ptrdiff_t( v.size() * 4 ), v.data(), fStatic );
 				f.bindBuffer( 0x8C2A, 0 );
 			}
+			if ( red & 32 ) {	// gate-side red (VKFAR17): a stuck face, every todo cube's face 0 over its faces 1-5 after GL's draw
+				for ( int c = 0; c < 2; c++ ) {
+					const GLuint t = c ? nd : alb;
+					copyImg( t, 0x9009, 0, 0, 0, 0, c ? ndBak : albBak, 0x9009, 0, 0, 0, 0, kFace, kFace, kLayers );
+					for ( int k : kTodo )
+						for ( int fc = 1; fc < 6; fc++ )
+							copyImg( t, 0x9009, 0, 0, 0, k * 6, t, 0x9009, 0, 0, 0, k * 6 + fc, kFace, kFace, 1 );
+				}
+			}
 			WwVkPresent::ReflRelightRun r;
 			r.prog = prog;
 			r.wwDefs = ( key == 1 ) != ( ( red & 8 ) != 0 ) ? "WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO"
@@ -416,7 +443,7 @@ int main( int argc, char ** argv )
 			r.ndKey = reinterpret_cast<std::uintptr_t>( &keys[2] );
 			for ( int k : kTodo ) {
 				WwVkPresent::ReflRelightTile t;
-				t.layer = k;
+				t.layer = k + ( red & 16 ? 1 : 0 );
 				t.tile[0] = float( ( k % kCols ) * kFace ) + ( red & 1 ? 1.0f : 0.0f );
 				t.tile[1] = float( ( k / kCols ) * kFace );
 				t.tile[2] = float( kFace );
@@ -426,6 +453,10 @@ int main( int argc, char ** argv )
 				r.tiles.push_back( t );
 			}
 			const bool ok = WwVkPresent::reflRelightRun( r, gw, w );
+			if ( red & 32 ) {	// put GL's cubes back for the next run
+				copyImg( albBak, 0x9009, 0, 0, 0, 0, alb, 0x9009, 0, 0, 0, 0, kFace, kFace, kLayers );
+				copyImg( ndBak, 0x9009, 0, 0, 0, 0, nd, 0x9009, 0, 0, 0, 0, kFace, kFace, kLayers );
+			}
 			if ( red & 6 ) {	// put GL's input back for the next run
 				f.bindBuffer( 0x8C2A, smp[size_t( red & 2 ? iRestir : iDdgi )].buf );
 				const std::vector<float> & v = seeds[( red & 2 ) == 0];
@@ -472,7 +503,7 @@ int main( int argc, char ** argv )
 			break;
 		}
 		// ---- reds
-		for ( int red : { 1, 2, 4, 8 } ) {
+		for ( int red : { 1, 2, 4, 8, 16, 32 } ) {
 			if ( ( red & 6 ) && key != 1 )
 				continue;
 			redsRun++;
@@ -489,6 +520,19 @@ int main( int argc, char ** argv )
 			std::printf( "REFLRELIGHTDRAW %s red %d: %s%s%s\n", keyName[key], red, fired ? "FAIL (fired)" : "PASS (dead)", ran ? "" : " refused: ",
 				ran ? "" : rw.c_str() );
 			redsFired += fired;
+			if ( red >= 16 && ran ) {	// VKFAR17: what the red moved (vs GL) and how many words kept the clear word
+				const std::vector<std::uint32_t> vr = readAtlas( vkAtlas, 0 );
+				int moved = 0, clearN = 0;
+				for ( int k : kTodo )
+					for ( int y = 0; y < kFace; y++ )
+						for ( int x = 0; x < kFace; x++ ) {
+							const size_t i = size_t( ( k / kCols ) * kFace + y ) * kAtW + size_t( ( k % kCols ) * kFace + x );
+							moved += vr[i] != gl0[i];
+							clearN += vr[i] == clearWord;
+						}
+				std::printf( "REFLRELIGHTDRAW %s red %d moved %d of %d words, clear word %d\n", keyName[key], red, moved,
+					int( sizeof( kTodo ) / sizeof( kTodo[0] ) ) * kFace * kFace, clearN );
+			}
 		}
 	}
 	const bool ok = fails == 0 && redsRun > 0 && redsFired == redsRun;

@@ -164,8 +164,13 @@ VKFRAME_FXG = {'fargnd_view_ps': 'far-ground/fo4_cellcsmfgl_ps',
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXG]
 # lane VKFAR16: the `fxr <name> <dir/file>` lines, fxg's flags + the all-on route's RT GI key
 VKFRAME_FXR_ARGS = VKFRAME_FXG_ARGS + ['-D', 'WW_CELL_RESTIR=1', '-D', 'WW_CELL_RTDDGI=1', '-D', 'WW_CELL_RTDDGI_CASCADES=1']
-VKFRAME_FXR = {'reflrelight_view_rt_ps': 'reflections/cell_reflrelight_ps'}
+VKFRAME_FXR = {'reflrelight_view_rt_ps': 'reflections/cell_reflrelight_ps',
+	'farlod_view_rt_ps': 'core/fo4_cellcsm_ps'}	# lane VKFAR25: the far LOD rings under the all-on key
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXR]
+# lane VKFAR25: the `fxdg <name> <dir/file>` lines, fxg's flags + RTDDGI + RTDDGI_CASCADES (the RT GI row without an RT preset)
+VKFRAME_FXDG_ARGS = VKFRAME_FXG_ARGS + ['-D', 'WW_CELL_RTDDGI=1', '-D', 'WW_CELL_RTDDGI_CASCADES=1']
+VKFRAME_FXDG = {'farlod_view_dg_ps': 'core/fo4_cellcsm_ps'}
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXDG]
 # lane VKAIR5: the air inject's `fxa` / `fxar` lines, fxg's / fxr's flags + the air program's AIR_SKYVIEW (its default key)
 VKFRAME_FXA_ARGS = VKFRAME_FXG_ARGS + ['-D', 'WW_CELL_AIR_SKYVIEW=1']
 VKFRAME_FXA = {'airinject_view_ps': 'air/cell_volair_ps'}
@@ -389,6 +394,11 @@ def script_ok(tree):
 	rlines = dict(re.findall(r'^fxr ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
 	if rlines != VKFRAME_FXR:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxr lines (%s) are not this checker\'s RT GI pixel twins' % ' '.join(sorted(rlines)))
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T ps_6_0 -E main ' + ' '.join(VKFRAME_FXDG_ARGS) + ' -Fo "$1.spv" ' not in vf:	# lane VKFAR25
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxdg() compile line changed')
+	dglines = dict(re.findall(r'^fxdg ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
+	if dglines != VKFRAME_FXDG:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxdg lines (%s) are not this checker\'s RT GI (no ReSTIR) pixel twins' % ' '.join(sorted(dglines)))
 	for fn, args, tab in (('fxa', VKFRAME_FXA_ARGS, VKFRAME_FXA), ('fxar', VKFRAME_FXAR_ARGS, VKFRAME_FXAR)):	# lane VKAIR5
 		if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T ps_6_0 -E main ' + ' '.join(args) + ' -Fo "$1.spv" ' not in vf:
 			bad.append('src/features/vkframe/vkframe_spirv.sh: its %s() compile line changed' % fn)
@@ -625,6 +635,9 @@ def main(argv):
 			if k in VKFRAME_FXR:
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXR[k] + '.hlsl')
 				hdefs = VKFRAME_FXR_ARGS
+			if k in VKFRAME_FXDG:	# lane VKFAR25
+				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXDG[k] + '.hlsl')
+				hdefs = VKFRAME_FXDG_ARGS
 			if k in VKFRAME_FXA:
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXA[k] + '.hlsl')
 				hdefs = VKFRAME_FXA_ARGS
@@ -660,7 +673,7 @@ def main(argv):
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXD[k] + '.hlsl')
 				hdefs = VKFRAME_FXD_ARGS
 				m = re.match(r'(ds_6_0)', 'ds_6_0')
-			if k in VKFRAME_FXG or k in VKFRAME_FXR or k in VKFRAME_FXA or k in VKFRAME_FXAR:
+			if k in VKFRAME_FXG or k in VKFRAME_FXR or k in VKFRAME_FXDG or k in VKFRAME_FXA or k in VKFRAME_FXAR:
 				m = re.match(r'(ps_6_0)', 'ps_6_0')
 			if k in VKFRAME_FXS:
 				m = re.match(r'(cs_6_0)', 'cs_6_0')
