@@ -6,7 +6,8 @@
 // (glCompressedTexSubImage3D, GL_COMPRESSED_RGB_S3TC_DXT1).
 // Fixture (worked out before the first run): the ring-0 cell (1, 1) (world 4096..8192), a 40 x 40 grid at spacing 128 from
 // (3584, 3584) (the cell + 512 a side), fgGrid RGBA32UI (nearest, clamped), fgLtex 64 x 64 x 4 RGBA8 (7 levels, repeat,
-// aniso 8), fgAtlas 64 x 64 RGBA8 (7 levels): all three SHARED (sharedTarget, as cellfarground.cpp makes them with the view
+// aniso 8 on the texture; GL's paint samples it through its own sampler object at anisotropy 1, as paintJobs does since
+// VKGROUND8), fgAtlas 64 x 64 RGBA8 (7 levels): all three SHARED (sharedTarget, as cellfarground.cpp makes them with the view
 // on); fgHeight R32F 40 x 40 (GL-owned, linear), heights 250..350; fgDecal a texel buffer of 8 records (boxes about 600 x 500
 // world) over 10 x 10 bins of 512, every bin listing every record. Arms N (side 256, 7 levels) and F (side 128, 6 levels),
 // pools of 3 layers, the page into layer 1. Every layer and level of both pools starts with the same random BC1 blocks
@@ -56,12 +57,18 @@ struct Fp
 	void( WINAPI * compressedTexSubImage3D )( GLenum, GLint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei, GLenum, GLsizei,
 		const void * ) = nullptr;
 	void( WINAPI * getCompressedTexImage )( GLenum, GLint, void * ) = nullptr;
+	void( WINAPI * genSamplers )( GLsizei, GLuint * ) = nullptr;
+	void( WINAPI * bindSampler )( GLuint, GLuint ) = nullptr;
+	void( WINAPI * samplerParameteri )( GLuint, GLenum, GLint ) = nullptr;
+	void( WINAPI * samplerParameterf )( GLuint, GLenum, GLfloat ) = nullptr;
 };
 Fp fp;
 
 bool loadFp()
 {
-	return load( fp.compressedTexSubImage3D, "glCompressedTexSubImage3D" ) && load( fp.getCompressedTexImage, "glGetCompressedTexImage" );
+	return load( fp.compressedTexSubImage3D, "glCompressedTexSubImage3D" ) && load( fp.getCompressedTexImage, "glGetCompressedTexImage" )
+		&& load( fp.genSamplers, "glGenSamplers" ) && load( fp.bindSampler, "glBindSampler" )
+		&& load( fp.samplerParameteri, "glSamplerParameteri" ) && load( fp.samplerParameterf, "glSamplerParameterf" );
 }
 
 std::uint32_t pack4x8( float a, float b, float c, float d )
@@ -360,6 +367,14 @@ int main( int argc, char ** argv )
 	glTexParameteri( fT2DA, GL_TEXTURE_WRAP_T, GL_REPEAT );
 	glTexParameterf( fT2DA, 0x84FE /* GL_TEXTURE_MAX_ANISOTROPY */, 8.0f );
 	glBindTexture( fT2DA, 0 );
+	// paintJobs' LTEX sampler (VKGROUND8): the texture's state at anisotropy 1, bound for the paint draw only
+	GLuint ltexSmp = 0;
+	fp.genSamplers( 1, &ltexSmp );
+	fp.samplerParameteri( ltexSmp, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
+	fp.samplerParameteri( ltexSmp, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+	fp.samplerParameteri( ltexSmp, GL_TEXTURE_WRAP_S, GL_REPEAT );
+	fp.samplerParameteri( ltexSmp, GL_TEXTURE_WRAP_T, GL_REPEAT );
+	fp.samplerParameterf( ltexSmp, 0x84FE /* GL_TEXTURE_MAX_ANISOTROPY */, 1.0f );
 	std::vector<std::uint8_t> at( static_cast<size_t>( kFpAtlas * kFpAtlas * 4 ) );
 	for ( auto & x : at )
 		x = std::uint8_t( byte( rng ) );
@@ -467,7 +482,9 @@ int main( int argc, char ** argv )
 		const GLenum one = fCol0;
 		f.drawBuffers( 1, &one );
 		glViewport( 0, 0, a.side, a.side );
+		fp.bindSampler( uLtex, ltexSmp );
 		glDrawElements( GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, nullptr );
+		fp.bindSampler( uLtex, 0 );
 		f.framebufferTexture2D( kFpDrawFb, fCol0, GL_TEXTURE_2D, 0, 0 );
 		glBindTexture( GL_TEXTURE_2D, a.scr );
 		f.generateMipmap( GL_TEXTURE_2D );
