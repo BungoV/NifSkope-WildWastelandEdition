@@ -1293,6 +1293,7 @@ struct RestirGl
 	vkasync::Ledger vk;         // lane VKCOMPUTE1: GL's wait on the last submit, owed until the ratio's first read
 	qint64 vkCopied = -1;       // lane VKBUF1: the step (runs) last copied into the shared cellRestir, at rtBufGen vkGen
 	quint64 vkGen = 0;
+	GLuint vkTex = 0;           // lane VKBUF1: the shared cellRestir's GL texture buffer GL binds while it holds this step
 };
 
 RestirGl & restirGl()
@@ -1331,6 +1332,7 @@ void restirSay( RestirGl & G, const QString & line )
 bool restirVkFresh( std::string & why )
 {
 	RestirGl & G = restirGl();
+	G.vkTex = 0;
 	if ( !G.owner || !G.ready || !G.valid || !G.tex || !G.buf[1] ) {
 		why = "no ReSTIR ratio this frame";
 		return false;
@@ -1343,13 +1345,14 @@ bool restirVkFresh( std::string & why )
 	unsigned b = 0, t = 0;
 	if ( !WwVkPresent::rtBufShare( WwVkPresent::kRtBufRestir, GL_RG32F, bytes, b, t, why ) )
 		return false;
-	if ( G.vkCopied == G.runs && G.vkGen == WwVkPresent::rtBufGen() )
-		return true;
-	restirSettle( G );   // the copy reads the ratio
-	if ( !WwVkPresent::rtBufCopy( WwVkPresent::kRtBufRestir, G.buf[1], bytes, why ) )
-		return false;
-	G.vkCopied = G.runs;
-	G.vkGen = WwVkPresent::rtBufGen();
+	if ( G.vkCopied != G.runs || G.vkGen != WwVkPresent::rtBufGen() ) {
+		restirSettle( G );   // the copy reads the ratio
+		if ( !WwVkPresent::rtBufCopy( WwVkPresent::kRtBufRestir, G.buf[1], bytes, why ) )
+			return false;
+		G.vkCopied = G.runs;
+		G.vkGen = WwVkPresent::rtBufGen();
+	}
+	G.vkTex = GLuint( t );
 	return true;
 }
 
@@ -1450,7 +1453,13 @@ void restirUniforms( Renderer * r, NifSkopeOpenGLContext::Program * prog )
 	{	// lane PERFFIX1: through the CELLUNI kit (DSA: the active unit never asked; WW_CELL_UNI_RED=1 the old calls)
 		WwCellUni::Units<std::remove_pointer_t<decltype( fn )>> u( fn, wwCellUniDsa() );
 		u.section();
-		u.bind( WwCellUnit::Restir, GL_TEXTURE_BUFFER, on ? G.tex : 0 );
+		// lane VKBUF1: with the view on Vulkan GL reads the shared copy (the same bytes, copied once a step), so a route
+		// that matches the bound texture buffer finds cellRestir in place, as it finds cellDdgiAtlas; else GL's own buffer
+		GLuint tex = on ? G.tex : 0;
+		std::string vkWhy;
+		if ( on && restirVkFresh( vkWhy ) && G.vkTex )
+			tex = G.vkTex;
+		u.bind( WwCellUnit::Restir, GL_TEXTURE_BUFFER, tex );
 		u.done();
 	}
 	prog->uni1i( "cellRestir", WwCellUnit::Restir );

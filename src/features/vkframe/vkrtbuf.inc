@@ -3,6 +3,8 @@
 #include "features/vkframe/vkrtbuf.h"
 #ifndef WW_VKPRESENT_NO_QT
 #include "wwswitch.h"  // wwEnvInt (the red is live)
+#include <QDebug>
+#include <QString>
 #endif
 #include <chrono>
 #include <cstdlib>
@@ -226,8 +228,12 @@ void rtBufSay()
 		return;
 	R.said = std::move( l );
 	R.saidAt = now;
+#ifdef WW_VKPRESENT_NO_QT
 	std::fprintf( stderr, "%s\n", R.said.c_str() );
 	std::fflush( stderr );
+#else
+	qInfo().noquote() << QString::fromStdString( R.said );   // the app's log, like the present's other vk lines
+#endif
 }
 
 }  // namespace WwVkPresent
