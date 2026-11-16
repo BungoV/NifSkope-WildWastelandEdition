@@ -85,6 +85,7 @@ VKFRAME_FX['lamp_view_ps'] = 'lights/lamp_view_ps'	# lane VKLAMP1: the lamps' pl
 VKFRAME_FX['cloud_shadowmap_view_ps'] = 'clouds/cloud_shadowmap_ps'	# lane VKCLOUD1: the cloud shadow map
 VKFRAME_FX['cloudmap_view_ps'] = 'clouds/cloudmap_ps'	# lane VKCLOUD4: the cloud map (the readable source itself)
 VKFRAME_FX['depthmax_view_ps'] = 'exposure/cell_depthmax_ps'	# lane VKSMALL2: the frame's farthest depth (row 40)
+VKFRAME_FX['vrs_rate_view_ps'] = 'near/cell_vrs_rate_ps'	# lane VKSMALL3: the shading rate images (row 76)
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FX]
 # lane VKFAR1: the far dots' vertex stage, the script's `fxv <name> <dir/file>` lines (fx()'s shifts, vs_6_0)
 VKFRAME_FXV = {'fardots_view_vs': 'far-lod/cell_fardots_view_vs',
