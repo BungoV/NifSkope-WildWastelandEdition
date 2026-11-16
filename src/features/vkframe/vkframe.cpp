@@ -1790,7 +1790,13 @@ QString wwVkFrameUse( int frames, double glGpuMs, double wallMs )
 	led.add( "gl-scene-to-bloom-source", WwVkFrame::Side::Gl, std::max( 0.0, gpu - ( vkRoute ? vk : 0.0 ) ) );
 	led.add( "bloom-chain", vkRoute ? WwVkFrame::Side::Vk : WwVkFrame::Side::Gl, vkRoute ? vk : 0.0 );
 	led.add( "gl-tone-map-to-present", WwVkFrame::Side::Gl, 0.0 );
+	/* lane VKFLIGHT1 (bungo's Goodneighbor flight 11-16 read "route no device yet" for every window): ready() tests the
+	 * device before wanted(), so kickDevice never runs while the view is on Vulkan. That is right: the bloom runs in the
+	 * vk view's tone pass on the present device (cell bloom: fo4cs on the present device), and a registered device would
+	 * turn cellhdr's wantVk on, which takes the frame off the tone route. Say so instead of "no device yet". */
 	const QString why = vkRoute ? QStringLiteral( "vulkan" )
+		: WwVkPresent::toneWanted() ? QStringLiteral( "the vk view's tone pass holds the bloom (present device); this "
+			"route's own chain is idle by design, and its gl ms is the whole frame, not a bloom cost" )
 		: !d.ready.load( std::memory_order_acquire ) ? deviceWhy()
 		: w.glWhy.isEmpty() ? QStringLiteral( "no bloom chain this window (bloom off or vanilla)" ) : w.glWhy;
 	std::fprintf( stderr, "%s | frames vulkan %d gl %d | overlap: wall %.2f ms a frame, CPU %.2f (paint start to swap return), GPU %.2f "
