@@ -7,6 +7,7 @@
 #include "features/post/gametaa.h"
 #include "features/vkframe/vkpresent.h"	// lane VKOBJ11: the targets shared with the present device while the view is on
 #include "features/vkframe/vkobjvel.h"	// lane VKOBJ12: step 3 on the present device
+#include "features/vkframe/vkcamvel.h"	// lane VKOBJ18: step 2 on the present device
 #include "features/particles/glparticles.h"
 #include "gl/glproperty.h"
 #include "gl/glscene.h"
@@ -146,6 +147,11 @@ struct InGpu
 	bool ok = false;	// this frame's textures were drawn
 	bool vk = false, vkFailed = false;	// lane VKOBJ11: vel / mask / depth are shared targets; a share refused at this size
 	std::uintptr_t vkKey = 0;
+	struct CamVelTally	// lane VKOBJ18: step 2's route, this renderer's own (the `vk camvel:` line)
+	{
+		qint64 runs = 0, gl = 0, refusals = 0, passes = 0;
+		QString said;
+	} cv;
 	GLuint q[4] = { 0, 0, 0, 0 };	// two begin/end timestamp pairs
 	bool qPending[2] = { false, false };
 	int qNext = 0;
@@ -689,19 +695,67 @@ void wwTaaInputsPass( Scene * scene )
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.camFbo );
 		const GLenum one = GL_COLOR_ATTACHMENT0;
 		fn->glDrawBuffers( 1, &one );
-		auto prog = r->useProgram( "game_taa_mv.prog" );
-		if ( !prog ) {
-			ok = false;
-		} else {
-			fn->glActiveTexture( GLenum( GL_TEXTURE0 + kUnitA ) );
-			fn->glBindTexture( GL_TEXTURE_2D, g.depth );
-			prog->uni1i( "depthTex", kUnitA );
-			prog->uni4m( "reproj", toMatrix4( reproj ) );
-			prog->uni2f( "jitterNdc", jx, jy );
-			prog->uni2f( "invSize", 1.0f / float( W ), 1.0f / float( H ) );
-			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &quadAttrs, idx );
-			r->stopProgram();
-			fn->glBindTexture( GL_TEXTURE_2D, 0 );
+		/* lane VKOBJ18: while vel / depth are shared targets (g.vk) the quad runs on the present device (vkcamvel.inc, the
+		 * twins of cell_ao.vert + game_taa_mv.frag; tests/vkframe/camveldraw.sh); GL draws it only when Vulkan did not.
+		 * Red WW_VKVIEW_CAMVEL_RED=1: GL's own. */
+		WW_SWITCH_STATIC( bool, camVelRed, [] {
+			const QString v = QString::fromLatin1( wwEnv( "WW_VKVIEW_CAMVEL_RED" ) ).trimmed();
+			return !v.isEmpty() && v != QLatin1String( "0" );
+		}() );
+		std::string cvWhy = g.vk ? std::string() : std::string( "the view off" );
+		bool cvDrew = false;
+		if ( g.vk ) {
+			if ( camVelRed )
+				cvWhy = "red WW_VKVIEW_CAMVEL_RED";
+			else if ( vp[0] != 0 || vp[1] != 0 )
+				cvWhy = "a viewport origin other than 0, 0";
+			else
+				cvWhy = WwVkPresent::camVelRefusal();
+			if ( cvWhy.empty() ) {
+				WwVkPresent::CamVelRun cv;
+				std::memcpy( cv.reproj, s.camReproj.data(), sizeof( cv.reproj ) );	// as uni4m sends it
+				cv.jitterNdc[0] = jx;
+				cv.jitterNdc[1] = jy;
+				cv.invSize[0] = 1.0f / float( W );
+				cv.invSize[1] = 1.0f / float( H );
+				cv.velKey = g.vkKey;
+				cv.depthKey = g.vkKey + 2;
+				cv.w = W;
+				cv.h = H;
+				cvDrew = WwVkPresent::camVelRun( cv, cvWhy );
+			}
+			if ( !cvDrew )
+				WwVkPresent::camVelOnGl( cvWhy.c_str() );
+		}
+		if ( !cvDrew ) {
+			auto prog = r->useProgram( "game_taa_mv.prog" );
+			if ( !prog ) {
+				ok = false;
+			} else {
+				fn->glActiveTexture( GLenum( GL_TEXTURE0 + kUnitA ) );
+				fn->glBindTexture( GL_TEXTURE_2D, g.depth );
+				prog->uni1i( "depthTex", kUnitA );
+				prog->uni4m( "reproj", toMatrix4( reproj ) );
+				prog->uni2f( "jitterNdc", jx, jy );
+				prog->uni2f( "invSize", 1.0f / float( W ), 1.0f / float( H ) );
+				r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &quadAttrs, idx );
+				r->stopProgram();
+				fn->glBindTexture( GL_TEXTURE_2D, 0 );
+			}
+		}
+		// the route's line: on a change of route or reason, and every 600th pass with the counts
+		InGpu::CamVelTally & t = g.cv;
+		t.passes++;
+		( cvDrew ? t.runs : t.gl )++;
+		if ( g.vk && !cvDrew )
+			t.refusals++;
+		const QString key = cvDrew ? QStringLiteral( "vulkan" ) : QStringLiteral( "gl: " ) + QString::fromStdString( cvWhy );
+		if ( key != t.said || t.passes % 600 == 0 ) {
+			if ( g.vk )
+				static_cast<void>( WwVkPresent::takeCamVelStat() );
+			t.said = key;
+			qInfo().noquote() << QStringLiteral( "vk camvel: runs=%1 gl=%2 refusals=%3%4" ).arg( t.runs ).arg( t.gl )
+				.arg( t.refusals ).arg( cvDrew ? QString() : QStringLiteral( " glWhy=" ) + QString::fromStdString( cvWhy ) );
 		}
 	}
 
