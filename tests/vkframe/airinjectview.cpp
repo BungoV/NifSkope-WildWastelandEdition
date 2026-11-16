@@ -32,6 +32,13 @@
 // GL probes (moved = texels failing the bar's clause against GL's own; LIVE >= 50 of 252, else TESTS NOTHING and the gate
 // fails): GL rerun with each route red's value (fogDistScale 140, volGbufZ flipped, volGbufSize.x 250, volDims.y 13) and
 // GL on the rewritten input.
+// Sentinel fill (VKAIR6 11-16, a fixture fix, bar unchanged): the tile's sentinel is written by glClearTexImage. With a
+// glTexSubImage2D fill, NVIDIA's FIRST glGetTexImage of the shared tile after a Vulkan run returned the uploaded sentinel
+// once the gate had uploaded into it ~20 times (from alpha def red 8 on, and every alpha rt run), while GL error was 0,
+// the pass fence VK_SUCCESS and a second glGetTexImage read Vulkan's values (VKAIR5 probe p2). With a clear fill every
+// first read is Vulkan's. The app never uploads into the tile (GL or Vulkan draws it). Every judged read is the FIRST one
+// after its run, and the first Vulkan read must equal a second read of the same tile ("read twice") so a stale first read
+// fails the gate instead of passing on a later read.
 // Last line `AIRINJECTVIEW GATE OK` or `AIRINJECTVIEW GATE FAILED`.
 #define FLD_NO_MAIN
 #include "farloddraw.cpp"
@@ -55,6 +62,7 @@ struct Ai
 	void( WINAPI * genVertexArrays )( GLsizei, GLuint * ) = nullptr;
 	void( WINAPI * bindVertexArray )( GLuint ) = nullptr;
 	void( WINAPI * getActiveUniformBlockName )( GLuint, GLuint, GLsizei, GLsizei *, char * ) = nullptr;
+	void( WINAPI * clearTexImage )( GLuint, GLint, GLenum, GLenum, const void * ) = nullptr;
 };
 Ai ai;
 
@@ -62,7 +70,7 @@ bool loadAi()
 {
 	return load( ai.vertexAttribPointer, "glVertexAttribPointer" ) && load( ai.enableVertexAttribArray, "glEnableVertexAttribArray" )
 		&& load( ai.genVertexArrays, "glGenVertexArrays" ) && load( ai.bindVertexArray, "glBindVertexArray" )
-		&& load( ai.getActiveUniformBlockName, "glGetActiveUniformBlockName" );
+		&& load( ai.getActiveUniformBlockName, "glGetActiveUniformBlockName" ) && load( ai.clearTexImage, "glClearTexImage" );
 }
 
 bool isSky( int x, int y )
@@ -131,12 +139,11 @@ void putAlpha( GLuint t, const std::vector<float> & d )
 	glBindTexture( GL_TEXTURE_2D, 0 );
 }
 
+// a GL clear, never glTexSubImage: see the header's "Sentinel fill" note
 void fillTile( GLuint t )
 {
-	const std::vector<float> s( size_t( kAiCols ) * size_t( kAiRows ) * 2, kAiSentinel );
-	glBindTexture( GL_TEXTURE_2D, t );
-	glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, kAiCols, kAiRows, fRg, GL_FLOAT, s.data() );
-	glBindTexture( GL_TEXTURE_2D, 0 );
+	const float s[2] = { kAiSentinel, kAiSentinel };
+	ai.clearTexImage( t, 0, fRg, GL_FLOAT, s );
 }
 
 std::vector<float> readTile( GLuint t )
@@ -490,6 +497,12 @@ int main( int argc, char ** argv )
 			}
 			const std::vector<float> v0 = readTile( vkTile );
 			{
+				const TileV twice = judgeTile( v0, readTile( vkTile ) );
+				const bool same = twice.ok() && twice.diff == 0;
+				std::printf( "AIRINJECTVIEW %s read twice: %s (differ %d, unwritten %d)\n", an, same ? "EXACT" : "FAIL", twice.diff, twice.unwritten );
+				fails += !same;
+			}
+			{
 				const TileV v = judgeTile( g, v0 );
 				std::printf( "AIRINJECTVIEW %s Vulkan vs GL: %s (unwritten %d, non-finite %d, differ %d, past 1e-5 rel %d, max rel %.3g)\n", an, v.word(),
 					v.unwritten, v.nonFinite, v.diff, v.bad, v.maxRel );
@@ -517,12 +530,15 @@ int main( int argc, char ** argv )
 						putAlpha( gb, da );
 				}
 				bool fired = false;
+				TileV rv;
 				if ( red == 32 )
 					fired = !ran && rw.find( "key" ) != std::string::npos;
-				else if ( ran )
-					fired = !judgeTile( g, readTile( vkTile ) ).ok();
-				std::printf( "AIRINJECTVIEW %s red %d: %s%s%s\n", an, red, fired ? "FAIL (fired)" : "PASS (dead)", ran ? "" : " refused: ",
-					ran ? "" : rw.c_str() );
+				else if ( ran ) {
+					rv = judgeTile( g, readTile( vkTile ) );
+					fired = !rv.ok();
+				}
+				std::printf( "AIRINJECTVIEW %s red %d: %s (unwritten %d, past 1e-5 rel %d)%s%s\n", an, red, fired ? "FAIL (fired)" : "PASS (dead)",
+					rv.unwritten, rv.bad, ran ? "" : " refused: ", ran ? "" : rw.c_str() );
 				redsFired += fired;
 			}
 			{
