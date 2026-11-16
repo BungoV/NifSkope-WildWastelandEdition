@@ -138,17 +138,49 @@ float2 cvSphere( float h0, float3 d, float R )
 {
 	float r0 = kRb + h0;
 	float b = r0 * d.z;
+#ifdef WW_VK_NVGL_FORMS
+	float c = mad( r0, r0, -( R * R ) );
+	precise float bb = b * b;
+	float disc = bb - c;
+#else
 	float c = r0 * r0 - R * R;
 	float disc = b * b - c;
+#endif
 	if ( disc < 0.0 )
 		return (float2)( -1.0 );
 	float s = sqrt( disc );
 	return float2( -b - s, -b + s );
 }
 
+#ifdef WW_VK_NVGL_FORMS
+/* lane VKCLOUD3: the Vulkan views' float forms of NV GL's compile of the GLSL (as the frozen cloud_march_view_ps.hlsl's,
+ * fitted there, not derived): the fused c, an unfused b * b, and the ground call taking a ray within ~1e-3 (relative) of
+ * the horizon tangent as a tangent hit. Without them the fly twin's samples sit an ulp of 6360 km off GL's: 5000 of 14400
+ * march values past rel 1e-3 (cloudview cloud_f, MEASURED; GL's HLSL route keeps the plain forms) */
+float2 cvSphereGnd( float h0, float3 d )
+{
+	float r0 = kRb + h0;
+	float b = r0 * d.z;
+	float c = mad( r0, r0, -40449600.0 );
+	precise float bb = b * b;
+	float disc = bb - c;
+	if ( disc < 0.0 ) {
+		if ( disc < -bb * 1.0e-3 )
+			return (float2)( -1.0 );
+		disc = 0.0;
+	}
+	float s = sqrt( disc );
+	return float2( -b - s, -b + s );
+}
+#endif
+
 float cvHeight( float3 o, float3 d, float t, out float3 up )
 {
+#ifdef WW_VK_NVGL_FORMS
+	float3 e = float3( d.xy * t, kRb + mad( d.z, t, o.z ) );
+#else
 	float3 e = float3( d.xy * t, kRb + o.z + d.z * t );
+#endif
 	float r = length( e );
 	up = e / r;
 	return r - kRb;
@@ -298,7 +330,12 @@ void frag_main()
 	cvPrm = cvPhasePrm;
 	cvPrm.x = min( cvPrm.x, 1.0 - 8.0 / ( cvProj.y * cvHistSize.y ) );
 	float2 ndc = ( q + 0.5 ) / cvHistSize * 2.0 - 1.0;
+#ifdef WW_VK_NVGL_FORMS
+	float3 du = mul(float3( ( ndc.x + cvProj.z ) / cvProj.x, ( ndc.y + cvProj.w ) / cvProj.y, -1.0 ), cvCam);
+	float3 d = du * rsqrt( mad( du.z, du.z, mad( du.y, du.y, du.x * du.x ) ) );
+#else
 	float3 d = normalize( mul(float3( ( ndc.x + cvProj.z ) / cvProj.x, ( ndc.y + cvProj.w ) / cvProj.y, -1.0 ), cvCam) );
+#endif
 	float3 o = cvCamKm;
 
 	float lo = min( cvBands.baseKm.x, cvBands.baseKm.y ), hi = max( cvBands.topKm.x, cvBands.topKm.y );
@@ -306,7 +343,11 @@ void frag_main()
 	if ( cvBands.density.y <= 0.0 ) hi = cvBands.topKm.x;
 	if ( cvShaft.x > 0.0 && cvBands.density.x > 0.0 )
 		lo = min( lo, max( cvShaft.y, 0.0 ) );	// lane CLOUDRECX1: the shafts under the Low band are marched too
+#ifdef WW_VK_NVGL_FORMS
+	float2 gnd = cvSphereGnd( o.z, d );
+#else
 	float2 gnd = cvSphere( o.z, d, kRb );
+#endif
 	float tGround = ( gnd.y > 0.0 && gnd.x > 0.0 ) ? gnd.x : 1e9;
 	float2 sb = cvSphere( o.z, d, kRb + lo ), st = cvSphere( o.z, d, kRb + hi );
 	float t0, t1;
@@ -340,6 +381,8 @@ void frag_main()
 		float pixKm = 2.0 / ( cvProj.y * cvHistSize.y );
 #if defined( WW_CLOUD_VARIETY ) || defined( WW_CLOUD_ACCUM )
 		float j = cvJitter( q );
+#elif defined( WW_VK_NVGL_FORMS )
+		float j = frac( 52.9829189 * frac( mad( q.y, 0.00583715, q.x * 0.06711056 ) ) + cvFrame * 0.618034 );
 #else
 		float j = frac( 52.9829189 * frac( dot( q, float2( 0.06711056, 0.00583715 ) ) ) + cvFrame * 0.618034 );
 #endif
