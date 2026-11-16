@@ -94,6 +94,7 @@ struct Gpu
 	double stampMs = 0.0;
 	// FARPAGES1: the two page pools, the cell table, the paint kit's scratch (a page and its BC1 blocks)
 	GLuint pagesN = 0, pagesF = 0, cellTex = 0, scratchN = 0, scratchF = 0, blocks = 0, pbo = 0, fboBc = 0;
+	GLuint ltexSmp = 0;	// VKGROUND8: the paint's LTEX sampler, anisotropy 1 (the texture keeps 8 for mode 1's lookup)
 	qint64 bPagesN = 0, bPagesF = 0, bCells = 0, bScratch = 0;
 	int sideN = 0, sideF = 0, nNear = 0;
 	bool compressed = true, decalsOn = true;
@@ -258,6 +259,9 @@ void freeKit( NifSkopeOpenGLContext::GLFunctions * fn, Gpu & g )
 	delIn( fn, g, 0, g.grid, g.bGrid );
 	delTex( fn, g.height, g.bHeight );
 	delIn( fn, g, 1, g.ltex, g.bLtex );
+	if ( g.ltexSmp )
+		fn->glDeleteSamplers( 1, &g.ltexSmp );
+	g.ltexSmp = 0;
 	freeDecals( fn, g );
 	qint64 none = 0;
 	delTex( fn, g.scratchN, none );
@@ -295,6 +299,9 @@ void freeAll( NifSkopeOpenGLContext::GLFunctions * fn, Gpu & g )
 	delIn( fn, g, 0, g.grid, g.bGrid );
 	delTex( fn, g.height, g.bHeight );
 	delIn( fn, g, 1, g.ltex, g.bLtex );
+	if ( g.ltexSmp )
+		fn->glDeleteSamplers( 1, &g.ltexSmp );
+	g.ltexSmp = 0;
 	freeDecals( fn, g );
 	freePools( fn, g );
 	delTex( fn, g.pages, g.bPages );
@@ -1010,6 +1017,14 @@ bool paintJobs( Renderer * r, Doc & d, const std::vector<FgSched::Job> & jobs, Q
 		fn->glGenFramebuffers( 1, &g.fbo );
 	if ( !g.fboBc )
 		fn->glGenFramebuffers( 1, &g.fboBc );
+	if ( !g.ltexSmp ) {	// VKGROUND8: SampleGrad with square gradients, so anisotropy buys nothing here, and GL / Vulkan agree at 1
+		fn->glGenSamplers( 1, &g.ltexSmp );
+		fn->glSamplerParameteri( g.ltexSmp, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
+		fn->glSamplerParameteri( g.ltexSmp, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		fn->glSamplerParameteri( g.ltexSmp, GL_TEXTURE_WRAP_S, GL_REPEAT );
+		fn->glSamplerParameteri( g.ltexSmp, GL_TEXTURE_WRAP_T, GL_REPEAT );
+		fn->glSamplerParameterf( g.ltexSmp, 0x84FE /* GL_TEXTURE_MAX_ANISOTROPY */, 1.0f );
+	}
 	auto scratch = [&]( GLuint & t, int side ) {
 		if ( t )
 			return;
@@ -1100,7 +1115,9 @@ bool paintJobs( Renderer * r, Doc & d, const std::vector<FgSched::Job> & jobs, Q
 			return false;
 		}
 		fn->glViewport( 0, 0, side, side );
+		fn->glBindSampler( WwCellUnit::FarGroundLtex, g.ltexSmp );	// the paint only: unbound before the census and mode 1
 		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+		fn->glBindSampler( WwCellUnit::FarGroundLtex, 0 );
 		fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0 );
 		fn->glActiveTexture( GL_TEXTURE0 );
 		fn->glBindTexture( GL_TEXTURE_2D, scr );

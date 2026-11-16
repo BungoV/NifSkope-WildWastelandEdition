@@ -551,7 +551,11 @@ bool fgPaintRunState( const FgPaintRun & r, WaterRun & s, std::string & why )
 				const char * nm = nullptr;
 				const WaterSlot * sl = slotOf( b.binding - 64, &nm );
 				WaterSlot plain;
-				VkSampler sm = farlod::waterSampler( S.D[0], sl ? *sl : plain, b.compare, !sl || !sl->tex, w );
+				// VKGROUND8: GL's paint samples fgLtex through its own sampler object at anisotropy 1 (paintJobs ltexSmp)
+				WaterSlot at = sl ? *sl : plain;
+				if ( nm && std::string( nm ) == "fgLtex" )
+					at.aniso = 1.0f;
+				VkSampler sm = farlod::waterSampler( S.D[0], at, b.compare, !sl || !sl->tex, w );
 				if ( !sm )
 					return breakOff( w );
 				if ( b.compare )
