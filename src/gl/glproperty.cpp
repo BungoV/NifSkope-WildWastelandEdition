@@ -62,6 +62,7 @@ int wwLodMaskByTree = 0;
 #include "libfo76utils/src/ddstxt16.hpp"
 #include "glview.h"
 #include "renderer.h"
+#include "features/shadows/shadowatsampler.h"	// lane VKSHADOW9: the shadow alpha test's sampler copies a bind's state
 
 #include <QDir>
 #include <QFile>
@@ -1688,6 +1689,9 @@ bool BSShaderLightingProperty::bind( const QStringView & fname, bool forceTextur
 	GLint wrapS = clampModes[i];
 	GLint wrapT = clampModes[i + 1];
 	const GLint minFilter = mipmaps > 1 ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR;
+	ShadowAt::bindState[0] = wrapS;	// lane VKSHADOW9 (R1)
+	ShadowAt::bindState[1] = wrapT;
+	ShadowAt::bindState[2] = minFilter;
 	if ( WwDp::rec ) {	// lane GAPPERF-BINDLESS: the replay asks the shadow again for the texture just bound
 		const float an = TexCache::get_max_anisotropy();
 		std::int32_t w[4] = { wrapS, wrapT, minFilter, 0 };

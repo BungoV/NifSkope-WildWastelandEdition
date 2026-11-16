@@ -66,12 +66,20 @@
 #include "features/vkframe/csm_view_vs.spv.h"  // lane VKSHADOW1
 #include "features/vkframe/csm_remap_view_vs.spv.h"  // lane VKSHADOW6: the cascade cache's Scroll remap
 #include "features/vkframe/csm_remap_view_ps.spv.h"
+#include "features/vkframe/csm_at_view_vs.spv.h"  // lane VKSHADOW8: the cascades' alpha-tested casters
+#include "features/vkframe/csm_at_view_ps.spv.h"
+#include "features/vkframe/csm_sway_view_vs.spv.h"  // lane VKSHADOW10: the cascades' swaying casters
 // lane VKAIR1: the air over the sky (cell_volsky), the clouds' march + resolve (and their accumulation twins)
 #include "features/vkframe/volsky_view_ps.spv.h"
 #include "features/vkframe/cloud_march_view_ps.spv.h"
 #include "features/vkframe/cloud_march_a_view_ps.spv.h"
 #include "features/vkframe/cloud_resolve_view_ps.spv.h"
 #include "features/vkframe/cloud_resolve_a_view_ps.spv.h"
+// lane VKCLOUD2: the march with the fly-through box (cloud_fly / cloud_fly_a)
+#include "features/vkframe/cloud_fly_view_ps.spv.h"
+#include "features/vkframe/cloud_fly_a_view_ps.spv.h"
+#include "features/vkframe/cloud_flybake_view_ps.spv.h"  // lane VKCLOUD5: the fly box's bake (vkcloudflybake.inc)
+#include "features/vkframe/cloud_flysdf_view_ps.spv.h"
 // lane VKFAR1: the far bulb dots as instanced quads (cell_fardots)
 #include "features/vkframe/fardots_view_vs.spv.h"
 #include "features/vkframe/fardots_view_ps.spv.h"
@@ -798,6 +806,8 @@ bool dmRecord( std::string & why );  // lane VKSMALL2 (vkdepthmax.inc): fxWork's
 bool vrsRecord( std::string & why );  // lane VKSMALL3 (vkvrs.inc): fxWork's kind 15, the shading rate images
 bool fxresRecord( std::string & why );  // lane VKSMALL5 (vkfxres.inc): fxWork's kind 16, the soft-effect layer
 bool boltRecord( std::string & why );  // lane VKOBJ15 (vkbolt.inc): fxWork's kind 17, the lightning strips' preview
+bool flyBakeRecord( std::string & why );  // lane VKCLOUD5 (vkcloudflybake.inc): fxWork's kind 19, the fly box's bake
+void flyBakeDrop();  // lane VKCLOUD5 (vkcloudflybake.inc): the bake's slice views and framebuffers
 void waterDrop();
 void underDrop();  // lane VKWATER4 (vkunder.inc)
 void objVelDrop();  // lane VKOBJ12 (vkobjvel.inc)
@@ -1349,13 +1359,21 @@ bool makeSlot( Slot & s, int w, int h, std::string & why )
 	return exportSem( s.glDone, s.glDoneGl, why ) && exportSem( s.vkDone, s.vkDoneGl, why );
 }
 
+// lane VKAIR9: a gate-only red (tests/vkframe/slice3d.cpp), never set by the app: 3D images made without 2D_ARRAY_COMPATIBLE
+int & sharedSliceRed()
+{
+	static int r = 0;
+	return r;
+}
+
 /* round 10: one image the present device makes and GL imports (the view's colour or depth / stencil), GENERAL on both
  * sides; samples 1 = a plain 2D texture. The route's other shared targets (the LUT, TAA's history and vectors, the
  * overlay) take the same steps: this is the one place they are written. Lane VKSHARE1: type 3D (d deep) or a 2D array
  * (layers), single-sample, GL_TEXTURE_3D / GL_TEXTURE_2D_ARRAY through glTexStorageMem3DEXT; one mip level always. */
 bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj, VkFormat fmt, GLenum glFmt, int samples, int w,
 	int h, bool depth, double & mb, std::string & why, VkImageType type = VK_IMAGE_TYPE_2D, int d = 1, int layers = 1, int levels = 1,
-	bool cube = false )  // lane VKOBJ4: a cube array (layers = 6 per cube; GL_TEXTURE_CUBE_MAP_ARRAY), the lamps' shadow cubes
+	bool cube = false,  // lane VKOBJ4: a cube array (layers = 6 per cube; GL_TEXTURE_CUBE_MAP_ARRAY), the lamps' shadow cubes
+	bool * slices = nullptr )  // lane VKAIR9: out, a 3D colour image whose slices take 2D views (render targets)
 {
 	levels = ( samples == 1 && !depth ) ? std::max( levels, 1 ) : 1;  // lanes VKLIGHT1 / VKAIR1: a mipped 2D, 2D array or 3D input
 	Vk & v = vk();
@@ -1380,7 +1398,12 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 		why = "a cube array is square, 2D and six layers a cube";
 		return false;
 	}
-	const VkImageCreateFlags flags = cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0;
+	VkImageCreateFlags flags = cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0;
+	// lane VKAIR9: a 3D colour image is 2D_ARRAY_COMPATIBLE, so one slice can be a colour attachment (GL's
+	// glFramebufferTextureLayer on a 3D texture: the air inject and its history strata); dropped only when the device
+	// refuses the format with it (then the slices are sampled / copied only)
+	if ( is3d && !depth && !sharedSliceRed() )
+		flags |= VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT;
 	VkImageFormatProperties ip {};
 	auto offered = [&]() {
 		return v.vkGetPhysicalDeviceImageFormatProperties( v.phys, fmt, type, VK_IMAGE_TILING_OPTIMAL, usage, flags, &ip ) == VK_SUCCESS
@@ -1391,6 +1414,16 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 	if ( !ok && ( usage & VK_IMAGE_USAGE_STORAGE_BIT ) ) {  // a format without storage (R8 / RG16F on some devices): sampled only
 		usage &= ~VkImageUsageFlags( VK_IMAGE_USAGE_STORAGE_BIT );
 		ok = offered();
+		if ( !ok )
+			usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+	}
+	if ( !ok && ( flags & VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT ) ) {  // lane VKAIR9: the old 3D image (no slice views)
+		flags &= ~VkImageCreateFlags( VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT );
+		ok = offered();
+		if ( !ok && ( usage & VK_IMAGE_USAGE_STORAGE_BIT ) ) {
+			usage &= ~VkImageUsageFlags( VK_IMAGE_USAGE_STORAGE_BIT );
+			ok = offered();
+		}
 	}
 	if ( !ok ) {
 		why = std::string( depth ? "depth / stencil" : "colour" ) + " format " + std::to_string( int( fmt ) ) + " at " + std::to_string( samples )
@@ -1502,6 +1535,8 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 			+ ", the storage " + std::to_string( errStorage ) + "; " + std::to_string( r.size ) + " bytes)";
 		return false;
 	}
+	if ( slices )
+		*slices = ( flags & VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT ) != 0;
 	return true;
 }
 
@@ -1526,6 +1561,7 @@ struct Shared
 	VkFormat fmt = VK_FORMAT_UNDEFINED;
 	double mb = 0.0;
 	bool borrowed = false;  // lane VKOBJ4 open item 3: another owner's images (the tone frame), found by key, never freed here
+	bool slices = false;  // lane VKAIR9: a 3D colour target made 2D_ARRAY_COMPATIBLE (sliceView works)
 };
 
 std::map<std::uintptr_t, Shared> & shareds()
@@ -1596,6 +1632,36 @@ const Shared * sharedFind( std::uintptr_t key )
 {
 	auto it = shareds().find( key );
 	return it != shareds().end() && it->second.glCtx == gl().ctx ? &it->second : nullptr;
+}
+
+/* lane VKAIR9: a 2D colour view of slice z of a 3D shared target (level 0), a render pass attachment as GL's
+ * glFramebufferTextureLayer( 3D, z ); the caller destroys it. Refused unless the image was made 2D_ARRAY_COMPATIBLE. */
+VkImageView sliceView( const Shared & s, int z, std::string & why )
+{
+	if ( s.type != 1 || !s.img ) {
+		why = "a slice view of a shared target that is not 3D";
+		return VK_NULL_HANDLE;
+	}
+	if ( !s.slices ) {
+		why = "the 3D shared target was made without 2D_ARRAY_COMPATIBLE (no slice view)";
+		return VK_NULL_HANDLE;
+	}
+	if ( z < 0 || z >= s.d ) {
+		why = "slice " + std::to_string( z ) + " of a 3D shared target " + std::to_string( s.d ) + " deep";
+		return VK_NULL_HANDLE;
+	}
+	Vk & v = vk();
+	VkImageViewCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+	ci.image = s.img;
+	ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	ci.format = s.fmt;
+	ci.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, std::uint32_t( z ), 1 };
+	VkImageView out = VK_NULL_HANDLE;
+	if ( v.vkCreateImageView( v.dev, &ci, nullptr, &out ) != VK_SUCCESS ) {
+		why = "vkCreateImageView (a 3D slice) failed";
+		return VK_NULL_HANDLE;
+	}
+	return out;
 }
 
 void dropView( bool glAlive )
@@ -3901,6 +3967,7 @@ void shutdown()
 	underDrop();  // lane VKWATER4 (L7): the underwater draw's framebuffer, depth view and host buffer
 	objVelDrop();  // lane VKOBJ12: the TAA inputs' step 3 framebuffer and host buffers
 	camVelDrop();  // lane VKOBJ18: the TAA inputs' step 2 framebuffer and host buffers
+	flyBakeDrop();  // lane VKCLOUD5: the fly bake's slice views and framebuffers
 }
 
 bool viewBegin( int w, int h, int samples, GlProc gp, std::string & why )
@@ -4140,7 +4207,7 @@ bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned g
 	const VkImageType vt = type == 1 ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
 	const int layers = type >= 2 ? d : 1;  // lane VKOBJ4: type 3 = a cube array of d layers, 6 a cube (farTwin's count)
 	if ( !makeShared( s.img, s.mem, s.tex, s.obj, fmt, GLenum( glFmt ), samples, w, h, depth, s.mb, why, vt, type == 1 ? d : 1, layers, levels,
-			type == 3 ) ) {
+			type == 3, &s.slices ) ) {
 		sharedFree( s, true );
 		return fail( why );
 	}
@@ -5636,8 +5703,8 @@ SkyStat takeSkyStat()
 // one crossing a pass on the present worker. Inputs GL owns go over as shared twins (a level each, glCopyImageSubData).
 namespace
 {
-enum FxProgId { kFxVolsky, kFxMarch, kFxMarchA, kFxResolve, kFxResolveA, kFxProgs };
-constexpr int kFxMaxTex = 8;
+enum FxProgId { kFxVolsky, kFxMarch, kFxMarchA, kFxResolve, kFxResolveA, kFxFly, kFxFlyA, kFxProgs };
+constexpr int kFxMaxTex = WwVkPresent::kFlyTex;
 constexpr VkDeviceSize kFxLooseAt = 512;  // b31 past b0 (336), on any minUniformBufferOffsetAlignment up to 256
 
 struct FxProg
@@ -5678,7 +5745,7 @@ struct Fx
 	VkFence fence = VK_NULL_HANDLE;
 	bool pending = false;
 	// this run's job, written by the drawing thread before the hand
-	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1), 3 the far cards (lane VKFAR2), 4 the water draw (lane VKWATER3), 6 the fog bloom (lane VKFAR2), 8 rain / snow (lane VKFAR2), 9 the far ground (lane VKFAR3), 10 the underwater fog (lane VKWATER4), 11 the TAA mask's reactive pass (lane VKFAR7), 12 the cloud shadow map (lane VKCLOUD3), 13 the cloud map (lane VKCLOUD4), 14 the farthest depth (lane VKSMALL2), 15 the shading rate images (lane VKSMALL3), 16 the soft-effect layer (lane VKSMALL5), 17 the lightning strips' preview (lane VKOBJ15)
+	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1), 3 the far cards (lane VKFAR2), 4 the water draw (lane VKWATER3), 6 the fog bloom (lane VKFAR2), 8 rain / snow (lane VKFAR2), 9 the far ground (lane VKFAR3), 10 the underwater fog (lane VKWATER4), 11 the TAA mask's reactive pass (lane VKFAR7), 12 the cloud shadow map (lane VKCLOUD3), 13 the cloud map (lane VKCLOUD4), 14 the farthest depth (lane VKSMALL2), 15 the shading rate images (lane VKSMALL3), 16 the soft-effect layer (lane VKSMALL5), 17 the lightning strips' preview (lane VKOBJ15), 19 the fly box's bake (lane VKCLOUD5)
 	VkFramebuffer fbAir = VK_NULL_HANDLE, fbM = VK_NULL_HANDLE, fbR = VK_NULL_HANDLE;
 	int w = 0, h = 0, vp[4] = {}, stencilRef = 1, march = kFxMarch, resolve = kFxResolve, mw = 0, mh = 0, hw = 0, hh = 0;
 	bool blend = false, skipMarch = false;
@@ -5750,6 +5817,14 @@ bool fxStatic( std::string & why )
 	F.prog[kFxResolveA].bytes = sizeof( vkframe_cloud_resolve_a_view_ps_spv );
 	F.prog[kFxResolveA].ntex = 4;
 	F.prog[kFxResolveA].looseBytes = WwVkPresent::kT_resolve_aBytes;
+	F.prog[kFxFly].code = vkframe_cloud_fly_view_ps_spv;
+	F.prog[kFxFly].bytes = sizeof( vkframe_cloud_fly_view_ps_spv );
+	F.prog[kFxFly].ntex = WwVkPresent::kFlyTex;
+	F.prog[kFxFly].looseBytes = WwVkPresent::kT_flyBytes;
+	F.prog[kFxFlyA].code = vkframe_cloud_fly_a_view_ps_spv;
+	F.prog[kFxFlyA].bytes = sizeof( vkframe_cloud_fly_a_view_ps_spv );
+	F.prog[kFxFlyA].ntex = WwVkPresent::kFlyTex;
+	F.prog[kFxFlyA].looseBytes = WwVkPresent::kT_fly_aBytes;
 	if ( !fxModule( vkframe_tone_view_vs_spv, sizeof( vkframe_tone_view_vs_spv ), F.vs ) ) {
 		why = "the air / clouds' vertex module failed";
 		return false;
@@ -6052,7 +6127,7 @@ bool fxPasses( int samples, std::string & why )
 			why = "vkCreateRenderPass (the clouds) failed";
 			return false;
 		}
-		for ( int k = kFxMarch; k <= kFxResolveA; k++ )
+		for ( int k = kFxMarch; k < kFxProgs; k++ )
 			if ( !fxPipe( F.prog[k], F.cloudPass, 1, 2, false, false, F.prog[k].pipe[0], why ) )
 				return false;
 		built = true;
@@ -6173,6 +6248,11 @@ bool fxWork( std::string & why )
 		}
 	} else if ( F.kind == 17 ) {  // lane VKOBJ15: the lightning strips' preview
 		if ( !boltRecord( why ) ) {
+			v.vkEndCommandBuffer( F.cmd );
+			return false;
+		}
+	} else if ( F.kind == 19 ) {  // lane VKCLOUD5: the fly box's bake, one render pass a slice
+		if ( !flyBakeRecord( why ) ) {
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
 		}
@@ -6444,6 +6524,8 @@ bool fxBegin( int which, bool & broken, std::string & why )
 	}
 	return true;
 }
+
+std::uintptr_t farSharedOf( unsigned tex );  // vkfardots.inc (lane VKCLOUD8: cloudRun reads shared inputs in place)
 }  // namespace
 
 namespace WwVkPresent
@@ -6554,7 +6636,7 @@ bool cloudRun( const CloudRun & t, std::string & why )
 	bool broken = false;
 	if ( !fxBegin( 1, broken, w ) )
 		return broken ? breakOff( w ) : refuse( w );
-	const int mp = t.accum ? kFxMarchA : kFxMarch, rp = t.accum ? kFxResolveA : kFxResolve;
+	const int mp = t.fly ? ( t.accum ? kFxFlyA : kFxFly ) : t.accum ? kFxMarchA : kFxMarch, rp = t.accum ? kFxResolveA : kFxResolve;
 	FxProg & M = F.prog[mp];
 	FxProg & R = F.prog[rp];
 	FxNames names;
@@ -6565,13 +6647,32 @@ bool cloudRun( const CloudRun & t, std::string & why )
 		VkImageView views[kFxMaxTex] = {};
 		int smp[kFxMaxTex] = {};
 		for ( int k = 0; k < M.ntex; k++ ) {
-			if ( !fxSlot( t.tex[k], views[k], names, S.copies, w ) )
+			// lane VKCLOUD8: a GL name that IS a shared target of this context (the fly's cfSdf = cloudfly's vol[pub]) is read
+			// where it is, as precip / fog bloom / clouds front do; another shape keeps the copy
+			FxTex x = t.tex[k];
+			if ( !x.shared && x.tex && !( t.red & 32 ) ) {
+				const std::uintptr_t sk = farSharedOf( x.tex );
+				const Shared * s = sk ? sharedFind( sk ) : nullptr;
+				if ( s && s->type == x.type && s->samples == 1 && s->levels == std::max( x.levels, 1 ) )
+					x.shared = sk;
+			}
+			if ( !fxSlot( x, views[k], names, S.copies, w ) )
 				return refuse( "the march's input t" + std::to_string( k ) + ": " + w );
-			smp[k] = t.tex[k].sampler;
+			smp[k] = x.sampler;
+			if ( x.shared ) {  // lane VKCLOUD10: which inputs were read in place (the "vk clouds:" line names them)
+				const int s0 = t.fly ? 0 : 1, mapAt = t.fly ? 2 : 0;
+				S.inPlace |= k == s0 ? kInShape : k == s0 + 1 ? kInDetail : k == mapAt ? kInMap
+					: t.fly && k == WwVkPresent::kFlyTex - 1 ? kInField : 0u;
+			}
 		}
+		const int sh = t.fly ? 0 : 1;  // cvShape's slot (the fly: shape detail map ..., the march: map shape detail ...)
 		if ( t.red & 2 ) {  // red: the shape and the detail swapped
-			std::swap( views[1], views[2] );
-			std::swap( smp[1], smp[2] );
+			std::swap( views[sh], views[sh + 1] );
+			std::swap( smp[sh], smp[sh + 1] );
+		}
+		if ( t.fly && ( t.red & 8 ) ) {  // red (lane VKCLOUD2): the box's distance field and the shape noise swapped
+			std::swap( views[0], views[WwVkPresent::kFlyTex - 1] );
+			std::swap( smp[0], smp[WwVkPresent::kFlyTex - 1] );
 		}
 		const VkImageView att[2] = { mc->view, md->view };
 		if ( !fxFb( F.fbM, F.cloudPass, att, 2, mc->w, mc->h ) )
@@ -6635,6 +6736,7 @@ FxStat takeCloudStat()
 #include "features/vkframe/vkfarcardsdraw.inc"  // lane VKFAR2: the far cards drawn on the view
 #include "features/vkframe/vkfogbloom.inc"  // lane VKFAR2 (row P4b): the fog bloom's own pass
 #include "features/vkframe/vkcloudfront.inc"  // lane VKFAR2 (row P8): the clouds in front of the scene
+#include "features/vkframe/vkcloudflybake.inc"  // lane VKCLOUD5: the fly-through box's bake
 #include "features/vkframe/vkprecip.inc"  // lane VKFAR2 (row L8 slice 1): rain / snow on the view
 
 // lane VKLIGHT1: AO, the contact shadow lines and the SSGI cast as compute on the present device (vkpresent.h LightRun)
@@ -7954,6 +8056,8 @@ struct CsmPlace
 	std::uint64_t gen = 0;
 	std::uint32_t firstIndex = 0, verts = 0, indices = 0;
 	std::int32_t baseVertex = 0;
+	bool uv = false;  // lane VKSHADOW8: its uvs copied into muv
+	bool wind = false;  // lane VKSHADOW10: its wind weights copied into mwind
 };
 struct Csm
 {
@@ -7992,8 +8096,27 @@ struct Csm
 	VkImageView rmView = VK_NULL_HANDLE;
 	std::uint64_t rmGen = 0;
 	bool rmRed = false;
+	// lane VKSHADOW8: the alpha-tested casters (csm_at_view_vs / _ps): the uvs beside mpos (8 bytes a vertex at the same
+	// base vertex), their pipelines (0 culled, 1 two-sided; the map + its sampler, push 64 vertex + 24 fragment bytes) and
+	// kCsmAtSets sets made once, one a distinct map a run (written each run: the last run is done); dSet = per draw (none: solid)
+	CsmBuf muv;
+	VkDescriptorSetLayout atDsl = VK_NULL_HANDLE;
+	VkPipelineLayout atLayout = VK_NULL_HANDLE;
+	VkShaderModule atVs = VK_NULL_HANDLE, atPs = VK_NULL_HANDLE;
+	VkPipeline atPipe[2] = { VK_NULL_HANDLE, VK_NULL_HANDLE };
+	VkDescriptorPool atPool = VK_NULL_HANDLE;
+	std::vector<VkDescriptorSet> atSets, dSet;
+	// lane VKSHADOW10: the swaying casters (csm_sway_view_vs, no fragment stage): the wind weights beside mpos (4 bytes a
+	// vertex at the same base vertex, binding 3) and their pipelines (0 culled, 1 two-sided; push kCsmSwayPush vertex bytes)
+	CsmBuf mwind;
+	VkPipelineLayout swLayout = VK_NULL_HANDLE;
+	VkShaderModule swVs = VK_NULL_HANDLE;
+	VkPipeline swPipe[2] = { VK_NULL_HANDLE, VK_NULL_HANDLE };
 };
 constexpr std::uint32_t kCsmCmdBytes = 20;
+constexpr std::uint32_t kCsmAtPush = 24;   // lane VKSHADOW8: uvScale, uvOffset, alpha, alphaThreshold (after the 64-byte clip)
+constexpr std::uint32_t kCsmAtSets = 256;  // lane VKSHADOW8: distinct alpha maps a run
+constexpr std::uint32_t kCsmSwayPush = 128;  // lane VKSHADOW10: clip, viewMatrix columns + block centre, block w / amp / time
 constexpr std::uint32_t kCsmRemapPush = 28;  // lane VKSHADOW6: layer, srcX, srcY, srcW, srcH, zScale, zBias  // GpuDriven::DrawCmd = VkDrawIndexedIndirectCommand
 
 Csm & csmS()
@@ -8166,7 +8289,112 @@ bool csmStatic( std::string & why )
 			return false;
 		}
 	}
-	S.pipelines = 3;
+	// lane VKSHADOW8: the alpha-tested casters (csm_at_view_vs / _ps, lookdev_csmdepth_at's twin): the casters' state plus
+	// the uvs (binding 2, location 5) and the alpha test; the map and its sampler at set 0 bindings 0 / 1
+	{
+		const VkDescriptorSetLayoutBinding ab[2] = { { 0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr },
+			{ 1, VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr } };
+		VkDescriptorSetLayoutCreateInfo dci { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+		dci.bindingCount = 2;
+		dci.pBindings = ab;
+		const VkPushConstantRange apr[2] = { { VK_SHADER_STAGE_VERTEX_BIT, 0, 64 }, { VK_SHADER_STAGE_FRAGMENT_BIT, 64, kCsmAtPush } };
+		VkShaderModuleCreateInfo avm { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO }, apm { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+		avm.codeSize = sizeof( vkframe_csm_at_view_vs_spv );
+		avm.pCode = vkframe_csm_at_view_vs_spv;
+		apm.codeSize = sizeof( vkframe_csm_at_view_ps_spv );
+		apm.pCode = vkframe_csm_at_view_ps_spv;
+		const VkDescriptorPoolSize aps[2] = { { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, kCsmAtSets }, { VK_DESCRIPTOR_TYPE_SAMPLER, kCsmAtSets } };
+		VkDescriptorPoolCreateInfo adp { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+		adp.maxSets = kCsmAtSets;
+		adp.poolSizeCount = 2;
+		adp.pPoolSizes = aps;
+		if ( v.vkCreateDescriptorSetLayout( v.dev, &dci, nullptr, &S.atDsl ) != VK_SUCCESS
+			|| v.vkCreateShaderModule( v.dev, &avm, nullptr, &S.atVs ) != VK_SUCCESS
+			|| v.vkCreateShaderModule( v.dev, &apm, nullptr, &S.atPs ) != VK_SUCCESS
+			|| v.vkCreateDescriptorPool( v.dev, &adp, nullptr, &S.atPool ) != VK_SUCCESS ) {
+			why = "the cascades' alpha set layout / shader modules / descriptor pool failed";
+			return false;
+		}
+		VkPipelineLayoutCreateInfo al { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+		al.setLayoutCount = 1;
+		al.pSetLayouts = &S.atDsl;
+		al.pushConstantRangeCount = 2;
+		al.pPushConstantRanges = apr;
+		const std::vector<VkDescriptorSetLayout> sl( kCsmAtSets, S.atDsl );
+		VkDescriptorSetAllocateInfo aai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+		aai.descriptorPool = S.atPool;
+		aai.descriptorSetCount = kCsmAtSets;
+		aai.pSetLayouts = sl.data();
+		S.atSets.assign( kCsmAtSets, VK_NULL_HANDLE );
+		if ( v.vkCreatePipelineLayout( v.dev, &al, nullptr, &S.atLayout ) != VK_SUCCESS
+			|| v.vkAllocateDescriptorSets( v.dev, &aai, S.atSets.data() ) != VK_SUCCESS ) {
+			why = "the cascades' alpha pipeline layout / descriptor sets failed";
+			return false;
+		}
+		VkPipelineShaderStageCreateInfo ast[2] = { st, st };
+		ast[0].module = S.atVs;
+		ast[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+		ast[1].module = S.atPs;
+		const VkVertexInputBindingDescription avb[3] = { vb[0], vb[1], { 2, 8, VK_VERTEX_INPUT_RATE_VERTEX } };
+		const VkVertexInputAttributeDescription ava[6] = { va[0], va[1], va[2], va[3], va[4], { 5, 2, VK_FORMAT_R32G32_SFLOAT, 0 } };
+		VkPipelineVertexInputStateCreateInfo avi { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+		avi.vertexBindingDescriptionCount = 3;
+		avi.pVertexBindingDescriptions = avb;
+		avi.vertexAttributeDescriptionCount = 6;
+		avi.pVertexAttributeDescriptions = ava;
+		rs.depthBiasEnable = VK_TRUE;  // the remap above turned bias off and its compare may be the red's
+		ds.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+		gp.stageCount = 2;
+		gp.pStages = ast;
+		gp.pVertexInputState = &avi;
+		gp.layout = S.atLayout;
+		for ( int k = 0; k < 2; k++ ) {
+			rs.cullMode = k ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
+			if ( v.vkCreateGraphicsPipelines( v.dev, tone().cache, 1, &gp, nullptr, &S.atPipe[k] ) != VK_SUCCESS ) {
+				why = std::string( "vkCreateGraphicsPipelines (the cascades' alpha test, " ) + ( k ? "two-sided" : "culled" ) + ") failed";
+				return false;
+			}
+		}
+	}
+	// lane VKSHADOW10: the swaying casters (csm_sway_view_vs, lookdev_csmdepth.vert's far wind): the casters' state plus the
+	// wind weights (binding 3, location 5), vertex stage only like the solid pipelines
+	{
+		const VkPushConstantRange spr { VK_SHADER_STAGE_VERTEX_BIT, 0, kCsmSwayPush };
+		VkShaderModuleCreateInfo svm { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+		svm.codeSize = sizeof( vkframe_csm_sway_view_vs_spv );
+		svm.pCode = vkframe_csm_sway_view_vs_spv;
+		VkPipelineLayoutCreateInfo sl { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+		sl.pushConstantRangeCount = 1;
+		sl.pPushConstantRanges = &spr;
+		if ( v.vkCreateShaderModule( v.dev, &svm, nullptr, &S.swVs ) != VK_SUCCESS
+			|| v.vkCreatePipelineLayout( v.dev, &sl, nullptr, &S.swLayout ) != VK_SUCCESS ) {
+			why = "the cascades' sway shader module / pipeline layout failed";
+			return false;
+		}
+		VkPipelineShaderStageCreateInfo sst = st;
+		sst.module = S.swVs;
+		const VkVertexInputBindingDescription svb[3] = { vb[0], vb[1], { 3, 4, VK_VERTEX_INPUT_RATE_VERTEX } };
+		const VkVertexInputAttributeDescription sva[6] = { va[0], va[1], va[2], va[3], va[4], { 5, 3, VK_FORMAT_R32_SFLOAT, 0 } };
+		VkPipelineVertexInputStateCreateInfo svi { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+		svi.vertexBindingDescriptionCount = 3;
+		svi.pVertexBindingDescriptions = svb;
+		svi.vertexAttributeDescriptionCount = 6;
+		svi.pVertexAttributeDescriptions = sva;
+		rs.depthBiasEnable = VK_TRUE;
+		ds.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+		gp.stageCount = 1;
+		gp.pStages = &sst;
+		gp.pVertexInputState = &svi;
+		gp.layout = S.swLayout;
+		for ( int k = 0; k < 2; k++ ) {
+			rs.cullMode = k ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
+			if ( v.vkCreateGraphicsPipelines( v.dev, tone().cache, 1, &gp, nullptr, &S.swPipe[k] ) != VK_SUCCESS ) {
+				why = std::string( "vkCreateGraphicsPipelines (the cascades' sway, " ) + ( k ? "two-sided" : "culled" ) + ") failed";
+				return false;
+			}
+		}
+	}
+	S.pipelines = 7;
 	S.buildMs = nowMs() - t0;
 	toneCacheSave();
 	S.made = true;
@@ -8388,6 +8616,12 @@ bool csmPool( const WwVkPresent::CsmRun & t, int red, std::string & why )
 		return red == 1;
 	};
 	std::uint64_t liveV = 0, liveI = 0, missV = 0, missI = 0;
+	// lane VKSHADOW10: the wind weight (a vec4 colour's alpha) of each vertex into mwind at the mesh's base vertex
+	auto putWind = [&S]( std::int32_t baseVertex, const WwVkPresent::CsmMesh & me ) {
+		float * o = static_cast<float *>( S.mwind.ptr ) + std::size_t( baseVertex );
+		for ( std::uint32_t i = 0; i < me.verts; i++ )
+			o[i] = me.wind[4 * std::size_t( i ) + 3];
+	};
 	for ( std::size_t m = 0; m < t.nMeshes; m++ ) {
 		if ( !used[m] )
 			continue;
@@ -8399,7 +8633,7 @@ bool csmPool( const WwVkPresent::CsmRun & t, int red, std::string & why )
 			missI += me.indices;
 		}
 	}
-	if ( !S.mpos.buf || !S.midx.buf || S.posUsed + missV > S.mpos.cap / 12 || S.idxUsed + missI > S.midx.cap / 2 ) {
+	if ( !S.mpos.buf || !S.midx.buf || !S.muv.buf || !S.mwind.buf || S.posUsed + missV > S.mpos.cap / 12 || S.idxUsed + missI > S.midx.cap / 2 ) {
 		S.st.repacks++;
 		if ( red != 2 ) {
 			S.pool.clear();
@@ -8407,7 +8641,9 @@ bool csmPool( const WwVkPresent::CsmRun & t, int red, std::string & why )
 		}
 		const std::uint64_t needV = 2 * ( red == 2 ? S.posUsed + missV : liveV ), needI = 2 * ( red == 2 ? S.idxUsed + missI : liveI );
 		if ( !csmBuf( S.mpos, VkDeviceSize( needV ) * 12, false, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, why, "the cascades' mesh positions" )
-			|| !csmBuf( S.midx, VkDeviceSize( needI ) * 2, false, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, why, "the cascades' mesh indices" ) ) {
+			|| !csmBuf( S.midx, VkDeviceSize( needI ) * 2, false, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, why, "the cascades' mesh indices" )
+			|| !csmBuf( S.muv, VkDeviceSize( needV ) * 8, false, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, why, "the cascades' mesh uvs" )
+			|| !csmBuf( S.mwind, VkDeviceSize( needV ) * 4, false, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, why, "the cascades' mesh wind" ) ) {
 			S.pool.clear();
 			S.posUsed = S.idxUsed = 0;
 			return false;
@@ -8419,6 +8655,15 @@ bool csmPool( const WwVkPresent::CsmRun & t, int red, std::string & why )
 		const WwVkPresent::CsmMesh & me = t.meshes[m];
 		if ( kept( me, false ) ) {
 			S.st.hits++;
+			CsmPlace & kp = S.pool[me.key];  // lane VKSHADOW8: a kept mesh an alpha-tested draw now wants the uvs of
+			if ( me.uv && !kp.uv ) {
+				std::memcpy( static_cast<char *>( S.muv.ptr ) + std::size_t( kp.baseVertex ) * 8, me.uv, std::size_t( me.verts ) * 8 );
+				kp.uv = true;
+			}
+			if ( me.wind && !kp.wind ) {  // lane VKSHADOW10: a kept mesh a sway draw now wants the wind weights of
+				putWind( kp.baseVertex, me );
+				kp.wind = true;
+			}
 			continue;
 		}
 		CsmPlace p;
@@ -8431,6 +8676,12 @@ bool csmPool( const WwVkPresent::CsmRun & t, int red, std::string & why )
 		std::memcpy( static_cast<char *>( S.midx.ptr ) + std::size_t( S.idxUsed ) * 2, me.idx, std::size_t( me.indices ) * 2 );
 		S.posUsed += me.verts;
 		S.idxUsed += me.indices;
+		p.uv = me.uv != nullptr;  // lane VKSHADOW8: the uvs at the same base vertex
+		if ( p.uv )
+			std::memcpy( static_cast<char *>( S.muv.ptr ) + std::size_t( p.baseVertex ) * 8, me.uv, std::size_t( me.verts ) * 8 );
+		p.wind = me.wind != nullptr;  // lane VKSHADOW10: the colours' alpha at the same base vertex
+		if ( p.wind )
+			putWind( p.baseVertex, me );
 		S.pool[me.key] = p;
 		S.st.copies++;
 		S.st.copyKb += double( std::size_t( me.verts ) * 12 + std::size_t( me.indices ) * 2 ) / 1024.0;
@@ -8447,8 +8698,8 @@ bool csmWork( std::string & why )
 	VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	v.vkBeginCommandBuffer( S.cmd, &bi );
-	const VkBuffer vbs[2] = { S.pos.buf, S.mats.buf }, mvbs[2] = { S.mpos.buf, S.mats.buf };
-	const VkDeviceSize vbo[2] = { 0, 0 };
+	const VkBuffer vbs[2] = { S.pos.buf, S.mats.buf }, mvbs[4] = { S.mpos.buf, S.mats.buf, S.muv.buf, S.mwind.buf };  // VKSHADOW8: 2 = uvs, VKSHADOW10: 3 = wind
+	const VkDeviceSize vbo[4] = { 0, 0, 0, 0 };
 	for ( std::size_t f = 0; f < S.fbs.size(); f++ ) {
 		const CsmFb & F = S.fbs[f];
 		bool any = false;
@@ -8461,6 +8712,7 @@ bool csmWork( std::string & why )
 		rbi.framebuffer = F.fb;
 		rbi.renderArea = { { 0, 0 }, { std::uint32_t( F.w ), std::uint32_t( F.h ) } };
 		v.vkCmdBeginRenderPass( S.cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE );
+		VkDescriptorSet boundSet = VK_NULL_HANDLE;  // lane VKSHADOW8: the alpha-tested draws' map set bound
 		int bound = -1, form = -1;  // form: 0 the queue's pool, 1 the mesh pool (lane VKSHADOW4), the same pipelines
 		for ( std::size_t k = 0; k < S.d.size(); k++ ) {
 			if ( S.dFb[k] != int( f ) )
@@ -8485,13 +8737,18 @@ bool csmWork( std::string & why )
 				v.vkCmdDraw( S.cmd, 3, 1, 0, 0 );
 				continue;
 			}
-			const int p = D.cull ? 0 : 1;
+			// lane VKSHADOW8: an alpha-tested draw (its map's set) takes pipelines 3 / 4 (2 is the remap)
+			const VkDescriptorSet set = S.dSet[k];
+			const int p = ( D.cull ? 0 : 1 ) + ( set ? 3 : D.sway ? 5 : 0 );  // lane VKSHADOW10: a sway draw takes 5 / 6
 			if ( p != bound )
-				v.vkCmdBindPipeline( S.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, S.pipe[p] );
+				v.vkCmdBindPipeline( S.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, set ? S.atPipe[p - 3] : D.sway ? S.swPipe[p - 5] : S.pipe[p] );
+			if ( set && ( set != boundSet || p != bound ) )
+				v.vkCmdBindDescriptorSets( S.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, S.atLayout, 0, 1, &set, 0, nullptr );
+			boundSet = set;
 			bound = p;
 			if ( int( D.mesh ) != form ) {
 				form = int( D.mesh );
-				v.vkCmdBindVertexBuffers( S.cmd, 0, 2, D.mesh ? mvbs : vbs, vbo );
+				v.vkCmdBindVertexBuffers( S.cmd, 0, D.mesh ? 4 : 2, D.mesh ? mvbs : vbs, vbo );
 				v.vkCmdBindIndexBuffer( S.cmd, D.mesh ? S.midx.buf : S.idx.buf, 0, VK_INDEX_TYPE_UINT16 );
 			}
 			const VkViewport vp { 0.0f, 0.0f, float( D.vw ), float( D.vh ), 0.0f, 1.0f };
@@ -8504,7 +8761,25 @@ bool csmWork( std::string & why )
 			v.vkCmdSetViewport( S.cmd, 0, 1, &vp );
 			v.vkCmdSetScissor( S.cmd, 0, 1, &sc );
 			v.vkCmdSetDepthBias( S.cmd, D.unit, D.clamp, D.slope );  // glPolygonOffset( slope, unit ): the same D16 law
-			v.vkCmdPushConstants( S.cmd, S.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, D.clip );
+			if ( D.sway ) {  // lane VKSHADOW10: clip, viewMatrix's columns with the block centre in .w, block w / amp / time
+				float sp[32] = {};
+				std::memcpy( sp, D.clip, 64 );
+				for ( int c = 0; c < 3; c++ ) {
+					for ( int r = 0; r < 3; r++ )
+						sp[16 + 4 * c + r] = D.swayView[3 * c + r];
+					sp[16 + 4 * c + 3] = D.swayBlock[c];
+				}
+				sp[28] = D.swayBlock[3];
+				sp[29] = D.swayAmp;
+				sp[30] = D.swayTime;
+				v.vkCmdPushConstants( S.cmd, S.swLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, kCsmSwayPush, sp );
+			} else {
+				v.vkCmdPushConstants( S.cmd, set ? S.atLayout : S.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, D.clip );
+			}
+			if ( set ) {
+				const float ap[6] = { D.uvScale[0], D.uvScale[1], D.uvOffset[0], D.uvOffset[1], D.atAlpha, D.atRef };
+				v.vkCmdPushConstants( S.cmd, S.atLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 64, kCsmAtPush, ap );
+			}
 			if ( D.mesh ) {
 				for ( std::uint32_t k = D.first; k < D.first + D.n; k++ ) {
 					const std::uint32_t * c = &S.mcmd[5 * std::size_t( k )];
@@ -8553,12 +8828,14 @@ void csmDrop()
 	S.pending = false;
 	csmFbsDrop();
 	S.fbGen = 0;
-	for ( CsmBuf * b : { &S.pos, &S.idx, &S.mats, &S.cmds, &S.mpos, &S.midx } )
+	for ( CsmBuf * b : { &S.pos, &S.idx, &S.mats, &S.cmds, &S.mpos, &S.midx, &S.muv, &S.mwind } )
 		csmBufFree( *b, gl().ok && b->glCtx == gl().ctx );
 	S.pool.clear();
 	S.posUsed = S.idxUsed = 0;
 	csmSemsDrop( gl().ok && S.semCtx == gl().ctx );
 }
+bool csmAtTex( unsigned name, VkImageView & view, VkSampler & smp, std::string & why );  // lane VKSHADOW8 (after vkflare.inc)
+bool csmAtTexCheck( unsigned name, std::string & why );  // lane VKSHADOW9 (after vkflare.inc)
 }  // namespace
 
 namespace WwVkPresent
@@ -8643,6 +8920,30 @@ bool csmRun( const CsmRun & t, std::string & why )
 	for ( int k = 0; k < 2; k++ )
 		if ( t.tex[k] && !sharedTargetIs( t.key[k], t.tex[k] ) )
 			return refuse( "a cascade target is not the shared one" );
+	// lane VKSHADOW8: an alpha-tested draw is a mesh draw, and every mesh it draws carries its uvs
+	bool alphas = false;
+	for ( const CsmDraw & D : t.d ) {
+		if ( !D.atTex )
+			continue;
+		alphas = true;
+		if ( !D.mesh || D.remap )
+			return refuse( "an alpha-tested draw that is not a mesh draw" );
+		for ( std::uint32_t k = D.first; k < D.first + D.n; k++ )
+			if ( !t.meshes[t.mdraws[4 * std::size_t( k )]].uv )
+				return refuse( "alpha uv: an alpha-tested draw's mesh has no uvs" );
+	}
+	// lane VKSHADOW10: a sway draw is a plain mesh draw (not alpha-tested), and every mesh it draws carries its wind weights
+	int nSway = 0;
+	for ( const CsmDraw & D : t.d ) {
+		if ( !D.sway )
+			continue;
+		nSway++;
+		if ( !D.mesh || D.remap || D.atTex )
+			return refuse( "a sway draw that is not a plain mesh draw" );
+		for ( std::uint32_t k = D.first; k < D.first + D.n; k++ )
+			if ( !t.meshes[t.mdraws[4 * std::size_t( k )]].wind )
+				return refuse( "sway wind: a sway draw's mesh has no wind weights" );
+	}
 	// the last run is done before its command buffer, buffers and framebuffers are touched again
 	if ( std::string fw; !fenceDone( S.fence, S.pending, "csm", fw ) )
 		return refuse( fw );
@@ -8660,6 +8961,46 @@ bool csmRun( const CsmRun & t, std::string & why )
 		S.dFb[k] = csmFb( t.key[t.d[k].target], t.d[k].layer, w );
 		if ( S.dFb[k] < 0 )
 			return breakOff( w );
+	}
+	// lane VKSHADOW8: the alpha-tested draws' maps: the twins made since the last flush on the device, then one set a
+	// distinct map (the last run is done: fenceDone above), the twin's view with GL's own sampler state
+	S.dSet.assign( t.d.size(), VK_NULL_HANDLE );
+	int nAlpha = 0, nAlphaTex = 0, nQAlpha = 0;
+	if ( alphas ) {
+		if ( !objTexFlush( w ) )
+			return refuse( "the alpha maps' twins: " + w );
+		std::map<unsigned, VkDescriptorSet> sets;
+		for ( std::size_t k = 0; k < t.d.size(); k++ ) {
+			const unsigned name = t.d[k].atTex;
+			if ( !name )
+				continue;
+			auto it = sets.find( name );
+			if ( it == sets.end() ) {
+				if ( sets.size() >= kCsmAtSets )
+					return refuse( "more than " + std::to_string( kCsmAtSets ) + " alpha maps in one run" );
+				VkImageView iv = VK_NULL_HANDLE;
+				VkSampler sm = VK_NULL_HANDLE;
+				if ( !csmAtTex( name, iv, sm, w ) )
+					return refuse( w );
+				const VkDescriptorSet set = S.atSets[sets.size()];
+				const VkDescriptorImageInfo ii[2] = { { VK_NULL_HANDLE, iv, VK_IMAGE_LAYOUT_GENERAL },
+					{ sm, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED } };
+				VkWriteDescriptorSet wr[2] = { { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET }, { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET } };
+				for ( int b = 0; b < 2; b++ ) {
+					wr[b].dstSet = set;
+					wr[b].dstBinding = std::uint32_t( b );
+					wr[b].descriptorCount = 1;
+					wr[b].descriptorType = b ? VK_DESCRIPTOR_TYPE_SAMPLER : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+					wr[b].pImageInfo = &ii[b];
+				}
+				v.vkUpdateDescriptorSets( v.dev, 2, wr, 0, nullptr );
+				it = sets.emplace( name, set ).first;
+			}
+			S.dSet[k] = it->second;
+			nAlpha++;
+			nQAlpha += t.d[k].queued ? 1 : 0;
+		}
+		nAlphaTex = int( sets.size() );
 	}
 	// lane VKSHADOW6: the remap's set names the scratch's view (the last run is done: fenceDone above)
 	if ( remaps && ( scr->view != S.rmView || S.rmGen != sharedGen() ) ) {
@@ -8761,9 +9102,18 @@ bool csmRun( const CsmRun & t, std::string & why )
 	S.st.requeues += requeues;
 	S.st.remaps += nRemap;
 	S.st.remapRed += S.rmRed ? nRemap : 0;
+	S.st.alphaDraws += nAlpha;
+	S.st.alphaTex += nAlphaTex;
+	S.st.swayDraws += nSway;
+	S.st.qAlphaDraws += nQAlpha;
 	S.st.cpuMs += ms;
 	S.st.maxMs = std::max( S.st.maxMs, ms );
 	return true;
+}
+
+bool csmAtTexOk( unsigned name, std::string & why )
+{
+	return csmAtTexCheck( name, why );
 }
 
 void csmOnGl( const char * why )
@@ -9249,6 +9599,67 @@ ObjStat takeObjStat()
 
 namespace
 {
+void * csmGlProc( const char * name )
+{
+	return reinterpret_cast<void *>( wglGetProcAddress( name ) );
+}
+
+// lane VKSHADOW8: an alpha-tested caster's map (CsmDraw::atTex): the texture cache's BC twin with GL's own sampler state,
+// resolved as the flare's sprite maps are (vkflare.inc flTex). Lane VKSHADOW9 (R1): anisotropy 1, as GL's alpha test
+// samples it (features/shadows/shadowatsampler.h); NV GL's anisotropic footprint is not Vulkan's (VKSHADOW8)
+bool csmAtTex( unsigned name, VkImageView & view, VkSampler & smp, std::string & why )
+{
+	view = VK_NULL_HANDLE;
+	smp = VK_NULL_HANDLE;
+	auto it = ot().twins.find( GLuint( name ) );
+	const Shared * s = it == ot().twins.end() ? nullptr : farTwinFind( it->second.key );
+	if ( !s || !s->view || s->type != 0 ) {
+		why = "an alpha caster's map " + std::to_string( name ) + " has no Vulkan twin (not block-compressed)";
+		return false;
+	}
+	WwVkPresent::BlSampler bs;
+	BlSmpKey k;
+	std::string w;
+	if ( !WwVkPresent::blSamplerRead( name, bs, csmGlProc, w ) ) {
+		why = "an alpha caster's map " + std::to_string( name ) + ": " + w;
+		return false;
+	}
+	if ( blIsSrgb( s->fmt ) && bs.srgbDecode == 0x8A4A ) {
+		why = "an alpha caster's map " + std::to_string( name ) + ": an sRGB map with its decode skipped";
+		return false;
+	}
+	bs.aniso = 1.0f;
+	blSwizzleNorm( s->fmt, bs );
+	if ( !blSamplerKey( bs, k, w ) || !( smp = sbSampler( k, w ) ) ) {
+		why = "an alpha caster's map " + std::to_string( name ) + ": " + w;
+		return false;
+	}
+	view = s->view;
+	return true;
+}
+// lane VKSHADOW9: csmAtTex's refusals without its sampler work, asked when the app records an alpha caster (a map no twin
+// takes keeps that caster on GL instead of refusing the whole run)
+bool csmAtTexCheck( unsigned name, std::string & why )
+{
+	auto it = ot().twins.find( GLuint( name ) );
+	const Shared * s = it == ot().twins.end() ? nullptr : farTwinFind( it->second.key );
+	if ( !s || !s->view || s->type != 0 ) {
+		why = "no Vulkan twin (not block-compressed)";
+		return false;
+	}
+	WwVkPresent::BlSampler bs;
+	if ( !WwVkPresent::blSamplerRead( name, bs, csmGlProc, why ) )
+		return false;
+	if ( blIsSrgb( s->fmt ) && bs.srgbDecode == 0x8A4A ) {
+		why = "an sRGB map with its decode skipped";
+		return false;
+	}
+	return true;
+}
+}  // namespace
+
+namespace
+{
 
 // the Vulkan half of slot k's frame: the fence of its last use, the next swapchain image, the flipped blit, present
 bool vkPart( int k, int w, int h, int vs, std::string & why, bool & rebuild, WwVkPresent::Split & sp )
@@ -9658,6 +10069,12 @@ void csmSay( bool wanted, const char * glWhy )
 		line += QStringLiteral( ", %1 refused to GL (last: %2)" ).arg( st.fails ).arg( QString::fromStdString( st.failWhy ) );
 	if ( st.remaps > 0 )  // lane VKSHADOW6: the cache's Scroll remaps drawn in the crossing
 		line += QStringLiteral( ", %1 cache remaps" ).arg( st.remaps );
+	if ( st.alphaDraws > 0 )  // lane VKSHADOW9: alpha-tested casters drawn in the crossing, their base maps
+		line += QStringLiteral( ", %1 alpha draws (%2 base maps)" ).arg( st.alphaDraws ).arg( st.alphaTex );
+	if ( st.swayDraws > 0 )  // lane VKSHADOW10: swaying casters drawn in the crossing
+		line += QStringLiteral( ", %1 sway draws" ).arg( st.swayDraws );
+	if ( st.qAlphaDraws > 0 )  // lane VKSHADOW11: alpha-tested casters from the QAlpha queue drawn in the crossing
+		line += QStringLiteral( ", %1 queued alpha draws" ).arg( st.qAlphaDraws );
 	line += pool;
 	said = line;
 	qInfo().noquote() << line;

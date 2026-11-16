@@ -458,6 +458,19 @@ struct CsmDraw
 	bool remap = false;
 	int src = 0, srcX = 0, srcY = 0, srcW = 0, srcH = 0;
 	float zScale = 1.0f, zBias = 0.0f;
+	/* lane VKSHADOW7: atTex != 0 (mesh draws only): alpha-tested (lookdev_csmdepth_at.frag), a fragment is discarded where
+	 * texture( atTex, uv * uvScale + uvOffset ).a * atAlpha < atRef. atTex = a texture cache BC twin's GL name (objTexMake),
+	 * sampled with the GL texture's own wrap and filters at anisotropy 1 (lane VKSHADOW9, ruling R1: GL's alpha test binds the
+	 * same through features/shadows/shadowatsampler.h); every mesh the draws use needs CsmMesh::uv */
+	unsigned atTex = 0;
+	float uvScale[2] = { 1.0f, 1.0f }, uvOffset[2] = { 0.0f, 0.0f }, atAlpha = 1.0f, atRef = 0.0f;
+	/* lane VKSHADOW10: sway (mesh draws only, not alpha-tested): lookdev_csmdepth.vert's far wind with lodTreeAnim 1
+	 * (csm_sway_view_vs.hlsl): farSwayAmp, this cascade's farSwayTime, farSwayBlock (view space centre, half size) and
+	 * globalUniforms.viewMatrix (GL column-major mat3); every mesh the draw uses needs CsmMesh::wind */
+	bool sway = false;
+	float swayAmp = 0.0f, swayTime = 0.0f, swayBlock[4] = {}, swayView[9] = {};
+	//! lane VKSHADOW11: an alpha-tested draw from the QAlpha queue (sunshadow.cpp atSpan through csmSpanMDraws; CsmStat::qAlphaDraws)
+	bool queued = false;
 };
 /* Lane VKSHADOW4 (item 3 part 1): a per-draw caster (sunshadow.cpp drawShape, the whole shape or its cullIdx ranges) as a
  * mesh csmRun keeps on the device while (key, gen) and its sizes match (vklamp.inc lampPool's law): key = the shape,
@@ -470,6 +483,8 @@ struct CsmMesh
 	std::uint32_t verts = 0;
 	const std::uint16_t * idx = nullptr;  //!< triangle list, mesh-local
 	std::uint32_t indices = 0;
+	const float * uv = nullptr;           //!< lane VKSHADOW7: vec2 per vertex (alpha-tested draws; gen covers it too)
+	const float * wind = nullptr;         //!< lane VKSHADOW10: vec4 colours per vertex, .a = the wind weight (sway draws; gen covers it)
 };
 struct CsmRun
 {
@@ -490,8 +505,22 @@ struct CsmRun
 	unsigned scratch = 0;           //!< lane VKSHADOW6: the remaps' source, a shared D16 array of `layers` layers (0: no remap draws)
 	std::uintptr_t scratchKey = 0;
 };
+/* lane VKSHADOW11: a QAlpha queue span (sunshadow.cpp atSpan: n 5-word commands from first, all of one pooled shape whose
+ * entry starts at index entryFirst) as mesh draws of that shape's CsmMesh. The pool holds the shape's triangles verbatim
+ * (cellqueue.cpp poolEnsure), so the mesh-local first index = the command's firstIndex - entryFirst; empty commands add nothing */
+inline void csmSpanMDraws( const std::uint32_t * cmds, std::size_t first, std::size_t n, std::uint32_t entryFirst, std::uint32_t mesh,
+	std::uint32_t matrix, std::vector<std::uint32_t> & out )
+{
+	for ( std::size_t k = first; k < first + n; k++ ) {
+		const std::uint32_t * c = cmds + k * 5;
+		if ( c[0] && c[2] >= entryFirst )
+			out.insert( out.end(), { mesh, matrix, c[2] - entryFirst, c[0] } );
+	}
+}
 //! GL current, its own cascade draws issued: the queued draws run on Vulkan into the shared targets. false: why (GL draws them)
 bool csmRun( const CsmRun & t, std::string & why );
+//! lane VKSHADOW9: csmRun would take this alpha map (a BC twin, not sRGB with its decode skipped); false: the caster stays on GL
+bool csmAtTexOk( unsigned name, std::string & why );
 void csmOnGl( const char * why );
 struct CsmStat
 {
@@ -507,6 +536,12 @@ struct CsmStat
 	int requeues = 0;
 	//! lane VKSHADOW6: remap draws run, and of those on the gates-only red pipeline (WW_VKCSM_REMAP_RED=1: GL_ALWAYS)
 	int remaps = 0, remapRed = 0;
+	//! lane VKSHADOW7: alpha-tested draws run, the distinct textures they bound in the run
+	int alphaDraws = 0, alphaTex = 0;
+	//! lane VKSHADOW10: sway draws run
+	int swayDraws = 0;
+	//! lane VKSHADOW11: of the alpha-tested draws, those from the QAlpha queue (CsmDraw::queued)
+	int qAlphaDraws = 0;
 	double copyKb = 0.0;
 };
 CsmStat takeCsmStat();
@@ -600,6 +635,58 @@ inline constexpr FxField kT_march_a[] = {
 	{ "atHazeAlbedo", 1136, 3, 1, 0, 0 }, { "atHazeSpec", 1152, 3, 1, 0, 0 }, { "atMsOld", 1164, 1, 1, 0, 0 },
 };
 inline constexpr int kT_march_aBytes = 1168;
+// lane VKCLOUD2: the march with the fly-through box (cloud_fly_ps / cloud_fly_a_ps: + cf*, the box skip)
+// kT_fly: 64 fields, 1236 bytes (spirv-cross --reflect of the shipped SPIR-V; tools: notes/vkair1/tools/reflect_table.py)
+inline constexpr FxField kT_fly[] = {
+	{ "atRay", 0, 3, 1, 0, 0 }, { "atMieS", 12, 1, 1, 0, 0 }, { "atMieE", 16, 1, 1, 0, 0 }, { "atHaze", 20, 3, 1, 0, 0 },
+	{ "atOzone", 32, 3, 1, 0, 0 }, { "atG", 44, 1, 1, 0, 0 }, { "atHazeAlbedo", 48, 3, 1, 0, 0 },
+	{ "atHazeSpec", 64, 3, 1, 0, 0 }, { "atMsOld", 76, 1, 1, 0, 0 }, { "cvBands.baseKm", 80, 3, 1, 0, 0 },
+	{ "cvBands.topKm", 96, 3, 1, 0, 0 }, { "cvBands.density", 112, 3, 1, 0, 0 }, { "cvBands.coverage", 128, 3, 1, 0, 0 },
+	{ "cvBands.sheet", 140, 1, 1, 0, 0 }, { "cvBands.mapRect", 144, 4, 1, 0, 0 }, { "cvBands.windKm", 160, 3, 1, 0, 0 },
+	{ "cvCal", 176, 1, 34, 0, 0 }, { "cvViewSize", 720, 2, 1, 0, 0 }, { "cvCamR", 728, 1, 1, 0, 0 },
+	{ "cvSunW", 736, 3, 1, 0, 0 }, { "cvMoonW", 752, 3, 1, 0, 0 }, { "cvSunK", 764, 1, 1, 0, 0 },
+	{ "cvMoonK", 768, 1, 1, 0, 0 }, { "cvKeyW", 772, 3, 1, 0, 0 }, { "cvKeyK", 784, 1, 1, 0, 0 },
+	{ "cvCam", 800, 3, 1, 0, 3 }, { "cvProj", 848, 4, 1, 0, 0 }, { "cvCamKm", 864, 3, 1, 0, 0 },
+	{ "cvHistSize", 880, 2, 1, 0, 0 }, { "cvStride", 888, 1, 1, 0, 0 }, { "cvPhase", 896, 2, 1, 0, 0 },
+	{ "cvSteps", 904, 1, 1, 1, 0 }, { "cvTaps", 908, 1, 1, 1, 0 }, { "cvOctaves", 912, 1, 1, 1, 0 },
+	{ "cvLightKm", 916, 1, 1, 0, 0 }, { "cvPhasePrm", 928, 4, 1, 0, 0 }, { "cvAmb", 944, 3, 1, 0, 0 },
+	{ "cvAmbOn", 956, 1, 1, 0, 0 }, { "cvApOn", 960, 1, 1, 0, 0 }, { "cvDeckAp", 976, 4, 1, 0, 0 },
+	{ "cvFrame", 992, 1, 1, 0, 0 }, { "cvMaxKm", 996, 1, 1, 0, 0 }, { "cvSlab", 1000, 1, 1, 0, 0 },
+	{ "cvProbe", 1004, 1, 1, 1, 0 }, { "cvProbeRect", 1008, 4, 1, 0, 0 }, { "cvProbeBand", 1024, 1, 1, 1, 0 },
+	{ "cvMsOn", 1028, 1, 1, 0, 0 }, { "cvMsG", 1032, 1, 1, 0, 0 }, { "cvTint", 1040, 3, 3, 0, 0 },
+	{ "cvWaterK", 1088, 3, 1, 0, 0 }, { "cvSceneZ", 1104, 4, 1, 0, 0 }, { "cvTopOn", 1120, 1, 1, 0, 0 },
+	{ "cvAmbDark", 1124, 1, 1, 0, 0 }, { "cvIce", 1136, 3, 1, 0, 0 }, { "cvShaft", 1152, 4, 1, 0, 0 },
+	{ "cvAlbedoD", 1168, 3, 1, 0, 0 }, { "cfOrgKm", 1184, 3, 1, 0, 0 }, { "cfDim", 1200, 3, 1, 0, 0 },
+	{ "cfCellKm", 1212, 1, 1, 0, 0 }, { "cfStepKm", 1216, 1, 1, 0, 0 }, { "cfMaxSteps", 1220, 1, 1, 1, 0 },
+	{ "cfSafe", 1224, 1, 1, 0, 0 }, { "cfOn", 1228, 1, 1, 0, 0 }, { "cfSkip", 1232, 1, 1, 0, 0 },
+};
+inline constexpr int kT_flyBytes = 1248;
+// kT_fly_a: 65 fields, 1236 bytes (spirv-cross --reflect of the shipped SPIR-V; tools: notes/vkair1/tools/reflect_table.py)
+inline constexpr FxField kT_fly_a[] = {
+	{ "atRay", 0, 3, 1, 0, 0 }, { "atMieS", 12, 1, 1, 0, 0 }, { "atMieE", 16, 1, 1, 0, 0 }, { "atHaze", 20, 3, 1, 0, 0 },
+	{ "atOzone", 32, 3, 1, 0, 0 }, { "atG", 44, 1, 1, 0, 0 }, { "atHazeAlbedo", 48, 3, 1, 0, 0 },
+	{ "atHazeSpec", 64, 3, 1, 0, 0 }, { "atMsOld", 76, 1, 1, 0, 0 }, { "cvBands.baseKm", 80, 3, 1, 0, 0 },
+	{ "cvBands.topKm", 96, 3, 1, 0, 0 }, { "cvBands.density", 112, 3, 1, 0, 0 }, { "cvBands.coverage", 128, 3, 1, 0, 0 },
+	{ "cvBands.sheet", 140, 1, 1, 0, 0 }, { "cvBands.mapRect", 144, 4, 1, 0, 0 }, { "cvBands.windKm", 160, 3, 1, 0, 0 },
+	{ "cvCal", 176, 1, 34, 0, 0 }, { "cvViewSize", 720, 2, 1, 0, 0 }, { "cvCamR", 728, 1, 1, 0, 0 },
+	{ "cvSunW", 736, 3, 1, 0, 0 }, { "cvMoonW", 752, 3, 1, 0, 0 }, { "cvSunK", 764, 1, 1, 0, 0 },
+	{ "cvMoonK", 768, 1, 1, 0, 0 }, { "cvKeyW", 772, 3, 1, 0, 0 }, { "cvKeyK", 784, 1, 1, 0, 0 },
+	{ "cvCam", 800, 3, 1, 0, 3 }, { "cvProj", 848, 4, 1, 0, 0 }, { "cvCamKm", 864, 3, 1, 0, 0 },
+	{ "cvHistSize", 880, 2, 1, 0, 0 }, { "cvStride", 888, 1, 1, 0, 0 }, { "cvPhase", 896, 2, 1, 0, 0 },
+	{ "cvSteps", 904, 1, 1, 1, 0 }, { "cvTaps", 908, 1, 1, 1, 0 }, { "cvOctaves", 912, 1, 1, 1, 0 },
+	{ "cvLightKm", 916, 1, 1, 0, 0 }, { "cvPhasePrm", 928, 4, 1, 0, 0 }, { "cvAmb", 944, 3, 1, 0, 0 },
+	{ "cvAmbOn", 956, 1, 1, 0, 0 }, { "cvApOn", 960, 1, 1, 0, 0 }, { "cvDeckAp", 976, 4, 1, 0, 0 },
+	{ "cvFrame", 992, 1, 1, 0, 0 }, { "cvMaxKm", 996, 1, 1, 0, 0 }, { "cvSlab", 1000, 1, 1, 0, 0 },
+	{ "cvProbe", 1004, 1, 1, 1, 0 }, { "cvProbeRect", 1008, 4, 1, 0, 0 }, { "cvProbeBand", 1024, 1, 1, 1, 0 },
+	{ "cvMsOn", 1028, 1, 1, 0, 0 }, { "cvMsG", 1032, 1, 1, 0, 0 }, { "cvTint", 1040, 3, 3, 0, 0 },
+	{ "cvWaterK", 1088, 3, 1, 0, 0 }, { "cvSceneZ", 1104, 4, 1, 0, 0 }, { "cvTopOn", 1120, 1, 1, 0, 0 },
+	{ "cvAmbDark", 1124, 1, 1, 0, 0 }, { "cvIce", 1136, 3, 1, 0, 0 }, { "cvShaft", 1152, 4, 1, 0, 0 },
+	{ "cvBlueSlice", 1168, 1, 1, 1, 0 }, { "cvAlbedoD", 1172, 3, 1, 0, 0 }, { "cfOrgKm", 1184, 3, 1, 0, 0 },
+	{ "cfDim", 1200, 3, 1, 0, 0 }, { "cfCellKm", 1212, 1, 1, 0, 0 }, { "cfStepKm", 1216, 1, 1, 0, 0 },
+	{ "cfMaxSteps", 1220, 1, 1, 1, 0 }, { "cfSafe", 1224, 1, 1, 0, 0 }, { "cfOn", 1228, 1, 1, 0, 0 },
+	{ "cfSkip", 1232, 1, 1, 0, 0 },
+};
+inline constexpr int kT_fly_aBytes = 1248;
 // kT_resolve: 12 fields, 192 bytes (spirv-cross --reflect of the shipped SPIR-V; tools: notes/vkair1/tools/reflect_table.py)
 inline constexpr FxField kT_resolve[] = {
 	{ "cvMoveClamp", 0, 1, 1, 0, 0 }, { "cvHistSize", 4, 2, 1, 0, 0 }, { "cvStride", 12, 1, 1, 0, 0 },
@@ -660,23 +747,71 @@ struct FxStat
 	int refusedPacks = 0;           //!< rain / snow: fxPack calls made for runs then refused (asked before the packs: 0)
 	int reusedHandles = 0;          //!< lane VKWATER4: water ray runs whose depth twin kept its VkImage handle over a sharedGen() move
 	int fenceMisses = 0;            //!< lane VKWATER4: waterRun's wait on the last crossing's fence that did not return VK_SUCCESS
+	int crossings = 0;              //!< lane VKCLOUD9: GL <-> Vulkan crossings that went through (the fly bake: runs = passes)
+	unsigned inPlace = 0;           //!< lane VKCLOUD10: the clouds' inputs read in place (farSharedOf) since the last take, OR of
+	                                //!< kInShape 1, kInDetail 2, kInMap 4, kInField 8 (the fly box's cfSdf)
 };
+inline constexpr unsigned kInShape = 1, kInDetail = 2, kInMap = 4, kInField = 8;
 FxStat takeVolSkyStat();
+//! lane VKCLOUD2: the fly march's t0.. (cloud_fly_ps / cloud_fly_a_ps reflected; t7 cvBlue only in _a, cfSdf Load'd)
+inline constexpr int kFlyTex = 9;
 struct CloudRun
 {
 	bool accum = false;             //!< the _a twins (Cloud Accumulation)
+	bool fly = false;               //!< lane VKCLOUD2: the march with the fly-through box (tex in kFlyTex order)
 	int mw = 0, mh = 0, hw = 0, hh = 0, cur = 0;
 	std::uintptr_t marchKey = 0, histKey[2] = {};  //!< shared targets: key = RGBA16F colour, key + 1 = RG32F depth
-	FxTex tex[8];                   //!< the march's t0.. (march: map shape detail sun moon scene trans; _a: + blue at t3)
-	std::uint8_t march[kT_march_aBytes] = {};
+	FxTex tex[kFlyTex];             //!< the march's t0.. (march: map shape detail sun moon scene trans; _a: + blue at t3;
+	                                //!< fly: shape detail map trans sun moon scene blue sdf)
+	std::uint8_t march[kT_flyBytes > kT_march_aBytes ? kT_flyBytes : kT_march_aBytes] = {};
 	std::uint8_t resolve[kT_resolve_aBytes] = {};
 	int red = 0;                    //!< gates only: 1 the resolve's march / history inputs swapped, 2 the march's t1 / t2
-	                                //!< swapped, 4 no march (the caller filled the march targets)
+	                                //!< swapped, 4 no march (the caller filled the march targets), 8 the fly's cfSdf and
+	                                //!< cvShape swapped (lane VKCLOUD2), 32 no shared lookup: every slot copied (VKCLOUD8)
 };
 //! GL current: the march (into the shared march targets) and the resolve (into hist[cur]) on Vulkan, one crossing
 bool cloudRun( const CloudRun & t, std::string & why );
 void cloudOnGl( const char * why );
 FxStat takeCloudStat();
+
+// lane VKCLOUD4: the fly-through box's bake (cloudfly.cpp runPass): cloud_flybake_ps / cloud_flysdf_ps's b31 (reflected)
+// kT_flybake: 14 fields, 672 bytes (spirv-cross --reflect of the shipped SPIR-V; tools: notes/vkair1/tools/reflect_table.py)
+inline constexpr FxField kT_flybake[] = {
+	{ "cvBands.baseKm", 0, 3, 1, 0, 0 }, { "cvBands.topKm", 16, 3, 1, 0, 0 }, { "cvBands.density", 32, 3, 1, 0, 0 },
+	{ "cvBands.coverage", 48, 3, 1, 0, 0 }, { "cvBands.sheet", 60, 1, 1, 0, 0 }, { "cvBands.mapRect", 64, 4, 1, 0, 0 },
+	{ "cvBands.windKm", 80, 3, 1, 0, 0 }, { "cvCal", 96, 1, 34, 0, 0 }, { "cfOrgKm", 640, 3, 1, 0, 0 },
+	{ "cfCellKm", 652, 1, 1, 0, 0 }, { "cfLayer", 656, 1, 1, 1, 0 }, { "cfMargin", 660, 1, 1, 0, 0 },
+	{ "cfSlackKm", 664, 1, 1, 0, 0 }, { "cfProbe", 668, 1, 1, 1, 0 },
+};
+inline constexpr int kT_flybakeBytes = 672;
+inline constexpr int kT_flybakeLayerAt = 656;
+// kT_flysdf: 3 fields, 28 bytes (spirv-cross --reflect of the shipped SPIR-V; tools: notes/vkair1/tools/reflect_table.py)
+inline constexpr FxField kT_flysdf[] = {
+	{ "cfAxis", 0, 1, 1, 1, 0 }, { "cfLayer", 4, 1, 1, 1, 0 }, { "cfDim", 16, 3, 1, 0, 0 },
+};
+inline constexpr int kT_flysdfBytes = 32;
+inline constexpr int kT_flysdfLayerAt = 4;
+inline constexpr int kFlyBakeTex = 3;  //!< cloud_flybake_ps's t0 cvShape, t1 cvDetail, t2 cvMap; cloud_flysdf_ps's t0 cfSrc
+struct FlyBakeRun
+{
+	int pass = 0;                   //!< 0 the occupancy bake (cloud_flybake), 1..3 the distance field along x, y, z (cloud_flysdf)
+	int from = 0, to = 0;           //!< the slices drawn, [from, to)
+	std::uintptr_t dst = 0;         //!< the written volume's sharedTarget key (3D R8, made with slices)
+	std::uintptr_t src = 0;         //!< passes 1..3: the read volume's sharedTarget key
+	FxTex tex[kFlyBakeTex];         //!< pass 0: the density's inputs (fxTexOf over GL's program)
+	std::uint8_t loose[kT_flybakeBytes] = {};  //!< b31 packed from GL's program (fxPack, kT_flybake or kT_flysdf); cfLayer is set here
+	int red = 0;                    //!< gates only: 1 every slice into slice 0, 2 slice k into k + 1, 4 the other pass's program;
+	                                //!< lane VKCLOUD9 (read off the first run of a batch): 16 a crossing a pass, 32 every pass on
+	                                //!< pass 0's descriptor set and b31 slots; 8 (lane VKCLOUD9) no shared lookup: pass 0's inputs copied
+};
+//! GL current: one pass over slices [from, to) of t.dst on Vulkan (one render pass a slice), one crossing; false: why, GL draws it
+bool flyBakeRun( const FlyBakeRun & t, std::string & why );
+inline constexpr int kFlyBakePasses = 4;  //!< lane VKCLOUD9: the most runs one crossing records (a full build)
+//! lane VKCLOUD9: n runs in order in ONE crossing (a barrier between runs: a later pass reads / overwrites an earlier one's
+//! volume); every run is checked before anything is recorded; false: why, nothing drawn (GL draws all n)
+bool flyBakeRunN( const FlyBakeRun * t, int n, std::string & why );
+void flyBakeOnGl( const char * why );
+FxStat takeFlyBakeStat();
 
 // lane VKFAR1 (row G3): the far bulb dots (cell_fardots_ps__WW_CELL_FOGLEAK's b31, reflected)
 inline constexpr FxField kT_fardots[] = {

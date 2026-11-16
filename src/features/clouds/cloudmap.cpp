@@ -14,6 +14,7 @@
 #include "cloudsheetmath.h"	// SKYLIGHT1 round 3: the layer's zenith-cap fit (uv = J world / altitude + c)
 #include "harnesswindow.h"
 #include "features/vkframe/vkcloudmap.h"	// lane VKCLOUD4: the map's layers on the Vulkan view
+#include "cloudinshare.h"	// lane VKCLOUD10: the map on the present device
 
 #include <QElapsedTimer>
 #include <QHash>
@@ -88,8 +89,6 @@ struct CmState
 	// GL
 	GLuint fbo = 0;
 	int texSize = 0;
-	std::uintptr_t mapKey = 0;	// lane VKCLOUD4: the map's sharedTarget key (WW_VKVIEW=1)
-	bool mapShared = false, shareAsk = false;
 	GLuint q[4] = { 0, 0, 0, 0 };
 	bool pending[2] = { false, false };
 	int cur2 = 0;
@@ -104,7 +103,20 @@ struct CmState
 	bool bindTried = false;
 	QString refusedShape;
 	int refusedSkips = 0;
+	WwCloudInShare::Vol tgt;	// lane VKCLOUD10: the map's texture (map.tex), a shared target while the view is on Vulkan
 };
+
+//! lane VKCLOUD10: the map target's sharedTarget key (one map a process: a static byte) and whether it is asked
+std::uintptr_t mapKey()
+{
+	static char k;
+	return reinterpret_cast<std::uintptr_t>( &k );
+}
+
+bool mapShareWanted()
+{
+	return WwVkPresent::shareWanted( "WW_VKVIEW_CLOUDIN_RED" );
+}
 
 CmState & cs()
 {
@@ -149,17 +161,15 @@ void drop( Scene * scene, CmState & s )
 {
 	if ( scene && scene->renderer ) {
 		auto fn = scene->renderer->fn;
-		if ( s.mapShared ) {	// lane VKCLOUD4: the present device's name: not ours to delete
-			if ( WwVkPresent::sharedTargetIs( s.mapKey, s.map.tex ) )
-				WwVkPresent::sharedTargetDrop( s.mapKey );
-			s.map.tex = 0;
-			s.mapShared = false;
-		} else if ( s.map.tex ) {
-			fn->glDeleteTextures( 1, &s.map.tex );
-		}
+		if ( s.tgt.shared )
+			WwVkPresent::sharedTargetDrop( mapKey() );	// lane VKCLOUD10: never glDeleteTextures on a shared name
+		else if ( s.tgt.tex )
+			fn->glDeleteTextures( 1, &s.tgt.tex );
 		if ( s.fbo )
 			fn->glDeleteFramebuffers( 1, &s.fbo );
 	}
+	s.tgt.tex = 0;
+	s.tgt.shared = false;
 	s.fbo = 0;
 	s.texSize = 0;
 	const quint64 g = s.map.generation;
@@ -288,51 +298,18 @@ void paramsOf( const QVector<Draw> & ds, BandParams out[3], bool redMax,
 
 bool ensureTarget( NifSkopeOpenGLContext::GLFunctions * fn, CmState & s, int n )
 {
-	// lane VKCLOUD4: a flipped wish (WW_VKVIEW, red WW_VKVIEW_CLOUDMAP_RED=1) or a shared map a shutdown dropped: made again
-	const bool share = WwVkPresent::shareWanted( "WW_VKVIEW_CLOUDMAP_RED" );
-	const bool lost = s.mapShared && !WwVkPresent::sharedTargetIs( s.mapKey, s.map.tex );
-	if ( s.map.tex && s.texSize == n && s.shareAsk == share && !lost )
-		return true;
-	s.shareAsk = share;
 	if ( !s.fbo )
 		fn->glGenFramebuffers( 1, &s.fbo );
-	if ( s.mapShared ) {	// the present device's name (or one a shutdown already dropped): not ours to delete
-		if ( WwVkPresent::sharedTargetIs( s.mapKey, s.map.tex ) )
-			WwVkPresent::sharedTargetDrop( s.mapKey );
-		s.map.tex = 0;
-		s.mapShared = false;
-	} else if ( s.map.tex ) {
-		fn->glDeleteTextures( 1, &s.map.tex );
-	}
-	if ( share ) {
-		if ( !s.mapKey )
-			s.mapKey = reinterpret_cast<std::uintptr_t>( new char );
-		unsigned t = 0;
-		std::string w;
-		s.mapShared = WwVkPresent::sharedTarget( s.mapKey, 0, n, n, 1, GL_RGBA8, t, w, 1 );
-		if ( s.mapShared )
-			s.map.tex = t;
-		else
-			qInfo().noquote() << "vk cloudmap: the map stays GL's (" << QString::fromStdString( w ) << ")";
-	}
-	if ( !s.mapShared ) {
-		fn->glGenTextures( 1, &s.map.tex );
-		fn->glBindTexture( GL_TEXTURE_2D, s.map.tex );
-		fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, n, n, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr );
-	} else {
-		fn->glBindTexture( GL_TEXTURE_2D, s.map.tex );
-	}
-	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
-	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
-	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
-	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
-	fn->glBindTexture( GL_TEXTURE_2D, 0 );
-	fn->glBindFramebuffer( GL_FRAMEBUFFER, s.fbo );
-	fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s.map.tex, 0 );
+	/* lane VKCLOUD10: the target (cloudinshare.h ensureMap): a shared target while the view is on Vulkan, so the march and
+	 * the fly bake read it in place; red WW_VKVIEW_CLOUDIN_RED=1 (or the view on GL): the old texture calls */
+	bool remade = false;
+	const bool made = WwCloudInShare::ensureMap( fn, s.tgt, s.texSize, s.fbo, mapKey(), n, GL_RGBA8, mapShareWanted(), remade );
+	s.map.tex = s.tgt.tex;
+	if ( !remade )
+		return made;
 	const GLenum one = GL_COLOR_ATTACHMENT0;
 	fn->glDrawBuffers( 1, &one );
-	s.texSize = n;
-	return fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
+	return made && fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
 }
 
 void timeRead( NifSkopeOpenGLContext::GLFunctions * fn, CmState & s, int slot, bool wait )
@@ -512,7 +489,8 @@ bool buildMap( Scene * scene, CmState & s, const QVector<Draw> & ds, const QVect
 	const bool worldLay = !red( "domeproj" );
 	s.worldLaid = s.worldSkipped = 0;
 	const bool vkTried = !glOnly && WwVkPresent::shareWanted( "WW_VKVIEW_CLOUDMAP_RED" );
-	bool onVk = vkTried && s.mapShared && WwVkPresent::sharedTargetIs( s.mapKey, s.map.tex );
+	// VKMERGE3: the target is VKCLOUD10's (s.tgt, mapKey()); red WW_VKVIEW_CLOUDIN_RED=1 unshares it (so GL builds), WW_VKVIEW_CLOUDMAP_RED=1 builds on GL
+	bool onVk = vkTried && s.tgt.shared && WwVkPresent::sharedTargetIs( mapKey(), s.tgt.tex );
 	std::string vkWhy = onVk ? "" : "the map is GL's own (not a shared target)";
 	static WwVkPresent::CloudMapRun vt;
 	vt = WwVkPresent::CloudMapRun();
@@ -618,7 +596,7 @@ bool buildMap( Scene * scene, CmState & s, const QVector<Draw> & ds, const QVect
 		bool drew = false;
 		if ( onVk ) {
 			vt.n = n;
-			vt.key = s.mapKey;
+			vt.key = mapKey();
 			vt.max = redMax;
 			drew = WwVkPresent::cloudMapRun( vt, vkWhy );
 		} else {
@@ -960,6 +938,8 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 		s.refusedSkips++;
 		return s.map;
 	}
+	if ( WwCloudInShare::mapStale( s.tgt, mapKey(), mapShareWanted() ) )
+		s.key.clear();	// lane VKCLOUD10: the target's share state moved or a shutdown took it: its texels are gone, build again
 	if ( key != s.key || !m.valid ) {
 		slow.how = "built";
 		const double buildAt = slow.now();

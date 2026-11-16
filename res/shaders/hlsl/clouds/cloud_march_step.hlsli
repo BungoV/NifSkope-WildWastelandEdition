@@ -5,7 +5,11 @@
 // lane CLOUD4: one march sample at t over dt (cloud_march.frag includes it inside its loops: the plain one and the
 // fly-through grid's fine one). Reads o, d, t, dt, pixKm, cosT, lo, hi; adds to L, T, dsum, wsum; `continue` = an
 // empty sample, `break` = the ray is opaque.
+#ifdef WW_VK_NVGL_FORMS
+	float3 p = mad( d, (float3)( t ), o );	// lane VKCLOUD3: NV GL fuses the sample's position (cloud_march_ps.hlsl cvSphereGnd)
+#else
 	float3 p = o + d * t;
+#endif
 	float3 up;
 	p.z = cvHeight( o, d, t, up );
 	cvFootKm = t * pixKm;

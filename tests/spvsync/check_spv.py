@@ -67,7 +67,10 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 VKFRAME_CSM = {'csm_view_vs': ('res/shaders/hlsl/near', 'csm_view_vs'),
 	'obj_depth_vs': ('res/shaders/hlsl/near', 'obj_depth_vs'),  # lane VKOBJ1: the objects' prepass
 	'csm_remap_view_vs': ('res/shaders/hlsl/near', 'csm_remap_view_vs'),  # lane VKSHADOW6: the Scroll remap (the loop's
-	'csm_remap_view_ps': ('res/shaders/hlsl/near', 'csm_remap_view_ps')}  # profile is the name's suffix)
+	'csm_remap_view_ps': ('res/shaders/hlsl/near', 'csm_remap_view_ps'),  # profile is the name's suffix)
+	'csm_at_view_vs': ('res/shaders/hlsl/near', 'csm_at_view_vs'),  # lane VKSHADOW8: the alpha-tested casters
+	'csm_at_view_ps': ('res/shaders/hlsl/near', 'csm_at_view_ps'),
+	'csm_sway_view_vs': ('res/shaders/hlsl/near', 'csm_sway_view_vs')}  # lane VKSHADOW10: the swaying casters
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_CSM]
 # lane VKAIR1: the air's sky pass and the clouds, the script's `fx <name> <dir/file>` lines (sky's register shifts, ps_6_0)
 # lane HLSLSRC2: the views' frozen spirv-cross twins under the view's name (the readable sources took the programs' names;
@@ -88,6 +91,10 @@ VKFRAME_FX['depthmax_view_ps'] = 'exposure/cell_depthmax_ps'	# lane VKSMALL2: th
 VKFRAME_FX['vrs_rate_view_ps'] = 'near/cell_vrs_rate_ps'	# lane VKSMALL3: the shading rate images (row 76)
 VKFRAME_FX['fxres_down_view_ps'] = 'particles/cell_fxres_down_ps'	# lane VKSMALL4: the soft-effect layer's depth (row 77)
 VKFRAME_FX['fxres_comp_view_ps'] = 'particles/fxres_comp_view_ps'	# lane VKSMALL4: its composite, dual-source twin (row 77)
+VKFRAME_FX['cloud_fly_view_ps'] = 'clouds/cloud_fly_view_ps'	# lane VKCLOUD2: the march with the fly-through box (VKCLOUD3: its view entry)
+VKFRAME_FX['cloud_fly_a_view_ps'] = 'clouds/cloud_fly_a_view_ps'	# lane VKCLOUD2
+VKFRAME_FX['cloud_flybake_view_ps'] = 'clouds/cloud_flybake_ps'	# lane VKCLOUD4: the box's occupancy bake
+VKFRAME_FX['cloud_flysdf_view_ps'] = 'clouds/cloud_flysdf_ps'	# lane VKCLOUD4: the box's distance field
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FX]
 # lane VKFAR1: the far dots' vertex stage, the script's `fxv <name> <dir/file>` lines (fx()'s shifts, vs_6_0)
 VKFRAME_FXV = {'fardots_view_vs': 'far-lod/cell_fardots_view_vs',

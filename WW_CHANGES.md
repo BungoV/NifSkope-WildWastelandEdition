@@ -21,6 +21,39 @@ Changed, not built, not checked live. Offline: tests/vkframe/precipview.sh passe
 - Left on the all-on route: the lamps' physical falloff (lift 4), then the lit look (lift 5). Census: default 0 / 0,
   all-on 1 / 1.
 
+## VKCLOUD10 (2026-11-16): the clouds' noise and coverage map live on Vulkan, read with no copy
+
+Changed, not built, not checked live. Offline: tests/vkframe/flybakesite.py passes; cloudview.sh and flybakeview.sh pass
+every arm except the two map reds (below), so both gates still read FAILED.
+
+- With the view on Vulkan (WW_VKVIEW=1), the clouds' two noise volumes (cvShape, cvDetail) and the coverage map (cvMap) are
+  made on the Vulkan device and shared with GL. GL draws and samples them as before; the Vulkan cloud march and the
+  fly-through box build read them in place, so a run no longer copies them (the map was copied every run, the noise each
+  time any shared target was made or dropped).
+- If the Vulkan device goes away, the noise is made and filled again and the map is redrawn on the next frame.
+- `WW_VKVIEW_CLOUDIN_RED=1`, or the view on GL, keeps GL's own textures with the old calls.
+- The `vk clouds:` and `vk cloudflybake:` lines now name the inputs read in place (`read in place: cvShape cvDetail cvMap`).
+- Gate: outputs on the shared inputs match the copied ones byte for byte; copies drop by 3 (by 1 when the noise was not
+  due for a copy); a remake after the device went away matches again. Reds never shared and the noise not refilled
+  FAIL as they must. The map reds (not re-attached to its framebuffer, not redrawn) are blind: both gate fixtures set
+  `cvBands.mapRect.w` 0, so the march and the bake never sample cvMap. Open: an arm with the map on.
+
+## VKCLOUD9 (2026-11-16): the fly-through clouds' box build crosses to Vulkan once, not four times
+
+Changed, not built, not checked live. Offline: tests/vkframe/flybakeview.sh and tests/vkframe/flybakesite.py pass.
+
+- With the view on Vulkan (WW_VKVIEW=1), a full build of the fly-through box (the occupancy bake and its three distance
+  passes) now queues all four passes and draws them in one GL-to-Vulkan hand-off, with a barrier between passes. It was
+  one hand-off a pass. The rolling refresh (one pass a frame) is unchanged.
+- If the one hand-off is refused, the whole build is redrawn on GL. A pass that GL must draw (Cloud Variety's bake) first
+  sends the passes queued before it.
+- The bake's inputs (cvShape, cvDetail, cvMap) are read in place when they already live on Vulkan, with no copy. In the
+  app they are still GL's own today, so they are copied as before until their owner shares them.
+- The `vk cloudflybake:` line now names runs, hand-offs, input copies per hand-off and per run, and drawing-thread ms per
+  hand-off.
+- Gate: the build in one hand-off matches GL and the four hand-off path byte for byte; shared inputs make 0 copies.
+  Reds (a hand-off a pass, every pass on pass 0's slots, the shared lookup skipped) must FAIL, and all do.
+
 ## VKFAR7 (2026-11-15): the TAA mask's reactive pass draws on Vulkan, all its draws in one hand-off
 
 Changed, not built, not checked live. Offline: tests/vkframe/taareactivedraw.sh passes.

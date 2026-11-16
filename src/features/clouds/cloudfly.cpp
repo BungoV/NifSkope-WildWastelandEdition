@@ -1,9 +1,12 @@
 #include "cloudfly.h"
+#include "cloudflybakeroute.h"	// lane VKCLOUD6: the bake's slices on Vulkan, GL only on a refusal
 #include "cloudflymath.h"
 #include "cloudmap.h"
 #include "cloudvol.h"
 #include "cloudvolmath.h"
 #include "features/sky/atmomath.h"
+#include "features/vkframe/vkpresent.h"	// lane VKCLOUD6: the box volumes on the present device
+#include "cloudinshare.h"	// lane VKCLOUD10: the "vk cloudflybake:" line's in-place names
 #include "recx.h"
 #include "wwswitch.h"
 #include "wwsyncred.h"	// lane PERFFIX6: ^WW_SYNC_RED
@@ -18,10 +21,14 @@
 #include <QSettings>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <memory>
+#include <string>
+#include <vector>
 
 // lane CLOUD4: fly-through clouds (cloudfly.h). The box: res/shaders/features/clouds/cloud_flybake.frag (occupancy), cloud_flysdf.frag
 // (the distance field, three separable passes), cloud_fly.frag (the march with the box).
@@ -130,7 +137,59 @@ struct FlGpu
 	int qcur = 0;
 	double ms = -1.0;
 	int frames = 0;
+	/* lane VKCLOUD6: vol[] are shared targets on the present device (the bake's slices drawn on Vulkan); keys are heap bytes
+	 * (QHash moves this struct): 0..3 vol[], 4..6 the bake inputs' twins (cvShape, cvDetail, cvMap) */
+	bool shared = false, shareRefused = false;
+	std::shared_ptr<char> keys { new char[7](), std::default_delete<char[]>() };
 };
+
+std::uintptr_t volKey( const FlGpu & g, int i )
+{
+	return reinterpret_cast<std::uintptr_t>( g.keys.get() + i );
+}
+
+/* lane VKCLOUD6: the "vk cloudflybake:" line, one a 5 s window while a bake was asked of Vulkan (red
+ * WW_VKVIEW_CLOUDFLYBAKE_RED=1 or the view on GL: GL's own volumes, no line) */
+void flyBakeSay()
+{
+	static WwVkPresent::FxStat sum;
+	static auto at = std::chrono::steady_clock::now();
+	const WwVkPresent::FxStat st = WwVkPresent::takeFlyBakeStat();
+	sum.runs += st.runs;
+	sum.crossings += st.crossings;
+	sum.gl += st.gl;
+	sum.fails += st.fails;
+	sum.cpuMs += st.cpuMs;
+	sum.maxMs = std::max( sum.maxMs, st.maxMs );
+	sum.copies += st.copies;
+	sum.inPlace |= st.inPlace;
+	sum.pipelines = st.pipelines;
+	sum.buildMs = st.buildMs;
+	if ( !st.glWhy.empty() )
+		sum.glWhy = st.glWhy;
+	if ( !st.failWhy.empty() )
+		sum.failWhy = st.failWhy;
+	const auto now = std::chrono::steady_clock::now();
+	if ( std::chrono::duration<double>( now - at ).count() < 5.0 )
+		return;
+	if ( sum.runs + sum.gl + sum.fails > 0 ) {
+		char line[512];
+		// lane VKCLOUD9: crossings and runs (passes) apart, copies per crossing and per run
+		std::snprintf( line, sizeof( line ), "vk cloudflybake: on Vulkan %d runs in %d crossings (one render pass a slice; %d pipelines "
+			"built in %.1f ms; %d input copies, %.2f a crossing, %.2f a run, read in place: %s; drawing thread %.3f ms a crossing, "
+			"max %.3f)", sum.runs, sum.crossings, sum.pipelines, sum.buildMs, sum.copies,
+			sum.crossings > 0 ? double( sum.copies ) / sum.crossings : 0.0, sum.runs > 0 ? double( sum.copies ) / sum.runs : 0.0,
+			WwCloudInShare::inPlaceNames( sum.inPlace ).c_str(), sum.crossings > 0 ? sum.cpuMs / sum.crossings : 0.0, sum.maxMs );
+		std::string s = line;
+		if ( sum.gl > 0 )
+			s += ", on GL " + std::to_string( sum.gl ) + " (last: " + sum.glWhy + ")";
+		if ( sum.fails > 0 )
+			s += ", refused " + std::to_string( sum.fails ) + " (last: " + sum.failWhy + ")";
+		std::fprintf( stderr, "%s\n", s.c_str() );
+	}
+	at = now;
+	sum = WwVkPresent::FxStat();
+}
 
 QHash<Renderer *, FlGpu> & gpus()
 {
@@ -170,14 +229,56 @@ bool ensureVolumes( NifSkopeOpenGLContext::GLFunctions * fn, FlGpu & g, const F:
 {
 	if ( !g.fbo )
 		fn->glGenFramebuffers( 1, &g.fbo );
-	if ( g.vol[0] && g.nxy == p.nxy && g.nz == p.nz )
+	/* lane VKCLOUD6: while the view is on Vulkan the four volumes are shared targets (3D R8 with slice views), so the bake's
+	 * slices draw on Vulkan (runPass); GL draws and reads the same names. Red WW_VKVIEW_CLOUDFLYBAKE_RED=1 (or a refusal):
+	 * GL's own textures, as before. */
+	const bool asked = WwVkPresent::shareWanted( "WW_VKVIEW_CLOUDFLYBAKE_RED" );
+	if ( !asked )
+		g.shareRefused = false;	// asked again later: one more try
+	const bool want = asked && !g.shareRefused;
+	bool live = g.shared;
+	for ( int i = 0; i < 4 && live; i++ )
+		live = WwVkPresent::sharedTargetIs( volKey( g, i ), g.vol[i] );
+	if ( g.shared && !live )
+		std::fill( g.vol, g.vol + 4, 0u );	// a shutdown dropped them (their GL names with them)
+	if ( g.vol[0] && g.nxy == p.nxy && g.nz == p.nz && g.shared == want && ( !g.shared || live ) )
 		return true;
+	const bool wasShared = g.shared;
+	if ( g.shared ) {
+		for ( int i = 0; i < 4; i++ )
+			WwVkPresent::sharedTargetDrop( volKey( g, i ) );
+		std::fill( g.vol, g.vol + 4, 0u );
+		g.shared = false;
+	}
+	if ( want ) {
+		unsigned made[4] = {};
+		std::string why;
+		bool ok = true;
+		for ( int i = 0; i < 4 && ok; i++ )
+			ok = WwVkPresent::sharedTarget( volKey( g, i ), 1, p.nxy, p.nxy, p.nz, GL_R8, made[i], why );
+		if ( ok ) {
+			for ( int i = 0; i < 4; i++ ) {
+				if ( g.vol[i] )
+					fn->glDeleteTextures( 1, &g.vol[i] );
+				g.vol[i] = made[i];
+			}
+			g.shared = true;
+		} else {
+			for ( int i = 0; i < 4; i++ )
+				WwVkPresent::sharedTargetDrop( volKey( g, i ) );
+			g.shareRefused = true;
+			std::fprintf( stderr, "cloudfly: %dx%dx%d box volumes stay GL's own (shared target refused: %s)\n", p.nxy, p.nxy, p.nz, why.c_str() );
+		}
+	}
 	for ( GLuint & t : g.vol ) {
-		if ( t )
-			fn->glDeleteTextures( 1, &t );
-		fn->glGenTextures( 1, &t );
+		if ( !g.shared ) {
+			if ( t )
+				fn->glDeleteTextures( 1, &t );
+			fn->glGenTextures( 1, &t );
+		}
 		fn->glBindTexture( GL_TEXTURE_3D, t );
-		fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_R8, p.nxy, p.nxy, p.nz, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr );
+		if ( !g.shared )
+			fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_R8, p.nxy, p.nxy, p.nz, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr );
 		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
 		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
 		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAX_LEVEL, 0 );
@@ -185,6 +286,9 @@ bool ensureVolumes( NifSkopeOpenGLContext::GLFunctions * fn, FlGpu & g, const F:
 			fn->glTexParameteri( GL_TEXTURE_3D, w, GL_CLAMP_TO_EDGE );
 	}
 	fn->glBindTexture( GL_TEXTURE_3D, 0 );
+	if ( g.shared != wasShared || ( g.shared && ( g.nxy != p.nxy || g.nz != p.nz ) ) )
+		std::fprintf( stderr, "cloudfly: %dx%dx%d box volumes %s\n", p.nxy, p.nxy, p.nz,
+			g.shared ? "on the present device (shared with GL)" : "back on GL's own textures" );
 	g.nxy = p.nxy;
 	g.nz = p.nz;
 	g.pub = -1;
@@ -194,7 +298,21 @@ bool ensureVolumes( NifSkopeOpenGLContext::GLFunctions * fn, FlGpu & g, const F:
 
 /* one pass over layers [from, to) of the build: 0 = the occupancy of the density (bound at the build's clock), 1..3 =
  * the distance field along x, y, z (occupancy -> ping-pong -> occupancy -> the building field) */
-bool runPass( Scene * scene, FlGpu & g, const F::Preset & p, int pass, int from, int to )
+/* lane VKCLOUD9: the full build's passes queued (runPass with a queue) and drawn in ONE crossing; a refusal there sends the
+ * whole build to GL (runPass with glOnly) */
+bool flyQueueRun( std::vector<WwVkPresent::FlyBakeRun> & q, std::string & why )
+{
+	if ( q.empty() )
+		return true;
+	const bool ok = WwVkPresent::flyBakeRunN( q.data(), int( q.size() ), why );
+	q.clear();
+	if ( ok )
+		why.clear();
+	return ok;
+}
+
+bool runPass( Scene * scene, FlGpu & g, const F::Preset & p, int pass, int from, int to,
+	std::vector<WwVkPresent::FlyBakeRun> * queue = nullptr, const char * glOnly = nullptr, std::string * queueWhy = nullptr )
 {
 	Renderer * r = scene->renderer;
 	auto fn = r->fn;
@@ -206,6 +324,7 @@ bool runPass( Scene * scene, FlGpu & g, const F::Preset & p, int pass, int from,
 	if ( !prog )
 		return false;
 	GLuint dst = 0;
+	int dstAt = 0, srcAt = 0;	// vol[] indices (lane VKCLOUD6: the shared targets' keys)
 	if ( pass == 0 ) {
 		if ( !wwCloudVolBindDensityAt( scene, 0, g.buildG.secs ) ) {
 			r->stopProgram();
@@ -216,30 +335,83 @@ bool runPass( Scene * scene, FlGpu & g, const F::Preset & p, int pass, int from,
 		prog->uni1f( "cfMargin", F::kMarginS );
 		prog->uni1f( "cfSlackKm", F::kSlackKm );
 		prog->uni1i( "cfProbe", 0 );
-		dst = g.vol[0];
 	} else {
-		const GLuint src = pass == 1 ? g.vol[0] : pass == 2 ? g.vol[1] : g.vol[0];
-		dst = pass == 1 ? g.vol[1] : pass == 2 ? g.vol[0] : g.vol[back];
+		srcAt = pass == 2 ? 1 : 0;
+		dstAt = pass == 1 ? 1 : pass == 2 ? 0 : back;
 		fn->glActiveTexture( GL_TEXTURE0 );
-		fn->glBindTexture( GL_TEXTURE_3D, src );
+		fn->glBindTexture( GL_TEXTURE_3D, g.vol[srcAt] );
 		prog->uni1i( "cfSrc", 0 );
 		prog->uni1i( "cfAxis", pass - 1 );
 		prog->uni3f( "cfDim", float( p.nxy ), float( p.nxy ), float( p.nz ) );
 	}
-	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.fbo );
-	fn->glViewport( 0, 0, p.nxy, p.nxy );
-	bool ok = true;
-	for ( int k = from; k < to && ok; k++ ) {
+	dst = g.vol[dstAt];
+	/* lane VKCLOUD6: the slices on Vulkan (flyBakeRun, one render pass a slice into the shared volume) from GL's program state
+	 * read back (fxTexOf / fxPack, cfLayer set per slice there); GL draws them only when the route hands them back (the
+	 * volumes GL's own, Cloud Variety's program, a refusal). Gates: tests/vkframe/flybakeview.sh (the run vs GL),
+	 * tests/vkframe/flybakesite.py (this site). */
+	WwVkPresent::FlyBakeRun t;
+	std::string glWhy;
+	bool wantVk = g.shared;
+	if ( wantVk && glOnly ) {
+		wantVk = false;
+		glWhy = std::string( "the build's one crossing was refused: " ) + glOnly;
+	} else if ( wantVk && pass == 0 && variety ) {
+		wantVk = false;
+		glWhy = "Cloud Variety (no Vulkan twin of cloud_flybake_v)";
+	} else if ( wantVk ) {
+		t.pass = pass;
+		t.dst = volKey( g, dstAt );
+		if ( pass == 0 ) {
+			static const char * const kName[WwVkPresent::kFlyBakeTex] = { "cvShape", "cvDetail", "cvMap" };
+			static const int kType[WwVkPresent::kFlyBakeTex] = { 1, 1, 0 };
+			for ( int k = 0; k < WwVkPresent::kFlyBakeTex && wantVk; k++ ) {
+				WwVkPresent::FxTex & x = t.tex[k];
+				wantVk = WwVkPresent::fxTexOf( fn, prog->id, kName[k], kType[k], x, glWhy );
+				x.twin = volKey( g, 4 + k );
+				x.still = k <= 1;	// the noise volumes: made once; the map moves
+			}
+			if ( wantVk )
+				WwVkPresent::fxPack( fn, prog->id, WwVkPresent::kT_flybake, int( std::size( WwVkPresent::kT_flybake ) ), t.loose );
+		} else {
+			t.src = volKey( g, srcAt );
+			WwVkPresent::fxPack( fn, prog->id, WwVkPresent::kT_flysdf, int( std::size( WwVkPresent::kT_flysdf ) ), t.loose );
+		}
+	}
+	bool bound = false;
+	auto glSlice = [&]( int k ) {
+		if ( !bound ) {
+			bound = true;
+			fn->glBindFramebuffer( GL_FRAMEBUFFER, g.fbo );
+			fn->glViewport( 0, 0, p.nxy, p.nxy );
+		}
 		fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, dst, 0, k );
 		if ( k == from ) {
 			fn->glDrawBuffer( GL_COLOR_ATTACHMENT0 );
-			ok = fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
+			if ( fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE )
+				return false;
 		}
-		if ( ok ) {
-			prog->uni1i( "cfLayer", k );
-			quad( r );
+		prog->uni1i( "cfLayer", k );
+		quad( r );
+		return true;
+	};
+	std::string vkWhy;
+	auto vkRun = [&]( int a, int b ) {
+		t.from = a;
+		t.to = b;
+		if ( queue ) {
+			queue->push_back( t );
+			return true;
 		}
-	}
+		return WwVkPresent::flyBakeRun( t, vkWhy );
+	};
+	bool onVk = false;
+	// a pass GL draws flushes the queued passes first (they come before it); a refused flush skips the pass (the build redoes on GL)
+	const bool held = queue && !wantVk && !flyQueueRun( *queue, *queueWhy );
+	bool ok = true;
+	if ( !held )
+		ok = wwFlyBakeRoute( wantVk, false, vkRun, glSlice, from, to, onVk );
+	if ( g.shared && !onVk && !held )
+		WwVkPresent::flyBakeOnGl( ( wantVk ? vkWhy : glWhy ).c_str() );
 	r->stopProgram();
 	for ( int u = 2; u >= 0; u-- ) {
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
@@ -436,8 +608,15 @@ void wwCloudFlyPrepare( Scene * scene, const float camKm[3], double secs )
 	};
 	if ( full ) {
 		start();
-		for ( int pass = 0; pass < 4 && ok; pass++ )
-			ok = runPass( scene, g, p, pass, 0, p.nz );
+		// lane VKCLOUD9: the four passes in one crossing; a refused crossing redoes the whole build on GL
+		std::vector<WwVkPresent::FlyBakeRun> q;
+		std::string qWhy;
+		for ( int pass = 0; pass < 4 && ok && qWhy.empty(); pass++ )
+			ok = runPass( scene, g, p, pass, 0, p.nz, &q, nullptr, &qWhy );
+		if ( ok && qWhy.empty() )
+			flyQueueRun( q, qWhy );
+		for ( int pass = 0; pass < 4 && ok && !qWhy.empty(); pass++ )
+			ok = runPass( scene, g, p, pass, 0, p.nz, nullptr, qWhy.c_str() );
 		if ( ok ) {
 			publish();
 			g.full++;
@@ -456,6 +635,7 @@ void wwCloudFlyPrepare( Scene * scene, const float camKm[3], double secs )
 				publish();
 		}
 	}
+	flyBakeSay();	// lane VKCLOUD6
 	fn->glQueryCounter( g.q[g.qcur * 2 + 1], kTimestamp );
 	g.pending[g.qcur] = true;
 	g.qcur = 1 - g.qcur;
