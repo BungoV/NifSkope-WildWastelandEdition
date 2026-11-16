@@ -48,6 +48,7 @@ BSD License - see nifskope.h
 #include "features/water/endlesssea.h"	// FARWATER1 round 2: the sky band over the endless sea
 #include "features/vkframe/vkpresent.h"	// lane VKAIR1: the sky's air on the present device
 #include "features/vkframe/vkfog.h"	// lane VKFAR2: the integrate on the present device
+#include "features/vkframe/vkairinject.h"	// lane VKAIR5: the air inject's stage 0 on the present device
 
 const void * wwGlobalUboBytes( const NifSkopeOpenGLContext * ctx );	// glcontext.cpp: b0's bytes (lane VKAIR1)
 
@@ -505,6 +506,7 @@ struct VaGpu
 	bool tileValid = false;	// stage 0 wrote this frame's column distances (the surfaces clamp to them)
 	GLuint zTex = 0, zFbo = 0, zSrc = 0;	// stage 0's depth: a copy of the obscurance pass's depth buffer (10-16)
 	int zW = 0, zH = 0;
+	bool tileShared = false, zShared = false;	// lane VKAIR5: the tile and stage 0's depth made on the present device
 	GLuint carry[2] = { 0, 0 };	// lane PERF2: the O(S) integrate's running (L, T), ping-pong between its draws (RGBA32F)
 	int mrtOk = -1;				// 8 draw buffers and colour attachments (else the O(S^2) integrate)
 	// lane PERF2, temporal: the strata (cols x rows x 4 slices, stratum p at layers p x slices ..), ping-pong; the
@@ -1798,6 +1800,55 @@ static QString vaRainFog( Scene * scene, NifSkopeOpenGLContext::Program * prog, 
 		.arg( mono ? QStringLiteral( "mono(RED)" ) : QStringLiteral( "marshall-palmer" ) );
 }
 
+/* lane VKAIR5: the `vk airinject:` line (one a 5 s window, or when it changes off Vulkan): runs = stage 0 draws with the
+ * view on Vulkan, drawn = by the twin, gl = refused to GL (glWhy the last), copies = volGbuf copies (0 on the shared depth),
+ * ms = the drawing thread's mean a run; RED when WW_VKVIEW_AIRINJECT_RED=1 keeps GL */
+struct VaAiSay
+{
+	int runs = 0, drawn = 0;
+	double at = 0.0;
+	QString said;
+};
+
+static VaAiSay & vaAiSay()
+{
+	static VaAiSay s;
+	return s;
+}
+
+static void vaAiSayLine( bool wanted )
+{
+	VaAiSay & A = vaAiSay();
+	const bool red = qEnvironmentVariableIntValue( "WW_VKVIEW_AIRINJECT_RED" ) == 1;
+	if ( !wanted ) {
+		const QString line = QStringLiteral( "vk airinject: on GL (%1)%2" )
+			.arg( red ? QStringLiteral( "red" ) : QStringLiteral( "the view not on Vulkan" ) )
+			.arg( red ? QStringLiteral( " [RED WW_VKVIEW_AIRINJECT_RED=1]" ) : QString() );
+		if ( line != A.said ) {
+			A.said = line;
+			qInfo().noquote() << line;
+		}
+		A.runs = A.drawn = 0;
+		return;
+	}
+	static QElapsedTimer clock;
+	if ( !clock.isValid() )
+		clock.start();
+	const double now = double( clock.elapsed() );
+	if ( now - A.at < 5000.0 && !A.said.isEmpty() && !A.said.contains( QStringLiteral( "on GL (" ) ) )
+		return;
+	A.at = now;
+	const WwVkPresent::AirInjectStat st = WwVkPresent::takeAirInjectStat();
+	QString line = QStringLiteral( "vk airinject: runs=%1 drawn=%2 gl=%3 copies=%4 ms=%5" )
+		.arg( A.runs ).arg( A.drawn ).arg( st.gl ).arg( st.copies )
+		.arg( st.runs > 0 ? st.cpuMs / st.runs : 0.0, 0, 'f', 3 );
+	if ( !st.glWhy.empty() )
+		line += QStringLiteral( " glWhy=%1" ).arg( QString::fromStdString( st.glWhy ) );
+	A.said = line;
+	A.runs = A.drawn = 0;
+	qInfo().noquote() << line;
+}
+
 static void vaPassInner( Scene * scene, bool run )
 {
 	if ( !scene || !scene->renderer )
@@ -2838,11 +2889,40 @@ static void vaPassInner( Scene * scene, bool run )
 		&& ao.w > 0 && ao.h > 0;
 	const bool depthOn = tileOn && ( s.opt & 2 );
 	g.tileValid = false;
-	if ( tileOn && ( g.tileCols != cols || g.tileRows != rows || !g.tile ) ) {
-		if ( !g.tile )
-			fn->glGenTextures( 1, &g.tile );
-		fn->glBindTexture( GL_TEXTURE_2D, g.tile );
-		fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RG32F, cols, rows, 0, GL_RG, GL_FLOAT, nullptr );
+	/* lane VKAIR5: while the view is on Vulkan (WW_VKVIEW_AIRINJECT_RED unset) the tile and stage 0's depth are shared
+	 * targets of the present device: the inject's twin (vkairinject.h) draws the tile in place reading the depth in place.
+	 * A red flipped live, or a shutdown that dropped the shared names, makes them again (GL's own: the calls as before) */
+	const std::uintptr_t tileKey = reinterpret_cast<std::uintptr_t>( &g.tile ), zKey = reinterpret_cast<std::uintptr_t>( &g.zTex );
+	const bool aiShare = WwVkPresent::shareWanted( "WW_VKVIEW_AIRINJECT_RED" );
+	if ( tileOn && ( g.tileCols != cols || g.tileRows != rows || !g.tile || g.tileShared != aiShare
+		|| ( g.tileShared && !WwVkPresent::sharedTargetIs( tileKey, g.tile ) ) ) ) {
+		if ( g.tileShared ) {
+			if ( WwVkPresent::sharedTargetIs( tileKey, g.tile ) )
+				WwVkPresent::sharedTargetDrop( tileKey );
+			g.tile = 0;	// the present device's name: dropped there (or by a shutdown), not deleted here
+			g.tileShared = false;
+		}
+		if ( aiShare ) {
+			if ( g.tile ) {
+				fn->glDeleteTextures( 1, &g.tile );
+				g.tile = 0;
+			}
+			unsigned t = 0;
+			std::string why;
+			g.tileShared = WwVkPresent::sharedTarget( tileKey, 0, cols, rows, 1, GL_RG32F, t, why );
+			if ( g.tileShared )
+				g.tile = t;
+			else
+				qInfo().noquote() << "vk airinject: the tile stays GL's (" << QString::fromStdString( why ) << ")";
+		}
+		if ( !g.tileShared ) {
+			if ( !g.tile )
+				fn->glGenTextures( 1, &g.tile );
+			fn->glBindTexture( GL_TEXTURE_2D, g.tile );
+			fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RG32F, cols, rows, 0, GL_RG, GL_FLOAT, nullptr );
+		} else {
+			fn->glBindTexture( GL_TEXTURE_2D, g.tile );
+		}
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
@@ -2858,12 +2938,36 @@ static void vaPassInner( Scene * scene, bool run )
 	 * left empty (the Z gate's 3 px). Red zcolour: the colour's alpha, as before. */
 	const bool zDepth = tileOn && !( s.red & 1048576 ) && ao.depthRb;
 	if ( zDepth ) {
-		if ( !g.zTex || g.zW != ao.w || g.zH != ao.h ) {
-			if ( !g.zTex )
-				fn->glGenTextures( 1, &g.zTex );
-			fn->glBindTexture( GL_TEXTURE_2D, g.zTex );
-			// the obscurance pass's own format (celllights.cpp): a depth blit needs the same on both sides
-			fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, ao.w, ao.h, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, nullptr );
+		if ( !g.zTex || g.zW != ao.w || g.zH != ao.h || g.zShared != aiShare
+			|| ( g.zShared && !WwVkPresent::sharedTargetIs( zKey, g.zTex ) ) ) {
+			if ( g.zShared ) {	// lane VKAIR5: as the tile's
+				if ( WwVkPresent::sharedTargetIs( zKey, g.zTex ) )
+					WwVkPresent::sharedTargetDrop( zKey );
+				g.zTex = 0;
+				g.zShared = false;
+			}
+			if ( aiShare ) {
+				if ( g.zTex ) {
+					fn->glDeleteTextures( 1, &g.zTex );
+					g.zTex = 0;
+				}
+				unsigned t = 0;
+				std::string why;
+				g.zShared = WwVkPresent::sharedTarget( zKey, 0, ao.w, ao.h, 1, GL_DEPTH24_STENCIL8, t, why );
+				if ( g.zShared )
+					g.zTex = t;
+				else
+					qInfo().noquote() << "vk airinject: stage 0's depth stays GL's (" << QString::fromStdString( why ) << ")";
+			}
+			if ( !g.zShared ) {
+				if ( !g.zTex )
+					fn->glGenTextures( 1, &g.zTex );
+				fn->glBindTexture( GL_TEXTURE_2D, g.zTex );
+				// the obscurance pass's own format (celllights.cpp): a depth blit needs the same on both sides
+				fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, ao.w, ao.h, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, nullptr );
+			} else {
+				fn->glBindTexture( GL_TEXTURE_2D, g.zTex );
+			}
 			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
 			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
 			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE );
@@ -2944,7 +3048,30 @@ static void vaPassInner( Scene * scene, bool run )
 			prog->uni1i( "volStage", 0 );
 			prog->uni1i( "volLayer", 0 );
 			PassTime::subBegin( PassTime::AirTile );
-			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+			/* lane VKAIR5: on Vulkan the twin draws the quad into the shared tile (GL's program, uniforms and volGbuf as set
+			 * above); a refusal (named in the vk airinject line) draws on GL */
+			bool aiVk = false;
+			if ( aiShare ) {
+				std::string why;
+				if ( !g.tileShared || !WwVkPresent::sharedTargetIs( tileKey, g.tile ) )
+					why = "the tile is not a shared target";
+				else {
+					WwVkPresent::AirInjectRun run;
+					run.prog = prog->id;
+					run.wwDefs = prog->wwDefs;
+					run.rt = prog->wwDefs.find( "WW_CELL_RTDDGI" ) != std::string::npos;
+					run.cols = cols;
+					run.rows = rows;
+					run.tileKey = tileKey;
+					aiVk = WwVkPresent::airInjectRun( run, *fn, why );
+				}
+				if ( !aiVk )
+					WwVkPresent::airInjectOnGl( why.c_str() );
+				vaAiSay().runs++;
+				vaAiSay().drawn += aiVk ? 1 : 0;
+			}
+			if ( !aiVk )
+				r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 			PassTime::subEnd( PassTime::AirTile );
 			g.tileValid = true;
 		}
@@ -3200,6 +3327,7 @@ static void vaPassInner( Scene * scene, bool run )
 		vaCpu.mark( PassTime::CpuAirFar );
 	}
 	WwVkPresent::fogSay( fogShare, "red WW_VKVIEW_FOG_RED=1 or WW_VKVIEW_AIR_RED=1, or the view not on Vulkan" );	// lane VKFAR2
+	vaAiSayLine( aiShare );	// lane VKAIR5
 	PassTime::subBegin( PassTime::AirPost );
 	// the numbers the dump echoes, read before the program stops
 	float cellRowV[3][4], cellDirColV[3] = { 0, 0, 0 }, cellDirToV[3] = { 0, 0, 0 };
