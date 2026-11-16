@@ -584,9 +584,14 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		put( "cellSsgiOn", { 1 } );
 		put( "cellSsgiRect", { 0.0f, 0.0f, 1.0f / float( kSW ), 1.0f / float( kSH ) } );
 		put( "cellSsgiK", { 1.0f, 1.0f } );
+		const int inactive3 = inactive;
 		put( "cellSsgiRed", { 0 } );
-		colPrintf( "BLVIEW colour ssgi state: unit %d, %d of 4 values with no active location or member\n", ssgiUnit, inactive - inactive0 );
-		if ( ssgiUnit < 0 || inactive != inactive0 || glGetError() != GL_NO_ERROR ) {
+		/* without RT GI (CELL_GI_UP false) cellLit passes cellSsgiE a zero probe, so keep (the only cellSsgiRed read) is
+		 * dead and GL drops cellSsgiRed: required active on the RT set only; the first three always */
+		const bool redDead = inactive != inactive3;
+		colPrintf( "BLVIEW colour ssgi state: unit %d, %d of 3 values with no active location or member; cellSsgiRed %s\n", ssgiUnit,
+			inactive3 - inactive0, redDead ? ( rt ? "not read (FAIL on the RT set)" : "not read (dead: zero probe without RT GI)" ) : "read" );
+		if ( ssgiUnit < 0 || inactive3 != inactive0 || ( rt && redDead ) || glGetError() != GL_NO_ERROR ) {
 			colPrintf( "BLVIEW colour FAIL (no unit for cellSsgi, a cellSsgi value not read, or a GL error making its target)\n" );
 			sharedTargetDrop( ssgiKey );
 			return false;
