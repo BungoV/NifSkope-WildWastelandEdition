@@ -608,7 +608,7 @@ int blOwnKey = 0;  // the unpooled shapes' one pool key (objBlShade waits the la
 }  // namespace
 
 bool vkBlDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * counts, const void * const * offs, GLsizei n,
-	std::size_t verts )
+	std::size_t verts, bool fadeBand )
 {
 	Ctx & c = cx();
 	QOpenGLContext * qc = QOpenGLContext::currentContext();
@@ -650,7 +650,8 @@ bool vkBlDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * coun
 		: ::rtddgiRestirGiShaderDefine() ? "WW_CELL_RESTIRGI in GL's program: no Vulkan twin" : nullptr;
 	if ( no )
 		return refuse( no );
-	if ( rigid && gf->glIsEnabled( GL_BLEND ) )
+	// lane VKOBJ19: a decal-fade piece blends by its own alpha (GL's loose alpha, mirrored per call by objBlLoose)
+	if ( rigid && !fadeBand && gf->glIsEnabled( GL_BLEND ) )
 		return refuse( "a blended rigid shape (the opaque route only)" );
 	static std::vector<std::uint32_t> cmds;
 	cmds.clear();

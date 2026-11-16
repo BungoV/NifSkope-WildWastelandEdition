@@ -573,7 +573,7 @@ void BSShape::drawShapes( NodeList * secondPass )
 			&& !WwBl::vkCellDraw( context->getCurrentProgram(), fadeCounts.data(), fadeOffsets.data(), GLsizei( fadeCounts.size() ),
 				size_t( verts.size() ) )
 			&& !WwBl::vkBlDraw( context->getCurrentProgram(), fadeCounts.data(), fadeOffsets.data(), GLsizei( fadeCounts.size() ),
-				size_t( verts.size() ) ) ) {
+				size_t( verts.size() ), true ) ) {
 			WwBl::multiDrawElements( context->fn, fadeCounts.data(), fadeOffsets.data(), GLsizei( fadeCounts.size() ),
 				GLenum( context->triMode() ) );
 			PassTime::countDraw( qint64( fadeCounts.size() ) );
@@ -609,11 +609,12 @@ void BSShape::drawShapes( NodeList * secondPass )
 				else
 					context->fn->glBlendColor( 0.0f, 0.0f, 0.0f, fadeAlpha[k] );
 				/* lane VKOBJ9: a band draw on a non-bindless twin (vkCellDraw reads GL's loose alpha as set above); the constant-alpha
-				 * band is refused there by name (objBlFrameRead: no blend constants), and the bl twins are not tried (their row
-				 * holds the alpha committed before the band) */
+				 * band is refused there by name (objBlFrameRead: no blend constants). Lane VKOBJ19: then the bl twins (the bl row holds
+				 * no alpha: objBlLoose reads GL's loose alpha per call, so the band's a0 x fade reaches them) */
 				const GLsizei bandCount = GLsizei( fadeBand[2 * k + 1] * 3 );
 				const void * bandOff = (const void *) ( size_t( fadeBand[2 * k] ) * 6 );
-				if ( WwBl::vkCellDraw( cur, &bandCount, &bandOff, 1, size_t( verts.size() ) ) )
+				if ( WwBl::vkCellDraw( cur, &bandCount, &bandOff, 1, size_t( verts.size() ) )
+					|| WwBl::vkBlDraw( cur, &bandCount, &bandOff, 1, size_t( verts.size() ), true ) )
 					continue;
 				WwBl::drawElements( context->fn, bandCount, size_t( fadeBand[2 * k] ) * 6, GLenum( context->triMode() ) );
 				bandGl++;
