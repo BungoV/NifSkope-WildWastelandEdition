@@ -350,7 +350,9 @@ def cloudshadow_jobs():
     return [job('vol', dict(base, csMode=[1]), MARCH_RULE,
                 [('od += kCvSigma * d * dh / csS.z;', 'od += kCvSigma * d * dh / csS.z * 0.98f;')]),
             job('band', dict(mapped, csMode=[3]), CS_RULE, [('kept *= 1.0 - c;', 'kept *= 1.0 - c * 0.98f;')]),
-            job('beer', dict(mapped, csMode=[2]), CS_RULE,
+            # seeding fix after run 1 (the bar unchanged): at the march's density tau was so thick that exp(-tau) was
+            # 0 and the red (tau x 0.98) read EXACT; at 1/50 of it T depends on tau and the red reaches its term
+            job('beer', dict(mapped, csMode=[2], **{'cvBands.density': [x * 0.02 for x in base['cvBands.density']]}), CS_RULE,
                 [('float T = 1.0 - c * ( 1.0 - exp( -tau ) );', 'float T = 1.0 - c * ( 1.0 - exp( -tau * 0.98f ) );')]),
             job('sheets', dict(mapped, csMode=[3], csSheetN=[2]), CS_RULE,
                 [('kept *= 1.0 - cover;', 'kept *= 1.0 - cover * 0.98f;'),
