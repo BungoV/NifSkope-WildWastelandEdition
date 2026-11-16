@@ -138,10 +138,12 @@ VKFRAME_FXP = {'objpfx_cs': ('pfx_view_cs', 'cs_6_0', 'VS_SHIFT', ''), 'objpfx_v
 	'objpfx_cell_rt_ps': ('particles_cell_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXC_RT)}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXP]
 # lane VKOBJ10: the script's `fxo` lines, taa_objvel.prog's twins (res/shaders/hlsl/post), no loader defines
-VKFRAME_FXO = {'objvel_vs': ('taa_objvel_vs', 'vs_6_0', 'VS_SHIFT'), 'objvel_ps': ('taa_objvel_ps', 'ps_6_0', 'PS_SHIFT')}
+VKFRAME_FXO = {'objvel_vs': ('taa_objvel_vs', 'vs_6_0', 'VS_SHIFT'), 'objvel_ps': ('taa_objvel_ps', 'ps_6_0', 'PS_SHIFT'),
+               'camvel_ps': ('game_taa_mv_ps', 'ps_6_0', 'PS_SHIFT')}	# lane VKOBJ18: game_taa_mv.prog's pixel stage
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXO]
 # lane VKOBJ15: the script's `fxe` lines, boltstrip.prog's twins (res/shaders/hlsl/core), no loader defines
-VKFRAME_FXE = {'bolt_view_vs': ('boltstrip_vs', 'vs_6_0', 'VS_SHIFT'), 'bolt_view_ps': ('boltstrip_ps', 'ps_6_0', 'PS_SHIFT')}
+VKFRAME_FXE = {'bolt_view_vs': ('boltstrip_vs', 'vs_6_0', 'VS_SHIFT'), 'bolt_view_ps': ('boltstrip_ps', 'ps_6_0', 'PS_SHIFT'),
+               'camvel_vs': ('cell_ao_vs', 'vs_6_0', 'VS_SHIFT')}	# lane VKOBJ18: game_taa_mv.prog's vertex stage
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXE]
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
 DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'

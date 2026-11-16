@@ -218,6 +218,8 @@ fxo() {
 }
 fxo objvel_vs taa_objvel_vs vs_6_0 "$VS_SHIFT"
 fxo objvel_ps taa_objvel_ps ps_6_0 "$PS_SHIFT"
+# lane VKOBJ18: game_taa_mv.prog's pixel stage, the TAA inputs' camera vectors (taainputs.cpp step 2)
+fxo camvel_ps game_taa_mv_ps ps_6_0 "$PS_SHIFT"
 # lane VKOBJ15: boltstrip.prog (res/shaders/hlsl/core), the lightning strips (controllers.cpp drawPreview). No loader
 # defines; every binding kept
 fxe() {
@@ -227,4 +229,6 @@ fxe() {
 }
 fxe bolt_view_vs boltstrip_vs vs_6_0 "$VS_SHIFT"
 fxe bolt_view_ps boltstrip_ps ps_6_0 "$PS_SHIFT"
+# lane VKOBJ18: game_taa_mv.prog's vertex stage (cell_ao.vert, the full-screen quad)
+fxe camvel_vs cell_ao_vs vs_6_0 "$VS_SHIFT"
 ls -la csm_view_vs.spv.h obj_depth_vs.spv.h sky_view_ps.spv.h bloom_down.spv.h bloom_hold.spv.h bloom_up.spv.h bloom_src.spv.h bloom_comb.spv.h bloom_back.spv.h tonemap.spv.h measure_q.spv.h tone_view_vs.spv.h tone_view_ps.spv.h taa_view_mv_cs.spv.h taa_view_resolve_cs.spv.h taa_view_rcas_ps.spv.h
