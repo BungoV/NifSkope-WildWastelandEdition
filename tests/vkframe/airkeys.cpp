@@ -6,6 +6,7 @@
 // make the 4 targets of entry 1, insert entries until entry 1's value address moves, ensure again, count shareds().
 // Bar (set before the first run, never widened): the value moved (else TESTS NOTHING); after the move 0 re-makes,
 // live shared targets == 4, each key still sharedTargetIs; GL raised no error.
+// VKAIR10: "4" is now VaVkKeys::kSlots (the same bar for every slot; 4 when it was written, 13 after the append).
 // Red (must FAIL): keys = the member addresses (the old route): after the move the count grows past 4.
 // tests/vkframe/airkeys.sh also checks the wire: cellvolair.cpp has no `uintptr_t>( &g.` key left and uses vkKeys.at.
 // Last line `AIRKEYS GATE OK` or `AIRKEYS GATE FAILED`.
@@ -89,11 +90,13 @@ bool arm( bool red )
 	}
 	const size_t live = shareds().size() - before;
 	const GLenum err = glGetError();
-	const bool pass = made0 == 4 && moved && made1 == 0 && live == 4 && keysKept == 4 && isShared == 4 && err == GL_NO_ERROR;
-	std::printf( "AIRKEYS %s: made %d, value moved %s after %d inserts (0x%llx -> 0x%llx), re-made after the move %d, keys kept %d of 4, "
-				 "shared %d of 4, live shared targets %zu (bar 4), GL error 0x%x: %s\n",
+	// VKAIR10: the bar is every slot VaVkKeys holds (4 until VKAIR10 appended the stage-1 / lamp-volume slots)
+	const int n = VaVkKeys::kSlots;
+	const bool pass = made0 == n && moved && made1 == 0 && live == static_cast<size_t>( n ) && keysKept == n && isShared == n && err == GL_NO_ERROR;
+	std::printf( "AIRKEYS %s: made %d, value moved %s after %d inserts (0x%llx -> 0x%llx), re-made after the move %d, keys kept %d of %d, "
+				 "shared %d of %d, live shared targets %zu (bar %d), GL error 0x%x: %s\n",
 		name, made0, moved ? "yes" : "NO", inserts, (unsigned long long)addr0, (unsigned long long)reinterpret_cast<std::uintptr_t>( &h[k1] ),
-		made1, keysKept, isShared, live, unsigned( err ), pass ? "PASS" : "FAIL" );
+		made1, keysKept, n, isShared, n, live, n, unsigned( err ), pass ? "PASS" : "FAIL" );
 	if ( !moved )
 		std::printf( "AIRKEYS %s: TESTS NOTHING (the value never moved)\n", name );
 	// drop everything this arm made (the red's old keys included)
