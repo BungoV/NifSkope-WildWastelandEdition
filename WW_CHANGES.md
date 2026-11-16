@@ -1,3 +1,12 @@
+## VKFAR30 (2026-11-16): the far LOD rings draw on Vulkan with all settings on (the half-rate screen GI read in place)
+
+Changed, not checked in the app.
+- With the half-rate screen GI on (the all-on settings), the far LOD rings' all-on Vulkan twin now reads GL's screen GI
+  and its key in place: the shared images found by name (cellGiHalf / cellGiHalfKey). Before, every such draw stayed on
+  GL ("cellGiHalf / cellGiHalfKey are not shared"). A name that is not the shared image stays on GL, named in the
+  `vk far: LOD rings` line. Offline gate tests/vkframe/farlodrtdraw.sh: the all-on arm matches GL; the not shared, wrong image
+  and stale image checks each fail as they must.
+
 ## VKFAR15 (2026-11-15): the far ground and far LOD rings stay on GL while RT GI or ReSTIR is on
 
 Changed, not built, not checked live.
