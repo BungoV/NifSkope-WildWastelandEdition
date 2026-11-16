@@ -14,11 +14,12 @@
 // Bar (set before the first run, never widened): every arm EXACT (0 texels differ), read twice equal, no GL error.
 // Job checks (else the job cannot judge): 0 < occupancy < total, gv0 holds only 0 / 255, gv1..gv3 only 0..15, each pass
 // changes its input, some slice differs from slice 0 and at least one adjacent slice pair differs.
-// Reds (each must FAIL; printed "N of M texels differ, U unwritten", moved = differ - unwritten):
-//   stuck    every slice drawn into slice 0 (FlyBakeRun.red 1): moved > 0
-//   offby1   slice k drawn into slice k + 1 (red 2): moved > 0
+// Reds (each must FAIL = texels differ on a fresh sentinel, read twice equal; printed "N of M texels differ, U unwritten",
+// moved = differ - unwritten; stuck shows only as unwritten on this job: slice 15, drawn last into slice 0, equals slice 0):
+//   stuck    every slice drawn into slice 0 (FlyBakeRun.red 1)
+//   offby1   slice k drawn into slice k + 1 (red 2)
 //   glwrites the route with redGlWrites (GL draws after Vulkan): GL_SAMPLES_PASSED > 0
-//   swap     the other pass's program (red 4: cloud_flysdf, b31 zero but cfLayer), run LAST: moved > 0
+//   swap     the other pass's program (red 4: cloud_flysdf, b31 zero but cfLayer), run LAST
 // Last line `FLYBAKEVIEW GATE OK` or `FLYBAKEVIEW GATE FAILED`.
 #define main fxview_main
 #include "fxview.cpp"
@@ -282,7 +283,8 @@ int main( int argc, char ** argv )
 		ok = ok && exact;
 	};
 	auto redArm = [&]( const std::string & name, const Res & r, bool ran ) {
-		const bool bit = ran && r.moved() > 0;
+		// the sentinel is cleared right before each red and every green reads 0 unwritten: a texel left at 200 is the red's miss
+		const bool bit = ran && r.twice && r.diff > 0;
 		std::printf( "FLYBAKEVIEW red %s: %s (%zu of %zu texels differ, %zu unwritten, %zu moved%s)\n", name.c_str(), bit ? "FAIL" : "EXACT", r.diff,
 			r.total, r.unwritten, r.moved(), ran ? "" : ", the run was refused" );
 		if ( !bit ) {
