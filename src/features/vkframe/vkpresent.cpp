@@ -81,6 +81,8 @@
 #include "features/vkframe/cloudmap_view_vs.spv.h"  // lane VKCLOUD4: the cloud map's build (vkcloudmap.inc)
 #include "features/vkframe/cloudmap_view_ps.spv.h"
 #include "features/vkframe/vkcloudmap.h"
+#include "features/vkframe/depthmax_view_ps.spv.h"  // lane VKSMALL2: the frame's farthest depth (vkdepthmax.inc)
+#include "features/vkframe/vkdepthmax.h"
 #include "features/vkframe/cloud_composite_view_ps.spv.h"  // lane VKFAR2 (row P8): the clouds in front (vkcloudfront.inc)
 // lane VKFAR2 (row L8 slice 1): rain / snow as a record pass + instanced quads (vkprecip.inc)
 #include "features/vkframe/precip_view_cs.spv.h"
@@ -786,6 +788,7 @@ bool underRecord( std::string & why );  // lane VKWATER4 (vkunder.inc): fxWork's
 bool taRecord( std::string & why );  // lane VKFAR7 (vktaareactive.inc): fxWork's kind 11, the TAA mask's reactive pass
 bool csRecord( std::string & why );  // lane VKCLOUD3 (vkcloudshadow.inc): fxWork's kind 12, the cloud shadow map's build
 bool cmRecord( std::string & why );  // lane VKCLOUD4 (vkcloudmap.inc): fxWork's kind 13, the cloud map's build
+bool dmRecord( std::string & why );  // lane VKSMALL2 (vkdepthmax.inc): fxWork's kind 14, the frame's farthest depth
 void waterDrop();
 void underDrop();  // lane VKWATER4 (vkunder.inc)
 void objDrop();  // lane VKOBJ1
@@ -5650,7 +5653,7 @@ struct Fx
 	VkFence fence = VK_NULL_HANDLE;
 	bool pending = false;
 	// this run's job, written by the drawing thread before the hand
-	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1), 3 the far cards (lane VKFAR2), 4 the water draw (lane VKWATER3), 6 the fog bloom (lane VKFAR2), 8 rain / snow (lane VKFAR2), 9 the far ground (lane VKFAR3), 10 the underwater fog (lane VKWATER4), 11 the TAA mask's reactive pass (lane VKFAR7), 12 the cloud shadow map (lane VKCLOUD3)
+	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1), 3 the far cards (lane VKFAR2), 4 the water draw (lane VKWATER3), 6 the fog bloom (lane VKFAR2), 8 rain / snow (lane VKFAR2), 9 the far ground (lane VKFAR3), 10 the underwater fog (lane VKWATER4), 11 the TAA mask's reactive pass (lane VKFAR7), 12 the cloud shadow map (lane VKCLOUD3), 13 the cloud map (lane VKCLOUD4), 14 the farthest depth (lane VKSMALL2)
 	VkFramebuffer fbAir = VK_NULL_HANDLE, fbM = VK_NULL_HANDLE, fbR = VK_NULL_HANDLE;
 	int w = 0, h = 0, vp[4] = {}, stencilRef = 1, march = kFxMarch, resolve = kFxResolve, mw = 0, mh = 0, hw = 0, hh = 0;
 	bool blend = false, skipMarch = false;
@@ -6125,6 +6128,11 @@ bool fxWork( std::string & why )
 		}
 	} else if ( F.kind == 13 ) {  // lane VKCLOUD4: the cloud map's build
 		if ( !cmRecord( why ) ) {
+			v.vkEndCommandBuffer( F.cmd );
+			return false;
+		}
+	} else if ( F.kind == 14 ) {  // lane VKSMALL2: the frame's farthest depth (cellhdr.cpp depthMaxMake)
+		if ( !dmRecord( why ) ) {
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
 		}
@@ -9938,3 +9946,4 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 #include "features/vkframe/vklamp.inc"  // lane VKLAMP1: the lamps' plain shadow cubes (celllamps.cpp)
 #include "features/vkframe/vkcloudshadow.inc"  // lane VKCLOUD3: the cloud shadow map's build (cloudshadow.cpp)
 #include "features/vkframe/vkcloudmap.inc"  // lane VKCLOUD4: the cloud map's build (cloudmap.cpp)
+#include "features/vkframe/vkdepthmax.inc"  // lane VKSMALL2: the frame's farthest depth (cellhdr.cpp depthMaxMake)
