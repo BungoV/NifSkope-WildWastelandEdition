@@ -619,10 +619,10 @@ int main( int argc, char ** argv )
 			bindUnit( u.atlas, GL_TEXTURE_2D, 0 );
 			bindUnit( u.table, 0x8C2A, 0 );
 		}
-		if ( boundDdgi || boundRestir ) {
+		if ( ( boundDdgi || boundRestir ) && u.ddgi >= 0 )	// a def-key draw has no RT units
 			bindUnit( u.ddgi, 0x8C2A, 0 );
+		if ( ( boundDdgi || boundRestir ) && u.restir >= 0 )
 			bindUnit( u.restir, 0x8C2A, 0 );
-		}
 	};
 
 	// GL's stage 1 as vaPassInner draws it (64 layers, MRT 1 + strata) into GL's own targets (the sentinel first)

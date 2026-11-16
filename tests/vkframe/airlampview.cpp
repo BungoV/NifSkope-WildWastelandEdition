@@ -682,10 +682,10 @@ int main( int argc, char ** argv )
 			bindUnit( u.atlas, GL_TEXTURE_2D, 0 );
 			bindUnit( u.table, kLvTb, 0 );
 		}
-		if ( gRtOn ) {
+		if ( gRtOn && u.ddgi >= 0 )	// the history draws the def key (no RT units) inside the all-on arm
 			bindUnit( u.ddgi, kLvTb, 0 );
+		if ( gRtOn && u.restir >= 0 )
 			bindUnit( u.restir, kLvTb, 0 );
-		}
 	};
 	// GL's stage 4 as vaPassInner draws it (64 layers, MRT 2) into outHist / outNow (the sentinel first)
 	auto glDraw = [&]( int key, int histOk, int frame, GLuint outHist, GLuint outNow, const Bound & b, std::string & err, bool layerStuck = false ) {
