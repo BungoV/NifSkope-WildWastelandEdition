@@ -5,6 +5,7 @@
  * farlod, farlodrun), as the water has its own (lanes VKWATER3, VKWATER4). */
 #include "features/vkframe/fargnd_view_vs.spv.h"  // vkframe_spirv.sh's fxt / fxg lines
 #include "features/vkframe/fargnd_view_ps.spv.h"
+#include "features/vkframe/fargndp_view_ps.spv.h"  // lane VKGROUND3: mode 2, fo4_cellcsmfgp's twin
 
 namespace
 {
@@ -36,6 +37,33 @@ const TwinSpec kFargndSpec { "far ground", vkframe_fargnd_view_vs_spv, sizeof( v
 	sizeof( kFargndInts ) / sizeof( kFargndInts[0] ), WwVkPresent::kT_fargndPsBytes, kFargndConstAt, kFargndHostBytes, true, 9, true };
 
 WaterDraw & farGroundD()
+{
+	static WaterDraw D;
+	return D;
+}
+
+// lane VKGROUND3: mode 2 (Live, cached pages). Its pixel stage declares mode 1's images less fgDecal / fgAtlas, plus the
+// cell table fgCells (RGBA16UI, an integer image) and the BC1 page pools fgPagesN / fgPagesF (spvh_binds of the header)
+const WaterImgName kFargndpImg[] = { { 64, "cellLights" }, { 68, "cellIsLut" }, { 69, "cellIsBloom" }, { 70, "cellShadow" },
+	{ 72, "cellFarSlots" }, { 73, "cellFarRecs" }, { 74, "cellFarPlaced" }, { 77, "cellCtGbuf" }, { 80, "cellSsgi" }, { 81, "fgGrid" },
+	{ 82, "fgLtex" }, { 86, "fgCells" }, { 87, "fgPagesN" }, { 88, "fgPagesF" }, { 89, "atApTex" }, { 90, "volTex" }, { 91, "volTile" },
+	{ 92, "volAirTerr" }, { 93, "volAirRainMap" }, { 94, "volAirNoise" }, { 95, "csmMap" }, { 96, "ussTerrMap" }, { 97, "ussContactMap" },
+	{ 98, "ussCloudMap" }, { 99, "waterInfoIndex" }, { 100, "waterInfoAtlas" }, { 101, "waterInfoBodies" }, { 106, "cellAo" },
+	{ 107, "cellSsr" }, { 109, "cellCluster" }, { 110, "rainCover" }, { 111, "landShoreIndex" }, { 112, "landShoreAtlas" },
+	{ 114, "BaseMap" }, { 115, "NormalMap" }, { 116, "GlowMap" }, { 117, "BacklightMap" }, { 118, "SpecularMap" },
+	{ 119, "GreyscaleMap" }, { 120, "EnvironmentMap" }, { 121, "CubeMap" }, { 122, "RefractionSrc" }, { 123, "LandLodDiff" },
+	{ 124, "LandLodOuter" }, { 125, "LandLodNoise" }, { 126, "LandLodDetail" }, { 127, "farSkyMap" }, { 65, "cellGi" },
+	{ 66, "cellGiSlots" }, { 67, "cellRooms" }, { 79, "cellAoDecal" }, { 102, "waterFlowIndex" }, { 103, "waterFlowAtlas" },
+	{ 200, "farStream" } };
+const std::uint32_t kFargndpInts[] = { 81, 86, 99, 100, 102, 103, 111, 112 };
+static_assert( kWaterPsLooseAt + WwVkPresent::kT_fargndpPsBytes <= kFargndConstAt && WwVkPresent::kT_fargndpPsBytes <= WwVkPresent::kTwinPsMax,
+	"mode 2's pixel block in the far ground's host buffer layout" );
+const TwinSpec kFargndpSpec { "far ground pages", vkframe_fargnd_view_vs_spv, sizeof( vkframe_fargnd_view_vs_spv ),
+	vkframe_fargndp_view_ps_spv, sizeof( vkframe_fargndp_view_ps_spv ), kFargndpImg, sizeof( kFargndpImg ) / sizeof( kFargndpImg[0] ),
+	kFargndpInts, sizeof( kFargndpInts ) / sizeof( kFargndpInts[0] ), WwVkPresent::kT_fargndpPsBytes, kFargndConstAt, kFargndHostBytes,
+	true, 18, true };  // fxWork kind 18 (VKMERGE1: 12 is vkcloud1's cloud shadow; 0-17 taken, 19 VKCLOUD5, 20 VKAIR12)
+
+WaterDraw & farGroundPD()
 {
 	static WaterDraw D;
 	return D;
@@ -164,6 +192,44 @@ FxStat takeFarGroundDrawStat()
 {
 	return farlodrun::takeTwinStat( farlod::farGroundD() );
 }
+
+// lane VKGROUND3: mode 2 (Live, cached pages), one crossing a shape (no batching yet)
+static WaterStat & farGroundLiveGlS()
+{
+	static WaterStat s;
+	return s;
+}
+
+void farGroundLiveOnGl( const char * why )
+{
+	WaterStat & s = farGroundLiveGlS();
+	s.gl++;
+	s.glWhy = why ? why : "";
+}
+
+WaterStat takeFarGroundLiveGlStat()
+{
+	WaterStat s = farGroundLiveGlS();
+	farGroundLiveGlS() = WaterStat();
+	return s;
+}
+
+std::string farGroundLiveDrawRefusal()
+{
+	return farlod::farGroundPD().broken ? farlod::farGroundPD().brokenWhy : farlodrun::twinDrawRefusal();
+}
+
+bool farGroundLiveRun( const WaterRun & r, std::string & why )
+{
+	if ( !farGroundFlush( why ) )	// mode 1's queued tiles draw first (GL's order)
+		return false;
+	return farlodrun::twinRun( farlod::farGroundPD(), farlod::kFargndpSpec, r, why );
+}
+
+FxStat takeFarGroundLiveDrawStat()
+{
+	return farlodrun::takeTwinStat( farlod::farGroundPD() );
+}
 }  // namespace WwVkPresent
 
 #ifndef WW_VKPRESENT_NO_QT
@@ -199,6 +265,35 @@ void farGroundSay( bool wanted, const char * glWhy )
 		line += QStringLiteral( "; batched: %1 crossings for %2 draws, %3 lost, %4 fence slips%5" ).arg( bs.crossings ).arg( bs.draws )
 			.arg( bs.lost ).arg( bs.slips )
 			.arg( bs.off ? QStringLiteral( ", off (one crossing a tile): " ) + QString::fromStdString( bs.offWhy ) : QString() );
+	said = line;
+	qInfo().noquote() << line;
+}
+
+void farGroundLiveSay( bool wanted, const char * glWhy )
+{
+	static QString said;
+	static double at = 0.0;
+	const QString head = QStringLiteral( "vk fargroundlive: " );
+	if ( !wanted ) {
+		const QString line = head + QStringLiteral( "on GL (%1)" ).arg( QString::fromUtf8( glWhy ? glWhy : "" ) );
+		if ( line != said ) {
+			said = line;
+			qInfo().noquote() << line;
+		}
+		return;
+	}
+	const double now = nowMs();
+	if ( now - at < 5000.0 && said.startsWith( head + QStringLiteral( "wanted" ) ) )
+		return;
+	at = now;
+	const WaterStat st = takeFarGroundLiveGlStat();
+	const FxStat ds = takeFarGroundLiveDrawStat();
+	QString line = head + QStringLiteral( "wanted on Vulkan, %1 draws run (fo4_cellcsmfgp twins, mode 2 cached pages, into the tone "
+		"frame; %2 ms CPU each, max %3, %4 copies, %5 fails%6); on GL %7 draws" )
+		.arg( ds.runs ).arg( ds.runs ? ds.cpuMs / ds.runs : 0.0, 0, 'f', 3 ).arg( ds.maxMs, 0, 'f', 3 ).arg( ds.copies ).arg( ds.fails )
+		.arg( ds.failWhy.empty() ? QString() : QStringLiteral( ": " ) + QString::fromStdString( ds.failWhy ) ).arg( st.gl );
+	if ( !st.glWhy.empty() )
+		line += QStringLiteral( " (refused: %1)" ).arg( QString::fromStdString( st.glWhy ) );
 	said = line;
 	qInfo().noquote() << line;
 }

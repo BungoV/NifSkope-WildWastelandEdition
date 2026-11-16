@@ -16,6 +16,10 @@
 // ALWAYS, 16 polygon offset dropped (vkwater.inc); gate-side: 64 the element offset passed in bytes (vkDraw's idxOff / 2
 // dropped), 128 the grid's weights rewritten after GL's draw (a twin that does not read fgGrid passes), 256 the decal records
 // moved after GL's draw (fgDecal not read). Last line `FARGROUNDDRAW GATE OK` or `FARGROUNDDRAW GATE FAILED`.
+// Lane VKGROUND5, the cellSsgi row (seed 1, all-on's SSGI: cellSsgiOn 1): cellSsgi on a shared image the gate owns (RGBA16F,
+// work size, as cellssgi.cpp's finShare makes it on the view), the plain texture's bytes copied in. GL on it vs GL on the plain
+// one EXACT; the twin on it judged by the bar with exactly one copy fewer than the main row's red 0 (read in place); red 512:
+// cellSsgi unbound (the twin's zero stand-in, GL's reference still reads it) must FAIL.
 #define FLD_NO_MAIN
 #include "farloddraw.cpp"
 #undef FLD_NO_MAIN
@@ -828,6 +832,31 @@ int main( int argc, char ** argv )
 					v[0], v[1], v[2], v[3], iv[0], iv[1], iv[2], iv[3] );
 			}
 		}
+		{	/* lane VKGROUND5 (VKGROUND4's fgpagesdraw fix): volPackDims.xyz = the packed air volume's size in texels, as
+			 * cellvolair.cpp sets it. Seeded in [0.05, 1) it made wwGridAt's clamp( uv * share, 0.5 / dims, share - 0.5 / dims )
+			 * run with lo > hi (undefined in GLSL and SPIR-V; NV's two compilers differ) on seed 1, whose far air grid is on */
+			const GLint l = f.getUniformLocation( pFg, "volPackDims" ), lp = f.getUniformLocation( pFg, "volPack" );
+			const Smp * vt = nullptr;
+			for ( const Smp & s : smp )
+				if ( s.name == "volTex" )
+					vt = &s;
+			if ( l >= 0 && vt ) {
+				float pd[4] = {}, pk[4] = {};
+				f.getUniformfv( pFg, l, pd );
+				if ( lp >= 0 )
+					f.getUniformfv( pFg, lp, pk );
+				pd[0] = float( vt->w );
+				pd[1] = float( vt->h );
+				pd[2] = float( vt->d );
+				f.uniform4fv( l, 1, pd );
+				const bool ok = pk[0] >= 1.0f / pd[0] && pk[1] >= 1.0f / pd[1] && pk[2] >= 1.0f / pd[0] && pk[3] >= 1.0f / pd[1];
+				std::printf( "FARGROUNDDRAW seed %d volPackDims %g x %g x %g (volTex), volPack shares %s the half-texel clamp\n", seed,
+					double( pd[0] ), double( pd[1] ), double( pd[2] ), ok ? "inside" : "OUTSIDE" );
+				if ( !ok )
+					return fatal( "volPack under one texel of the air volume (wwGridAt's clamp undefined)" );
+			} else if ( l >= 0 )
+				return fatal( "volPackDims read but no volTex sampler" );
+		}
 		std::printf( "FARGROUNDDRAW seed %d: %d loose uniforms seeded%s, fgMode 1, decals on\n", seed, nu, scissor ? ", a scissor" : "" );
 
 		auto glDraw = [&]() {
@@ -950,6 +979,97 @@ int main( int argc, char ** argv )
 			std::printf( "FARGROUNDDRAW seed 1 copies a run: %d on the shared inputs, %d on plain ones (%s)\n", copiesShared, copiesPlain,
 				fewer ? "fgGrid, fgLtex, fgAtlas read in place" : "NOT three fewer" );
 			gateOk = gateOk && fewer;
+		}
+		if ( seed == 1 ) {	// lane VKGROUND5: the cellSsgi row (header)
+			int iSsgi = -1;
+			for ( size_t k = 0; k < smp.size(); k++ )
+				if ( smp[k].name == "cellSsgi" )
+					iSsgi = int( k );
+			if ( iSsgi < 0 || smp[size_t( iSsgi )].unbound || smp[size_t( iSsgi )].kind != 0 || !smp[size_t( iSsgi )].tex )
+				return fatal( "cellSsgi is not a bound 2D input of the program" );
+			using GetUi = void( WINAPI * )( GLuint, GLint, GLint * );
+			const auto getUi = reinterpret_cast<GetUi>( wglGetProcAddress( "glGetUniformiv" ) );
+			const GLint onLoc = f.getUniformLocation( pFg, "cellSsgiOn" );
+			GLint ssgiOn = -1;
+			if ( getUi && onLoc >= 0 )
+				getUi( pFg, onLoc, &ssgiOn );
+			Smp & ss = smp[size_t( iSsgi )];
+			const GLuint plainSsgi = ss.tex;
+			static char ssgiKey;
+			unsigned shTex = 0;
+			if ( !WwVkPresent::sharedTarget( reinterpret_cast<std::uintptr_t>( &ssgiKey ), 0, ss.w, ss.h, 1, ss.fmt, shTex, why ) )
+				return fatal( "sharedTarget cellSsgi: " + why );
+			glBindTexture( GL_TEXTURE_2D, shTex );
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, 0x812F );
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, 0x812F );
+			glTexParameteri( GL_TEXTURE_2D, fMaxLevel, 0 );
+			glBindTexture( GL_TEXTURE_2D, 0 );
+			copyImg( plainSsgi, GL_TEXTURE_2D, 0, 0, 0, 0, shTex, GL_TEXTURE_2D, 0, 0, 0, 0, ss.w, ss.h, 1 );
+			ss.tex = shTex;
+			before( fbRef );
+			drawState( fbRef, scissor );
+			glDraw();
+			stateEnd();
+			const std::vector<std::uint16_t> shC = readColor( refCol );
+			const std::vector<float> shD = readDepth( refDs, false );
+			size_t cDiff = 0, dDiff = 0;
+			for ( size_t i = 0; i < shC.size() && i < glC.size(); i++ )
+				cDiff += shC[i] != glC[i];
+			for ( size_t i = 0; i < shD.size() && i < glD.size(); i++ )
+				dDiff += shD[i] != glD[i];
+			const bool exact = !cDiff && !dDiff && shC.size() == glC.size() && shD.size() == glD.size() && glGetError() == GL_NO_ERROR;
+			std::printf( "FARGROUNDDRAW seed 1 cellSsgi row: cellSsgiOn %d, cellSsgi %d x %d fmt 0x%X on a shared image of the gate's own; "
+				"GL shared vs plain cellSsgi: %s (%zu colour halves, %zu depth samples differ)\n", int( ssgiOn ), ss.w, ss.h, unsigned( ss.fmt ),
+				exact ? "EXACT" : "DIFFER", cDiff, dDiff );
+			gateOk = gateOk && exact && ssgiOn == 1;
+			int copiesSsgi = -1;
+			for ( const int red : { 0, 512 } ) {
+				ss.tex = red ? 0 : shTex;	// red 512: cellSsgi unbound on the twin's side only (GL's reference read it)
+				before( fbFrame );
+				drawState( fbFrame, scissor );
+				WwVkPresent::WaterRun r;
+				WwVkPresent::farGroundStateOf( &gw, pFg, r );
+				r.w = W;
+				r.h = H;
+				r.color = fc;
+				WwVkPresent::WaterCmd c;
+				c.count = count;
+				c.instanceCount = 1;
+				c.firstIndex = std::uint32_t( idxOff / 2 );
+				c.baseVertex = base;
+				c.baseInstance = 0;
+				r.cmds.assign( 1, c );
+				r.key = reinterpret_cast<std::uintptr_t>( twinKeys );
+				r.red = 0;
+				const bool ran = WwVkPresent::farGroundRun( r, why );
+				stateEnd();
+				runs++;
+				const int copies = take().copies;
+				if ( !red )
+					copiesSsgi = copies;
+				if ( !ran ) {
+					std::printf( "FARGROUNDDRAW seed 1 cellSsgi row red %d: REFUSED (%s)\n", red, why.c_str() );
+					gateOk = false;
+					continue;
+				}
+				const Verdict v = judge( bgC, bgD, readColor( fc ), readDepth( fds, true ), glC, glD );
+				const bool fail = std::strcmp( v.word(), "FAIL" ) == 0;
+				std::printf( "FARGROUNDDRAW seed 1 cellSsgi row red %d%s: %s covered %zu (both %zu, one side only %zu), depth max %ld D24 units "
+					"(%zu past 1), colour %zu halves differ, %zu samples past 1e-2 (max rel %.3g), %d copies%s\n", red,
+					red ? " (cellSsgi dropped to the stand-in)" : " (cellSsgi shared)", v.word(), v.covered, v.both, v.onlyOne, v.maxDepthU,
+					v.depthPast, v.halvesDiff, v.colPast, v.maxRel, copies,
+					red ? ( fail ? " -> red FAILS as it must" : " -> red PASSES: the gate is blind" ) : "" );
+				if ( red ? !fail : fail )
+					gateOk = false;
+			}
+			ss.tex = plainSsgi;
+			WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &ssgiKey ) );
+			const bool inPlace = copiesShared >= 0 && copiesSsgi >= 0 && copiesShared - copiesSsgi == 1;
+			std::printf( "FARGROUNDDRAW seed 1 cellSsgi copies a run: %d on the shared cellSsgi, %d on the plain one (%s)\n", copiesSsgi,
+				copiesShared, inPlace ? "cellSsgi read in place, 0 copies of it" : "NOT one fewer" );
+			gateOk = gateOk && inPlace;
 		}
 	}
 	std::printf( "FARGROUNDDRAW %d runs: %d on Vulkan, %.2f ms CPU each (max %.2f; the harness's hand-off wait included), %d fails, "

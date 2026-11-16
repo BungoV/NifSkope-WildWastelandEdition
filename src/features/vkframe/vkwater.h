@@ -585,6 +585,12 @@ template <class Fn> void farGroundStateOf( Fn * fn, unsigned prog, WaterRun & r 
 	twinStateOf( fn, prog, r, kT_fargndPs, int( sizeof( kT_fargndPs ) / sizeof( kT_fargndPs[0] ) ), kT_fargndPsBytes );
 }
 
+//! lane VKGROUND3: far ground mode 2's side (fo4_cellcsmfgp's twin: Live, cached pages), the same vertex array
+template <class Fn> void farGroundLiveStateOf( Fn * fn, unsigned prog, WaterRun & r )
+{
+	twinStateOf( fn, prog, r, kT_fargndpPs, int( sizeof( kT_fargndpPs ) / sizeof( kT_fargndpPs[0] ) ), kT_fargndpPsBytes );
+}
+
 //! lane VKWATER1: the device's side of the verdict (vkwater.inc)
 WaterCaps waterCaps();
 /*! lane VKWATER2: one census input's twin on the present device, GL current: sharedTarget (colour, integer, depth 2D /
@@ -649,6 +655,14 @@ bool farGroundFlush( std::string & why );
 int farGroundQueued();
 bool farGroundRunN( const WaterRun * const * rs, int n, std::string & why );
 TwinBatchStat takeFarGroundBatchStat();
+/*! lane VKGROUND3: far ground mode 2 (Show > Far ground: Live, cached pages; fo4_default vs + fo4_cellcsmfgp FOGLEAK +
+ * FRAME_UBO ps twins; r from farGroundLiveStateOf, one command a shape) into the tone frame, one crossing. Flushes mode 1's
+ * queue first. false: why (GL draws it) */
+bool farGroundLiveRun( const WaterRun & r, std::string & why );
+std::string farGroundLiveDrawRefusal();
+FxStat takeFarGroundLiveDrawStat();
+void farGroundLiveOnGl( const char * why );
+WaterStat takeFarGroundLiveGlStat();
 }
 
 #ifndef WW_VKPRESENT_NO_QT
@@ -660,5 +674,7 @@ void waterSay( bool wanted, const char * glWhy );
 void farLodSay( bool wanted, const char * glWhy );
 //! lane VKFAR3: the far ground's route line ("vk farground:"), the same shape
 void farGroundSay( bool wanted, const char * glWhy );
+//! lane VKGROUND3: far ground mode 2's route line ("vk fargroundlive:"), the same shape
+void farGroundLiveSay( bool wanted, const char * glWhy );
 }
 #endif

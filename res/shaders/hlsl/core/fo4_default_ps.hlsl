@@ -409,6 +409,8 @@ float VisibDiv( float NdotL, float NdotV, float VdotH, float NdotH )
 // this is a normalized Phong model used in the Torrance-Sparrow model
 // (FO4MATCH1: the vanilla path's lobe: the game's sun and light passes, Schlick ^5 and the lobe capped at 15; the
 // material's Fresnel Power stays the editor BRDF's)
+// (lane VKGROUND3: WW_GLSL_BASE_TERMS, gate only, compiles every FO4MATCH1 term of this file out to the GLSL base's terms,
+// for twin gates whose GL reference is the legacy .frag; the loader and vkframe_spirv.sh never define it)
 float3 TorranceSparrow(float NdotL, float NdotH, float NdotV, float VdotH, float3 color, float power, float F0)
 {
 	// D: Normalized phong model
@@ -419,9 +421,13 @@ float3 TorranceSparrow(float NdotL, float NdotH, float NdotV, float VdotH, float
 
 	// F: Schlick's approximation
 	// (FO4MATCH1: ^5, as the game's passes)
+#ifdef WW_GLSL_BASE_TERMS
+	float F = fresnelSchlick( VdotH, F0 );
+#else
 	float fc = 1.0 - VdotH;
 	float fc5 = fc * fc * fc * fc * fc;
 	float F = min( F0 + ( 1.0 - F0 ) * fc5, 1.0 );
+#endif
 
 	// Torrance-Sparrow:
 	// (F * G * D) / (4 * NdotL * NdotV)
@@ -429,7 +435,11 @@ float3 TorranceSparrow(float NdotL, float NdotH, float NdotV, float VdotH, float
 	// and division by NdotL is removed since
 	// outgoing radiance is determined by:
 	// BRDF * NdotL * L()
+#ifdef WW_GLSL_BASE_TERMS
+	float spec = (F * G_NdotV * D) / 4.0;
+#else
 	float spec = min( (F * G_NdotV * D) / 4.0, 15.0 );
+#endif
 
 	return color * spec * M_PI;
 }
@@ -1052,7 +1062,7 @@ void frag_main()
 #endif
 		emissive += backlight * D.rgb;
 	}
-#ifdef WW_CELLLIGHTS
+#if defined( WW_CELLLIGHTS ) && !defined( WW_GLSL_BASE_TERMS )
 	/* FO4MATCH1: the vanilla path's sun tail is the game's (sunTailGame: translucency, a = the back light power, + the
 	 * wrap from the subsurface rolloff), linear in the light as its diffuse (cellLit: albedo x sun x cellBackK x the
 	 * sun's visibility); the far placement's baked sky visibility stays its shade. The editor BRDF keeps the leaf law above */
@@ -1070,15 +1080,23 @@ void frag_main()
 
 	// Diffuse
 	// (FO4MATCH1: the vanilla path takes the game's Oren-Nayar (its light and sun passes); the editor BRDF the full model)
+#ifdef WW_GLSL_BASE_TERMS
+	float diff = OrenNayarFull( NdotL, dot(normal, V), dot(L, V), 1.0 - smoothness );
+#else
 	float diff = editorBrdf ? OrenNayarFull( NdotL, dot(normal, V), dot(L, V), 1.0 - smoothness )
 	                        : OrenNayar( L, V, normal, 1.0 - smoothness, NdotL );
+#endif
 	diffuse = (float3)(diff);
 
 	float3 soft = (float3)(0.0);
 	float wrap = NdotL;
+#ifdef WW_GLSL_BASE_TERMS
+	if ( or( hasSoftlight, subsurfaceRolloff > 0.0 ) ) {
+#else
 	if ( !editorBrdf )
 		diffuse += sunTailGame( NdotL, 0.0, subsurfaceRolloff );	// the game's wrap; its translucency is the back light above
 	else if ( or( hasSoftlight, subsurfaceRolloff > 0.0 ) ) {
+#endif
 		wrap = (wrap + subsurfaceRolloff) / (1.0 + subsurfaceRolloff);
 		soft = albedo * max( 0.0, wrap ) * smoothstep( 1.0, 0.0, sqrt(diff) );
 
@@ -1099,7 +1117,11 @@ void frag_main()
 	color.rgb += A.rgb * albedo;
 	// Specular
 	color.rgb += spec;
+#ifdef WW_GLSL_BASE_TERMS
+	if ( true )
+#else
 	if ( editorBrdf )
+#endif
 		color.rgb += A.rgb * ambMask * fresnelSchlick( VdotH, ambF0 ) * (1.0 - NdotV) * D.rgb;
 	else	// the game's ambient specular lobe on the flat ambient, in this colour's root space (its square is the game's term)
 		color.rgb += A.rgb * sqrt( ambMask * ambSpecGame( NdotV, smoothness ) );
@@ -1121,7 +1143,11 @@ void frag_main()
 		// lane BOUNCE1: the sun's specular x the imagespace Sunlight Scale, as its diffuse (cellDirColor); sqrt space here
 		// (FO4MATCH1: the editor BRDF keeps the sqrt space; the vanilla path below is linear in the light)
 		float3 Dx = D.rgb * sqrt( max( cellSunScale, 0.0 ) );	// the sun's root (sqrt space)
+#ifdef WW_GLSL_BASE_TERMS
+		if ( true ) {
+#else
 		if ( editorBrdf ) {
+#endif
 			float3 sx = specSun * sqrt( max( cellSunScale, 0.0 ) ) + A.rgb * specMask * fresnelSchlick( VdotH, 0.04 ) * ( 1.0 - NdotV ) * D.rgb;
 			cellExtSpec = sx * sx;
 		} else {

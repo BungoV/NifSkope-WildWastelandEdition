@@ -20,7 +20,9 @@ BSD License - see nifskope.h
 #include "features/far-lod/loddecal.h"
 #include "features/exposure/cellhdr.h"	// lane VKFAR3: the shared tone frame
 #include "features/vkframe/vkpresent.h"	// lane VKFAR3: ring 0 on the Vulkan view (row G3)
+#include "features/vkframe/vkfarcards.h"	// lane VKGROUND5: the BC1 page pools as far twins
 #include "features/vkframe/vkwater.h"
+#include "features/vkframe/vkfgpaint.h"	// lane VKGROUND7: the page paint on the present device
 
 #include <QElapsedTimer>
 #include <QHash>
@@ -92,6 +94,7 @@ struct Gpu
 	double stampMs = 0.0;
 	// FARPAGES1: the two page pools, the cell table, the paint kit's scratch (a page and its BC1 blocks)
 	GLuint pagesN = 0, pagesF = 0, cellTex = 0, scratchN = 0, scratchF = 0, blocks = 0, pbo = 0, fboBc = 0;
+	GLuint ltexSmp = 0;	// VKGROUND8: the paint's LTEX sampler, anisotropy 1 (the texture keeps 8 for mode 1's lookup)
 	qint64 bPagesN = 0, bPagesF = 0, bCells = 0, bScratch = 0;
 	int sideN = 0, sideF = 0, nNear = 0;
 	bool compressed = true, decalsOn = true;
@@ -104,6 +107,9 @@ struct Gpu
 	// lane VKFAR3: the live lookup's grid, layers and atlas on the present device (bits 1, 2, 4; key slot vkSlot), no copy a draw
 	int vkSlot = -1, vkShared = 0, vkFailed = 0;
 	std::string vkWhy;
+	// lane VKGROUND7: the page paint's committed jobs / on Vulkan / on GL since the last `vk fgpaint:` line, the last GL reason
+	int fgJobs = 0, fgVk = 0, fgGl = 0;
+	std::string fgWhy;
 };
 
 struct Doc
@@ -154,21 +160,34 @@ void delTex( NifSkopeOpenGLContext::GLFunctions * fn, GLuint & t, qint64 & bytes
 	bytes = 0;
 }
 
-// lane VKFAR3: the shared inputs' keys, three a Gpu (a Gpu is copied into the graveyard: its address is no key)
-constexpr int kVkSlots = 256;
-char g_vkKeys[3 * kVkSlots];
+// lane VKFAR3: the shared inputs' keys, six a Gpu (a Gpu is copied into the graveyard: its address is no key). Lane
+// VKGROUND3: 3 -> 6, slots 3..5 (bits 8, 16, 32) for mode 2's cell table and page pools
+constexpr int kVkSlots = 256, kVkKeysPer = 6;
+char g_vkKeys[kVkKeysPer * kVkSlots];
 bool g_vkUsed[kVkSlots];
 
 std::uintptr_t vkKeyOf( const Gpu & g, int slot )
 {
-	return reinterpret_cast<std::uintptr_t>( g_vkKeys + 3 * g.vkSlot + slot );
+	return reinterpret_cast<std::uintptr_t>( g_vkKeys + kVkKeysPer * g.vkSlot + slot );
+}
+
+// lane VKGROUND5: slots 4, 5 (the page pools, BC1) are far twins; the others sharedTarget's
+constexpr int kVkFirstTwin = 4;
+
+bool vkIs( const Gpu & g, int slot, GLuint t )
+{
+	return slot >= kVkFirstTwin ? WwVkPresent::farTwinIs( vkKeyOf( g, slot ), t ) : WwVkPresent::sharedTargetIs( vkKeyOf( g, slot ), t );
 }
 
 //! a shared input goes with its target (its GL name too); one a present shutdown already took is only forgotten
 void delShared( Gpu & g, int slot, GLuint & t, qint64 & bytes )
 {
-	if ( WwVkPresent::sharedTargetIs( vkKeyOf( g, slot ), t ) )
-		WwVkPresent::sharedTargetDrop( vkKeyOf( g, slot ) );
+	if ( vkIs( g, slot, t ) ) {
+		if ( slot >= kVkFirstTwin )
+			WwVkPresent::farTwinDrop( vkKeyOf( g, slot ) );
+		else
+			WwVkPresent::sharedTargetDrop( vkKeyOf( g, slot ) );
+	}
 	t = 0;
 	bytes = 0;
 	g.vkShared &= ~( 1 << slot );
@@ -201,7 +220,9 @@ bool sharedIn( Gpu & g, int slot, int type, int w, int h, int d, GLenum fmt, int
 	}
 	unsigned tex = 0;
 	std::string why;
-	if ( !WwVkPresent::sharedTarget( vkKeyOf( g, slot ), type, w, h, d, fmt, tex, why, levels ) ) {
+	const bool made = slot >= kVkFirstTwin ? WwVkPresent::farTwin( vkKeyOf( g, slot ), type, w, h, d, fmt, tex, why, levels )
+		: WwVkPresent::sharedTarget( vkKeyOf( g, slot ), type, w, h, d, fmt, tex, why, levels );
+	if ( !made ) {
 		g.vkWhy = why;
 		g.vkFailed |= 1 << slot;
 		if ( !g.vkShared ) {
@@ -238,6 +259,9 @@ void freeKit( NifSkopeOpenGLContext::GLFunctions * fn, Gpu & g )
 	delIn( fn, g, 0, g.grid, g.bGrid );
 	delTex( fn, g.height, g.bHeight );
 	delIn( fn, g, 1, g.ltex, g.bLtex );
+	if ( g.ltexSmp )
+		fn->glDeleteSamplers( 1, &g.ltexSmp );
+	g.ltexSmp = 0;
 	freeDecals( fn, g );
 	qint64 none = 0;
 	delTex( fn, g.scratchN, none );
@@ -251,9 +275,9 @@ void freeKit( NifSkopeOpenGLContext::GLFunctions * fn, Gpu & g )
 
 void freePools( NifSkopeOpenGLContext::GLFunctions * fn, Gpu & g )
 {
-	delTex( fn, g.pagesN, g.bPagesN );
-	delTex( fn, g.pagesF, g.bPagesF );
-	delTex( fn, g.cellTex, g.bCells );
+	delIn( fn, g, 4, g.pagesN, g.bPagesN );
+	delIn( fn, g, 5, g.pagesF, g.bPagesF );
+	delIn( fn, g, 3, g.cellTex, g.bCells );
 	qint64 none = 0;
 	delTex( fn, g.scratchN, none );
 	delTex( fn, g.scratchF, none );
@@ -275,6 +299,9 @@ void freeAll( NifSkopeOpenGLContext::GLFunctions * fn, Gpu & g )
 	delIn( fn, g, 0, g.grid, g.bGrid );
 	delTex( fn, g.height, g.bHeight );
 	delIn( fn, g, 1, g.ltex, g.bLtex );
+	if ( g.ltexSmp )
+		fn->glDeleteSamplers( 1, &g.ltexSmp );
+	g.ltexSmp = 0;
 	freeDecals( fn, g );
 	freePools( fn, g );
 	delTex( fn, g.pages, g.bPages );
@@ -943,6 +970,29 @@ GLuint allocPool( NifSkopeOpenGLContext::GLFunctions * fn, int side, int layers,
 	return t;
 }
 
+/* lane VKGROUND5: a pool on the present device (far twin slot 4 / 5, the same levels and filters) while mode 2 draws there
+ * (share); GL's own otherwise or when the twin failed (its slot bit in vkFailed, not tried again until the view goes off) */
+GLuint allocPoolIn( NifSkopeOpenGLContext::GLFunctions * fn, Gpu & g, int slot, int side, int layers, bool compressed, qint64 & bytes,
+	bool share )
+{
+	GLuint t = 0;
+	const int nl = FgSched::levels( side );
+	if ( !share || ( g.vkFailed & ( 1 << slot ) ) || !sharedIn( g, slot, 2, side, side, layers, compressed ? kBc1 : GL_RGBA8, nl, t ) )
+		return allocPool( fn, side, layers, compressed, bytes );
+	fn->glBindBuffer( GL_PIXEL_UNPACK_BUFFER, 0 );
+	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, t );
+	fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BASE_LEVEL, 0 );
+	fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, nl - 1 );
+	fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
+	fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+	fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+	fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+	fn->glTexParameterf( GL_TEXTURE_2D_ARRAY, 0x84FE /* GL_TEXTURE_MAX_ANISOTROPY */, 8.0f );
+	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, 0 );
+	bytes = FgSched::pageBytes( side, compressed ) * layers;
+	return t;
+}
+
 //! Paints this frame's pages: the cell's layers + decals into a scratch page, its mips, then BC1 blocks (GPU) through
 //! a pixel buffer into the pool's layer, or (red nocompress) the levels copied as they are.
 bool paintJobs( Renderer * r, Doc & d, const std::vector<FgSched::Job> & jobs, QString * why )
@@ -951,8 +1001,14 @@ bool paintJobs( Renderer * r, Doc & d, const std::vector<FgSched::Job> & jobs, Q
 	Gpu & g = d.gpu;
 	if ( !d.pics )
 		loadPictures( d );
-	uploadBase( fn, d );
-	uploadDecals( fn, d );
+	/* lane VKGROUND7: the paint's grid, layers and atlas (slots 0-2) follow the view as the live lookup's do; reshare clears
+	 * every failed bit, so the pools' (8 | 16 | 32, cachedPass's) are kept */
+	const bool vkShare = WwVkPresent::shareWanted( "WW_VKVIEW_FGPAINT_RED" ), vkKeep = WwVkPresent::shareKept( "WW_VKVIEW_FGPAINT_RED" );
+	const int poolFail = g.vkFailed & ( 8 | 16 | 32 );
+	reshare( fn, g, vkShare, vkKeep );
+	g.vkFailed |= poolFail;
+	uploadBase( fn, d, vkShare );
+	uploadDecals( fn, d, vkShare );
 	if ( !g.height ) {
 		g.height = tex2D( fn, GL_R32F, d.nx, d.ny, GL_RED, GL_FLOAT, d.height.data(), true, false );
 		g.bHeight = qint64( d.height.size() ) * 4;
@@ -961,6 +1017,14 @@ bool paintJobs( Renderer * r, Doc & d, const std::vector<FgSched::Job> & jobs, Q
 		fn->glGenFramebuffers( 1, &g.fbo );
 	if ( !g.fboBc )
 		fn->glGenFramebuffers( 1, &g.fboBc );
+	if ( !g.ltexSmp ) {	// VKGROUND8: SampleGrad with square gradients, so anisotropy buys nothing here, and GL / Vulkan agree at 1
+		fn->glGenSamplers( 1, &g.ltexSmp );
+		fn->glSamplerParameteri( g.ltexSmp, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
+		fn->glSamplerParameteri( g.ltexSmp, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		fn->glSamplerParameteri( g.ltexSmp, GL_TEXTURE_WRAP_S, GL_REPEAT );
+		fn->glSamplerParameteri( g.ltexSmp, GL_TEXTURE_WRAP_T, GL_REPEAT );
+		fn->glSamplerParameterf( g.ltexSmp, 0x84FE /* GL_TEXTURE_MAX_ANISOTROPY */, 1.0f );
+	}
 	auto scratch = [&]( GLuint & t, int side ) {
 		if ( t )
 			return;
@@ -988,6 +1052,19 @@ bool paintJobs( Renderer * r, Doc & d, const std::vector<FgSched::Job> & jobs, Q
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
 	const float * attrs = q;
 	const GLenum one = GL_COLOR_ATTACHMENT0;
+	// lane VKGROUND7: a page on Vulkan (vkfgpaint.inc) skips GL's draw, mips and encode; a refusal paints it on GL
+	std::string glWhy;
+	if ( !vkShare )
+		glWhy = "red WW_VKVIEW_FGPAINT_RED=1 or the view not on Vulkan";
+	else if ( !g.compressed )
+		glWhy = "red nocompress: the route writes BC1 pools";
+	else if ( !vkIs( g, 4, g.pagesN ) || !vkIs( g, 5, g.pagesF ) )
+		glWhy = "a page pool is not a far twin";
+	else if ( ( g.vkShared & 7 ) != 7 )
+		glWhy = "the grid, layers or atlas not shared";
+	else
+		glWhy = WwVkPresent::fgPaintRefusal();
+	bool vk = glWhy.empty();
 	for ( const FgSched::Job & j : jobs ) {
 		const int side = j.pool == 1 ? g.sideN : g.sideF;
 		const GLuint scr = j.pool == 1 ? g.scratchN : g.scratchF;
@@ -1010,6 +1087,26 @@ bool paintJobs( Renderer * r, Doc & d, const std::vector<FgSched::Job> & jobs, Q
 		p->uni1i( "fgPageDecals", g.decalsOn ? 1 : 0 );
 		const FgSched::Cell & c = g.sched.cells[size_t( j.cell )];
 		p->uni2f( "fgStampCell", float( c.wx ) * kCell, float( c.wy ) * kCell );
+		int layer = -1;
+		if ( vk ) {
+			layer = g.sched.commit( j );
+			if ( layer < 0 )
+				continue;
+			g.fgJobs++;
+			WwVkPresent::FgPaintRun run;
+			run.prog = p->id;
+			run.wwDefs = p->wwDefs;
+			run.side = side;
+			run.layer = layer;
+			run.poolKey = vkKeyOf( g, j.pool == 1 ? 4 : 5 );
+			if ( WwVkPresent::fgPaintRun( run, *fn, glWhy ) ) {
+				g.fgVk++;
+				g.painted++;
+				continue;
+			}
+			vk = false;	// this layer and the frame's rest on GL
+			WwVkPresent::fgPaintOnGl( glWhy.c_str() );
+		}
 		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.fbo );
 		fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, scr, 0 );
 		fn->glDrawBuffers( 1, &one );
@@ -1018,15 +1115,21 @@ bool paintJobs( Renderer * r, Doc & d, const std::vector<FgSched::Job> & jobs, Q
 			return false;
 		}
 		fn->glViewport( 0, 0, side, side );
+		fn->glBindSampler( WwCellUnit::FarGroundLtex, g.ltexSmp );	// the paint only: unbound before the census and mode 1
 		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+		fn->glBindSampler( WwCellUnit::FarGroundLtex, 0 );
 		fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0 );
 		fn->glActiveTexture( GL_TEXTURE0 );
 		fn->glBindTexture( GL_TEXTURE_2D, scr );
 		fn->glGenerateMipmap( GL_TEXTURE_2D );
 
-		const int layer = g.sched.commit( j );
-		if ( layer < 0 )
-			continue;
+		if ( layer < 0 ) {
+			layer = g.sched.commit( j );
+			if ( layer < 0 )
+				continue;
+			g.fgJobs++;
+		}
+		g.fgGl++;
 		const GLuint dst = j.pool == 1 ? g.pagesN : g.pagesF;
 		const int nl = FgSched::levels( side );
 		if ( g.compressed ) {
@@ -1074,11 +1177,14 @@ bool paintJobs( Renderer * r, Doc & d, const std::vector<FgSched::Job> & jobs, Q
 		g.painted++;
 	}
 	r->stopProgram();
+	g.fgWhy = glWhy;
+	if ( WwVkPresent::fgPaintSay( g.fgJobs, g.fgVk, g.fgGl, glWhy.c_str(), wwEnvInt( "WW_VKVIEW_FGPAINT_RED" ) == 1, false ) )
+		g.fgJobs = g.fgVk = g.fgGl = 0;
 	return true;
 }
 
 //! The cell table the draw reads: per ring cell pool, layer, fade (RGBA16UI; uploaded when it changes).
-void uploadCells( NifSkopeOpenGLContext::GLFunctions * fn, Doc & d )
+void uploadCells( NifSkopeOpenGLContext::GLFunctions * fn, Doc & d, bool share )
 {
 	Gpu & g = d.gpu;
 	std::vector<quint16> t( size_t( d.ncx ) * size_t( d.ncy ) * 4, 0 );
@@ -1091,7 +1197,10 @@ void uploadCells( NifSkopeOpenGLContext::GLFunctions * fn, Doc & d )
 	if ( g.cellTex && t == g.cellTab )
 		return;
 	if ( !g.cellTex ) {
-		g.cellTex = tex2D( fn, GL_RGBA16UI, d.ncx, d.ncy, GL_RGBA_INTEGER, GL_UNSIGNED_SHORT, t.data(), false, false );
+		GLuint have = 0;	// lane VKGROUND5: on the present device (slot 3) while mode 2 draws there
+		if ( share && !( g.vkFailed & 8 ) )
+			sharedIn( g, 3, 0, d.ncx, d.ncy, 1, GL_RGBA16UI, 1, have );
+		g.cellTex = tex2D( fn, GL_RGBA16UI, d.ncx, d.ncy, GL_RGBA_INTEGER, GL_UNSIGNED_SHORT, t.data(), false, false, have );
 		g.bCells = qint64( t.size() ) * 2;
 	} else {
 		fn->glBindTexture( GL_TEXTURE_2D, g.cellTex );
@@ -1149,10 +1258,31 @@ bool cachedPass( Scene * scene, Doc & d, const State & s, QString * extra )
 	const float ccx = d.cut.centreX( kCell ), ccy = d.cut.centreY( kCell );
 	const int nNear = FgSched::nearCount( g.sched.cells, ccx, ccy, v.nearDist );
 	const bool comp = !s.redNoCompress;
-	if ( !g.pagesN || g.sideN != v.sideN || g.nNear != nNear || g.compressed != comp ) {
+	/* lane VKGROUND5: the cell table and pools (slots 3..5) follow the view as reshare's inputs do: on the present device
+	 * while mode 2 draws there, GL's own once the view is off by its switch or the red (!keep), unchanged on a frame with
+	 * no view (keep). A pool that moves is made again (its pages painted again); the view off leaves GL's calls as before */
+	const bool share = WwVkPresent::shareWanted( "WW_VKVIEW_FARGROUNDLIVE_RED" ),
+		keep = WwVkPresent::shareKept( "WW_VKVIEW_FARGROUNDLIVE_RED" );
+	if ( !keep )
+		g.vkFailed &= ~( 8 | 16 | 32 );
+	bool moved[3] = { false, false, false };
+	{
+		GLuint * const t[3] = { &g.cellTex, &g.pagesN, &g.pagesF };
+		for ( int i = 0; i < 3; i++ ) {
+			const int slot = 3 + i;
+			const bool on = g.vkShared & ( 1 << slot );
+			if ( *t[i] )
+				moved[i] = on ? !vkIs( g, slot, *t[i] ) || ( !share && !keep ) : share && !( g.vkFailed & ( 1 << slot ) );
+		}
+	}
+	if ( moved[0] ) {
+		delIn( fn, g, 3, g.cellTex, g.bCells );
+		g.cellTab.clear();
+	}
+	if ( moved[1] || moved[2] || !g.pagesN || g.sideN != v.sideN || g.nNear != nNear || g.compressed != comp ) {
 		qint64 none = 0;
-		delTex( fn, g.pagesN, g.bPagesN );
-		delTex( fn, g.pagesF, g.bPagesF );
+		delIn( fn, g, 4, g.pagesN, g.bPagesN );
+		delIn( fn, g, 5, g.pagesF, g.bPagesF );
 		delTex( fn, g.scratchN, none );
 		delTex( fn, g.scratchF, none );
 		delTex( fn, g.blocks, none );
@@ -1167,8 +1297,8 @@ bool cachedPass( Scene * scene, Doc & d, const State & s, QString * extra )
 		g.sideF = v.sideF;
 		g.nNear = nNear;
 		g.compressed = comp;
-		g.pagesN = allocPool( fn, g.sideN, capN, comp, g.bPagesN );
-		g.pagesF = allocPool( fn, g.sideF, capF, comp, g.bPagesF );
+		g.pagesN = allocPoolIn( fn, g, 4, g.sideN, capN, comp, g.bPagesN, share );
+		g.pagesF = allocPoolIn( fn, g, 5, g.sideF, capF, comp, g.bPagesF, share );
 		g.sched.reset( capN, capF );
 		g.fillFrames = 0;
 		g.painted = 0;
@@ -1205,9 +1335,11 @@ bool cachedPass( Scene * scene, Doc & d, const State & s, QString * extra )
 		g.settledSaid = true;
 		qInfo().noquote() << QStringLiteral( "far ground pages: settled after %1 frames, %2 pages painted (budget %3 texels a frame)" )
 			.arg( g.fillFrames ).arg( g.painted ).arg( v.budget );
+		if ( g.fgJobs && WwVkPresent::fgPaintSay( g.fgJobs, g.fgVk, g.fgGl, g.fgWhy.c_str(), wwEnvInt( "WW_VKVIEW_FGPAINT_RED" ) == 1, true ) )
+			g.fgJobs = g.fgVk = g.fgGl = 0;	// lane VKGROUND7: a fill's last jobs said at its settle
 	}
 	g.busy = fading || g.idle < kSettleFrames;
-	uploadCells( fn, d );
+	uploadCells( fn, d, share );
 	*extra = QStringLiteral( "; pages near %1 x %2 px + far %3 x %4 px = %5 MB %6 (cell table %7 KB); pixel %8 mrad (fovy %9, %10 px), "
 		"near under %11 units: %12 cells for the camera at the cut centre; budget %13 texels a frame" )
 		.arg( g.sched.capN ).arg( g.sideN ).arg( g.sched.capF ).arg( g.sideF ).arg( mb( g.bPagesN + g.bPagesF ) )
@@ -1537,10 +1669,82 @@ bool wantsFrames( Scene * scene )
 	return it != docs().constEnd() && it->gpu.ready == 3 && it->gpu.busy;
 }
 
+/* lane VKGROUND3: a ring-0 shape of mode 2 (Show > Far ground: Live, cached pages; fo4_cellcsmfgp) on the Vulkan view, one
+ * crossing a shape (red WW_VKVIEW_FARGROUNDLIVE_RED=1). Its inputs are the cell table and the two page pools: never copied
+ * a draw, so the draw waits on GL until they are on the present device (key slots 3..5) */
+static bool vkDrawLive( Scene * scene, NifSkopeOpenGLContext::Program * prog, int indexCount, long long idxOff, int baseVertex )
+{
+	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_FARGROUNDLIVE_RED" ) ) {
+		WwVkPresent::farGroundLiveSay( false, "red WW_VKVIEW_FARGROUNDLIVE_RED=1 or the view not on Vulkan" );
+		return false;
+	}
+	auto fn = scene->renderer->fn;
+	const char * no = nullptr;
+	unsigned int color = 0;
+	constexpr int kPagesShared = 8 | 16 | 32;	// slots 3, 4, 5: fgCells, fgPagesN, fgPagesF
+	if ( std::string_view( prog->name ) != "fo4_cellcsmfgp.prog" )
+		no = "no sun shadows (fo4_cellfgp.prog): the twin is fo4_cellcsmfgp.prog only";
+	else if ( prog->wwBindless )
+		no = "a bindless program (no Vulkan twin)";
+	else if ( !wwFogLeakShaderDefine() )
+		no = "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan twin";
+	else if ( !prog->wwShadowFrame )
+		no = "WW_FRAME_UBO off: GL's program is not the Vulkan twin";
+	else if ( prog->wwDefs != "WW_CELL_FOGLEAK+WW_FRAME_UBO" )	// RT GI / ReSTIR keys read inputs the twin has no slot for
+		no = "an RT GI / ReSTIR key in GL's program (cellDdgiAtlas, cellRestir, cellGiHalf): the twin is the base key only";
+	else if ( idxOff & 1 )
+		no = "an odd element offset";
+	else if ( const auto dit = docs().constFind( scene->nifModel );
+		dit == docs().constEnd() || ( dit->gpu.vkShared & kPagesShared ) != kPagesShared ) {
+		no = "the cell table or page pools are not on the present device (not shared yet)";	// never a copy a draw
+	} else {
+		GLint drawFb = 0;
+		fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFb );
+		color = wwCellHdrVkToneColor( GLuint( drawFb ) );
+		if ( !color )
+			no = "the draw target is not the shared tone frame";
+	}
+	if ( !no ) {
+		GLint cur = 0;
+		fn->glGetIntegerv( GL_CURRENT_PROGRAM, &cur );
+		if ( GLuint( cur ) != prog->id )
+			no = "another program at the shape's draw";
+	}
+	if ( no ) {
+		vkFlush();	// mode 1's queued tiles first (GL's order)
+		WwVkPresent::farGroundLiveOnGl( no );
+		WwVkPresent::farGroundLiveSay( true, nullptr );
+		return false;
+	}
+	static WwVkPresent::WaterRun r;
+	static char keys[192];	// the twins' keys (key + slot index)
+	r = WwVkPresent::WaterRun();
+	WwVkPresent::farGroundLiveStateOf( fn, prog->id, r );
+	wwCellHdrFrameSize( r.w, r.h );
+	r.color = color;
+	WwVkPresent::WaterCmd c;
+	c.count = std::uint32_t( indexCount );
+	c.instanceCount = 1;
+	c.firstIndex = std::uint32_t( idxOff / 2 );
+	c.baseVertex = baseVertex;
+	r.cmds.push_back( c );
+	r.key = reinterpret_cast<std::uintptr_t>( keys );
+	std::string why;
+	const bool ok = WwVkPresent::farGroundLiveRun( r, why );	// flushes mode 1's queue first
+	if ( !ok )
+		WwVkPresent::farGroundLiveOnGl( why.c_str() );
+	else
+		PassTime::countDraw( 1 );
+	WwVkPresent::farGroundLiveSay( true, nullptr );
+	return ok;
+}
+
 bool vkDraw( Scene * scene, NifSkopeOpenGLContext::Program * prog, int block, int indexCount, long long idxOff, int baseVertex )
 {
 	if ( !scene || !scene->renderer || !prog || !ring0( scene->nifModel, block ) )
 		return false;
+	if ( const std::string_view pn( prog->name ); pn == "fo4_cellcsmfgp.prog" || pn == "fo4_cellfgp.prog" )
+		return vkDrawLive( scene, prog, indexCount, idxOff, baseVertex );	// lane VKGROUND3: mode 2, its own route and red
 	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_FARGROUND_RED" ) ) {
 		WwVkPresent::farGroundSay( false, "red WW_VKVIEW_FARGROUND_RED=1 or the view not on Vulkan" );
 		return false;
@@ -1551,8 +1755,6 @@ bool vkDraw( Scene * scene, NifSkopeOpenGLContext::Program * prog, int block, in
 	unsigned int color = 0;
 	if ( name == "fo4_cellcsmfgc.prog" || name == "fo4_cellfgc.prog" )
 		no = "red oldpages (fo4_cellcsmfgc, FARDRAW1's decal-only pages: no Vulkan twin)";
-	else if ( name == "fo4_cellcsmfgp.prog" || name == "fo4_cellfgp.prog" )
-		no = "Live, cached pages (fo4_cellcsmfgp: no Vulkan twin yet)";
 	else if ( name != "fo4_cellcsmfgl.prog" )
 		no = "not the shader-decals twin (Baked sheet, or no sun shadows: fo4_cellcsmfgl.prog only)";
 	else if ( prog->wwBindless )

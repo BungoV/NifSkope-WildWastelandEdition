@@ -22,6 +22,8 @@ struct FarTwinStat
  * samples the same memory. Keyed like sharedTarget (its own map); refused without textureCompressionBC / imageCubeArray. */
 bool farTwin( std::uintptr_t key, int type, int w, int h, int layers, unsigned glFmt, unsigned & tex, std::string & why, int levels = 1 );
 void farTwinDrop( std::uintptr_t key );
+//! tex is still key's twin (a present shutdown takes them all; the owner makes it again). Lane VKGROUND5
+bool farTwinIs( std::uintptr_t key, unsigned tex );
 //! one level of one layer as the present device sees it (packed blocks / texels); for the gates
 bool farTwinRead( std::uintptr_t key, int level, int layer, std::vector<std::uint8_t> & out, std::string & why );
 FarTwinStat farTwinStat();  //!< the twins and the texel buffers together

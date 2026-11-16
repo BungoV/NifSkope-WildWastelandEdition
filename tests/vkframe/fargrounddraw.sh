@@ -8,7 +8,7 @@ set -u
 OUT="${1:?out dir}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PY="${PY:-$(command -v python)}"	# before the UCRT64 PATH
-export PATH="/c/msys64/ucrt64/bin:$PATH"
+DXC="${DXC:-/e/Tools/dxc/bin/x64/dxc.exe}"
 if powershell -NoProfile -Command "if (Get-Process NifSkope,Fallout4 -ErrorAction SilentlyContinue) { 'busy' }" | grep -q busy; then echo "FARGROUNDDRAW GATE FAILED (NifSkope or the game runs: no window of ours now)"; exit 1; fi
 mkdir -p "$OUT"
 # BATCH1117: GL's program is the HLSL-built SPIR-V pair (build_all into $FARGROUNDDRAW_SPVSET, default $OUT/spvset)

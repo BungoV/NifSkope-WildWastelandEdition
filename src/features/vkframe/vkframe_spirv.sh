@@ -319,13 +319,14 @@ fxg() {
 	rm -f "$1.spv"
 }
 fxg fargnd_view_ps far-ground/fo4_cellcsmfgl_ps
+fxg fargndp_view_ps far-ground/fo4_cellcsmfgp_ps
 fxt() {
 	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main -fvk-b-shift 256 0 -fvk-t-shift 200 0 -fvk-s-shift 216 0 -fvk-u-shift 240 0 -fspv-preserve-bindings -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
 	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
 	rm -f "$1.spv"
 }
 fxt fargnd_view_vs core/water_view_vs
-ls -la fargnd_view_ps.spv.h fargnd_view_vs.spv.h
+ls -la fargnd_view_ps.spv.h fargndp_view_ps.spv.h fargnd_view_vs.spv.h
 # lane VKFAR16: the probe relight (cell_reflrelight.prog, cellreflprobe.cpp) on fxg / fxt's shifts (its vertex stage declares
 # nothing), and fxr: fxg's flags + the all-on route's RT GI key (WW_CELL_RESTIR + RTDDGI + RTDDGI_CASCADES), the `_rt_ps` twins
 fxr() {
@@ -369,6 +370,13 @@ fxa airinject_view_ps air/cell_volair_ps
 fxar airinject_view_rt_ps air/cell_volair_ps
 fxt airinject_view_vs air/cell_volair_vs
 ls -la airinject_view_ps.spv.h airinject_view_rt_ps.spv.h airinject_view_vs.spv.h
+# lane VKGROUND6: the far ground page paint (cell_fgpage.prog) and its BC1 encode (cell_fgbc1.prog), cellfarground.cpp paintJobs,
+# vkfgpaint.inc, on fxg / fxt's shifts; the loader builds both with no define (fxg's two are inert: no #if on them in either
+# source). One vertex stage (cell_ao.vert's twin, it declares nothing) serves both
+fxg fgpage_view_ps far-ground/cell_fgpage_ps
+fxg fgbc1_view_ps far-ground/cell_fgbc1_ps
+fxt fgpage_view_vs core/cell_ao_vs
+ls -la fgpage_view_ps.spv.h fgbc1_view_ps.spv.h fgpage_view_vs.spv.h
 # lane VKFAR7: the TAA mask's reactive pass (taainputs.cpp pass 4, vktaareactive.inc): pixel stage on fx()'s shifts (b31 at 31,
 # BaseMap at 64 / 128), vertex stage on fxb()'s (its b31 at 32)
 fx taareactive_view_ps post/taa_reactive_ps

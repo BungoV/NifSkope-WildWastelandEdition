@@ -54,6 +54,28 @@ Changed, not built, not checked live. Offline: tests/vkframe/flybakeview.sh and 
 - Gate: the build in one hand-off matches GL and the four hand-off path byte for byte; shared inputs make 0 copies.
   Reds (a hand-off a pass, every pass on pass 0's slots, the shared lookup skipped) must FAIL, and all do.
 
+## VKGROUND7 + VKGROUND8 (2026-11-16): the far ground's page paint on the Vulkan view
+
+Changed, not built, not checked live.
+- With the view on Vulkan (WW_VKVIEW=1) and Show > Far ground: Live, cached pages, each new page is now painted and
+  BC1-encoded on the present device, straight into the page pools. Before, GL painted every page into a GL scratch,
+  read the blocks back and uploaded them. When the route refuses, GL paints that page as before, and the
+  `vk fgpaint:` line names why. Red `WW_VKVIEW_FGPAINT_RED=1` keeps every page on GL.
+- The paint now samples the ground layers at anisotropy 1 on GL and Vulkan alike (its own sampler, paint only). The
+  layers keep 8 for the Live lookup draw (mode 1). The page shader gives the sampler exact gradients, so 8 bought
+  nothing in the paint, and the two drivers disagreed there.
+- Offline: tests/vkframe/fgpaintview (painted page within 2 / 255 of GL's, BC1 blocks inside the bound, 6 reds) and
+  tests/vkframe/fargroundoff (now knows the page pools' far twins).
+
+## VKGROUND5 (2026-11-16): the far ground's cached pages on the Vulkan view
+
+Changed, not built, not checked live.
+- With the view on Vulkan (WW_VKVIEW=1) and Show > Far ground: Live, cached pages, the cell table and both page pools
+  are now made on the present device, so the far ground's Vulkan twin reads them in place (no copy a draw). Before, it
+  stayed on GL ("not shared yet"). With the view off, GL makes them as before. Red `WW_VKVIEW_FARGROUNDLIVE_RED=1`.
+- Offline: tests/vkframe/fgpagesdraw (3 inputs shared, 3 copies fewer a run) and tests/vkframe/fargrounddraw (now
+  compared against the HLSL reference terms, as fgpagesdraw is).
+
 ## VKFAR15 (2026-11-15): the far ground and far LOD rings stay on GL while RT GI or ReSTIR is on
 
 Changed, not built, not checked live.
