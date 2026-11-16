@@ -10,7 +10,9 @@
 // nearest repeat, glTexSubImage3D as the app's fill), the light list (a GL RGBA32F texture buffer, 2 omni lamps in the grid).
 // Fixture: 21 x 12 x 64, identity reprojection with last frame's grid 0.99 narrower in x and y (VKAIR16: with the same grid every
 // tap sat on a texel centre, so the edge columns' bounds reject rode on the drivers' rounding of a ~1e-6 weight: 46 texels a
-// frame-2 arm kept on one side, rejected on the other, N 4 vs 5; now the edge taps sit 0.05..0.1 of a texel inside). Arms: def frame 1 (volLampHistOk 0: no
+// frame-2 arm kept on one side, rejected on the other, N 4 vs 5; now the edge taps sit 0.05..0.1 of a texel inside; in depth the
+// same 0.99 about the middle slice: last frame's near 0.5 exp(-0.32 lnr / 0.99 / 64), its log span lnr / 0.99, so layer 0's tap
+// sits 0.315 of a slice inside, layer 63's 0.315 below the top; with x and y alone layer 0 still flipped 4 texels an arm). Arms: def frame 1 (volLampHistOk 0: no
 // history, four samples), def frame 2 (volLampHistOk 1: history kept where the hash matches), rt frame 2.
 // Bar (set before the first run, never widened):
 //   GL writes every texel of both outs (no sentinel 7 left), all finite; frame 1 lit (lvNow rgb > 0) >= 50 texels; frame 2
@@ -303,7 +305,7 @@ std::string stage4( GLuint p, int histOk, int layer, int frame, std::string * ab
 		{ "volLightShift", { 0, 0, 0 }, false }, { "volMsLamp", { 0, 0, 0, 0 }, false }, { "volGndLamp", { 0, 0, 0, 0 }, false },
 		{ "volPhase", { 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, false }, { "airMed", { 0.002, 0.3, 0.5, 2.0 }, false },
 		{ "fogView", { 0, 0, 0, 0 }, false }, { "volProj", { 1.2, 2.1 }, true }, { "volSlices", { 0.5, lnr, kLvSlices, 1.0 }, true },
-		{ "volReproj", { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 }, true }, { "volPrevGrid", { 1.188, 2.079, 0.5, lnr }, true },
+		{ "volReproj", { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 }, true }, { "volPrevGrid", { 1.188, 2.079, 0.5 * std::exp( -0.32 * lnr / 0.99 / 64.0 ), lnr / 0.99 }, true },
 		{ "volPrevScale", { 1.0 }, true }, { "fogDistScale", { 1.0 }, true }, { "cellRow", { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 }, false } };
 	for ( const U & u : us )
 		if ( !setU( p, u.n, u.v ) ) {
