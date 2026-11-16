@@ -32,7 +32,8 @@
 // the noise rewritten (glTexSubImage3D) after GL's draw; gate 128 the noise's MAG filter NEAREST after GL's draw (the run
 // reads GL's sampler state); gate 32 the other key's wwDefs: must REFUSE, named "key"; gate 64 the out history's key = the
 // history in's: must REFUSE, named "feedback"; gate 256 a GL-owned copy of the history bound on volHist: must REFUSE, named
-// "volHist".
+// "volHist"; gate 512 (the RT GI arm only) a GL-owned RGBA32F texture buffer bound on cellDdgiAtlas, a big all-on input
+// that is not shared: must REFUSE, named "cellDdgiAtlas".
 // Coverage limit: the app's own s1Share branches (cellvolair.cpp) run only in the app; this gate drives the helper they call.
 // Last line `AIRTEMPORALVIEW GATE OK` or `AIRTEMPORALVIEW GATE FAILED`.
 #define FLD_NO_MAIN
@@ -655,7 +656,9 @@ int main( int argc, char ** argv )
 				st.draws, st.copies, st.bufCopies, kAtSlices, cp ? "OK" : "FAIL" );
 			fails += !cp;
 		}
-		for ( int red : { 1, 2, 4, 8, 16, 128, 32, 64, 256 } ) {
+		for ( int red : { 1, 2, 4, 8, 16, 128, 32, 64, 256, 512 } ) {
+			if ( red == 512 && ( key != 1 || units[key].ddgi < 0 ) )
+				continue;  // the RT GI arm only (the default program has no cellDdgiAtlas)
 			redsRun++;
 			if ( red == 8 )
 				fillLamp( in.lampNow, 13 );
@@ -671,11 +674,28 @@ int main( int argc, char ** argv )
 				glBindTexture( kAt3d, 0 );
 				fillHist( plain, ns * kAtSlices, 0 );
 			}
+			GLuint atlas = 0, atlasBuf = 0;
+			if ( red == 512 ) {  // a GL-owned RGBA32F texture buffer bound on cellDdgiAtlas (Buffer<float4>)
+				f.genBuffers( 1, &atlasBuf );
+				f.bindBuffer( 0x8C2A, atlasBuf );
+				f.bufferData( 0x8C2A, 4096 * 16, nullptr, fStatic );
+				f.bindBuffer( 0x8C2A, 0 );
+				glGenTextures( 1, &atlas );
+				glBindTexture( 0x8C2A, atlas );
+				ex.texBuffer( 0x8C2A, GLenum( fRgba32f ), atlasBuf );
+				glBindTexture( 0x8C2A, 0 );
+			}
 			const GLuint hist = red == 4 ? in.histB : red == 256 ? plain : in.histA;
 			std::string rw;
 			WwVkPresent::AirTemporalStat rs;
 			Pair rv;
+			if ( atlas )
+				bindUnit( units[key].ddgi, 0x8C2A, atlas );
 			const bool ran = vkRun( red == 1 || red == 2 || red == 32 || red == 64 ? red : 0, hist, rw, rs, &rv );
+			if ( atlas ) {  // the 64 KB buffer stays (no glDeleteBuffers loaded): one a gate run
+				bindUnit( units[key].ddgi, 0x8C2A, 0 );
+				glDeleteTextures( 1, &atlas );
+			}
 			if ( red == 8 )
 				fillLamp( in.lampNow, 0 );
 			if ( red == 16 )
@@ -692,6 +712,8 @@ int main( int argc, char ** argv )
 				fired = !ran && rw.find( "feedback" ) != std::string::npos;
 			else if ( red == 256 )
 				fired = !ran && rw.find( "volHist" ) != std::string::npos;
+			else if ( red == 512 )
+				fired = !ran && rw.find( "cellDdgiAtlas" ) != std::string::npos;
 			else if ( ran ) {
 				jv = judge( g, rv );
 				fired = !jv.ok();
