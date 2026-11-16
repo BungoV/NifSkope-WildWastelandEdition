@@ -54,6 +54,22 @@ Changed, not built, not checked live. Offline: tests/vkframe/flybakeview.sh and 
 - Gate: the build in one hand-off matches GL and the four hand-off path byte for byte; shared inputs make 0 copies.
   Reds (a hand-off a pass, every pass on pass 0's slots, the shared lookup skipped) must FAIL, and all do.
 
+## VKFAR15 (2026-11-15): the far ground and far LOD rings stay on GL while RT GI or ReSTIR is on
+
+Changed, not built, not checked live.
+- Their Vulkan twins carry only the base program, so with RT GI / ReSTIR on the far terrain drew on Vulkan without its
+  GI. They now draw on GL then, and the `vk farground:` line names why. Their RT twins come next.
+
+## VKFAR14 (2026-11-15): the live far ground on streamed flights; the far ground's Vulkan draw no longer refused
+
+Changed, not built, not checked live.
+- A streamed cell open (and a live far rebuild) now prepares the far ring 0's live ground (the Far ground row) too,
+  every ring-0 cell, so crossings keep it (the shapes are shown and hidden per cell). Before, streamed flights drew the
+  baked sheet. Red `WW_CELL_FARGROUND_RED=nostream` keeps the old rule. Offline: tests/features/far-ground/fgstream.
+- The far ground's Vulkan twin: its image list and uniform table follow the regenerated shader header, so its draws
+  are no longer refused on every frame. tests/vkframe/fargrounddraw still fails on seed 1 (colour within 2 %): the
+  twin's readable source has the newer sun-pass terms the gate's GL reference lacks. Needs a ruling.
+
 ## VKFAR7 (2026-11-15): the TAA mask's reactive pass draws on Vulkan, all its draws in one hand-off
 
 Changed, not built, not checked live. Offline: tests/vkframe/taareactivedraw.sh passes.

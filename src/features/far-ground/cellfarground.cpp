@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "features/far-ground/cellfarground.h"
+#include "features/far-ground/cellfgcut.h"	// lane VKFAR14: the cut, uncut on streamed opens
 #include "features/far-ground/cellfgsched.h"
 #include "features/shared/cellpasstime.h"
 #include "gl/cellunits.h"
@@ -109,7 +110,7 @@ struct Doc
 {
 	int first = 0, last = 0;
 	int gx0 = 0, gy0 = 0, ncx = 0, ncy = 0, spc = 32, nx = 0, ny = 0;
-	int cutX0 = 0, cutY0 = 0, cutX1 = -1, cutY1 = -1;
+	CellFarGround::Cut cut;	// lane VKFAR14: off on a streamed open (every cell drawn, the block only centres)
 	float ox = 0.0f, oy = 0.0f;
 	std::vector<quint32> grid;	// 4 words a sample: ids 0|1, ids 2|3, weights unorm8 x4, vertex colour RGB8 + page
 	std::vector<float> height;
@@ -432,7 +433,7 @@ void buildGrid( const LodtFile & L, Doc & d, std::vector<int> & remap, QVector<q
 }
 
 //! The ring's decal records (in draw order), their world boxes binned at 512 units.
-void buildDecals( const QString & lodlPath, Doc & d, int cx0, int cy0, int cx1, int cy1 )
+void buildDecals( const QString & lodlPath, Doc & d )
 {
 	QString base = lodlPath;
 	base.replace( QRegularExpression( QStringLiteral( "\\.lodl$" ), QRegularExpression::CaseInsensitiveOption ), QString() );
@@ -452,7 +453,7 @@ void buildDecals( const QString & lodlPath, Doc & d, int cx0, int cy0, int cx1, 
 	for ( int cy = 0; cy < d.ncy; cy++ )
 		for ( int cx = 0; cx < d.ncx; cx++ ) {
 			const int wx = d.gx0 + cx, wy = d.gy0 + cy;
-			if ( wx >= cx0 && wx <= cx1 && wy >= cy0 && wy <= cy1 )
+			if ( d.cut.has( wx, wy ) )
 				continue;	// the cut: the loaded block draws its own ground
 			for ( quint32 r : lodg.cellRecords( wx, wy ) )
 				if ( r < seen.size() )
@@ -1113,7 +1114,7 @@ bool cachedPass( Scene * scene, Doc & d, const State & s, QString * extra )
 				FgSched::Cell c;
 				c.wx = d.gx0 + cx;
 				c.wy = d.gy0 + cy;
-				if ( c.wx >= d.cutX0 && c.wx <= d.cutX1 && c.wy >= d.cutY0 && c.wy <= d.cutY1 )
+				if ( d.cut.has( c.wx, c.wy ) )
 					continue;
 				g.sched.cells.push_back( c );
 			}
@@ -1145,7 +1146,7 @@ bool cachedPass( Scene * scene, Doc & d, const State & s, QString * extra )
 	v.sideN = FgSched::kNearSide[qu];
 	v.sideF = FgSched::kFarSide[qu];
 	v.budget = 4LL * 512 * 512;
-	const float ccx = float( d.cutX0 + d.cutX1 + 1 ) * 0.5f * kCell, ccy = float( d.cutY0 + d.cutY1 + 1 ) * 0.5f * kCell;
+	const float ccx = d.cut.centreX( kCell ), ccy = d.cut.centreY( kCell );
 	const int nNear = FgSched::nearCount( g.sched.cells, ccx, ccy, v.nearDist );
 	const bool comp = !s.redNoCompress;
 	if ( !g.pagesN || g.sideN != v.sideN || g.nNear != nNear || g.compressed != comp ) {
@@ -1280,7 +1281,7 @@ bool qualityPinned()
 }
 
 void prepare( const void * nif, const EsmWorld & world, const QString & lodlPath, int blockFirst, int blockLast,
-	int rx0, int ry0, int rx1, int ry1, int cx0, int cy0, int cx1, int cy1, QStringList * notes )
+	int rx0, int ry0, int rx1, int ry1, int cx0, int cy0, int cx1, int cy1, bool uncut, QStringList * notes )
 {
 	forget( nif );
 	auto note = [notes]( const QString & l ) {
@@ -1301,10 +1302,11 @@ void prepare( const void * nif, const EsmWorld & world, const QString & lodlPath
 	Doc d;
 	d.first = blockFirst;
 	d.last = blockLast;
-	d.cutX0 = cx0;
-	d.cutY0 = cy0;
-	d.cutX1 = cx1;
-	d.cutY1 = cy1;
+	d.cut.x0 = cx0;
+	d.cut.y0 = cy0;
+	d.cut.x1 = cx1;
+	d.cut.y1 = cy1;
+	d.cut.off = uncut;
 	d.gx0 = std::max( rx0, L.cellMinX() );
 	d.gy0 = std::max( ry0, L.cellMinY() );
 	const int gx1 = std::min( rx1, L.cellMaxX() ), gy1 = std::min( ry1, L.cellMaxY() );
@@ -1322,7 +1324,7 @@ void prepare( const void * nif, const EsmWorld & world, const QString & lodlPath
 	for ( int cy = 0; cy < d.ncy; cy++ )
 		for ( int cx = 0; cx < d.ncx; cx++ ) {
 			const int wx = d.gx0 + cx, wy = d.gy0 + cy;
-			if ( wx >= cx0 && wx <= cx1 && wy >= cy0 && wy <= cy1 )
+			if ( d.cut.has( wx, wy ) )
 				continue;
 			d.cells++;
 			if ( d.pageCell.size() < 255 )	// the page id is a byte of the grid (255 = none)
@@ -1351,14 +1353,16 @@ void prepare( const void * nif, const EsmWorld & world, const QString & lodlPath
 		lodgenDestroyBakeCaches( caches );
 		d.ltexMs = double( tp.nsecsElapsed() ) / 1e6;
 	}
-	buildDecals( lodlPath, d, cx0, cy0, cx1, cy1 );
-	note( QStringLiteral( "far ground: prepared ring 0 cells %1..%2 x %3..%4 (%5 drawn, %6 pages), grid %7x%8, %9 LTEX layers, "
+	buildDecals( lodlPath, d );
+	note( QStringLiteral( "far ground: prepared ring 0 cells %1..%2 x %3..%4 (%5 drawn, %6 pages%16), grid %7x%8, %9 LTEX layers, "
 		"%10 decal records%11, list max %12 mean %13, %14 ms, CPU %15 MB" )
 		.arg( d.gx0 ).arg( gx1 ).arg( d.gy0 ).arg( gy1 ).arg( d.cells ).arg( d.pages ).arg( d.nx ).arg( d.ny )
 		.arg( d.ltexPaths.size() ).arg( d.recPiece.size() )
 		.arg( d.decalWhy.isEmpty() ? QString() : QStringLiteral( " (no decals: %1)" ).arg( d.decalWhy ) )
 		.arg( d.maxList ).arg( d.meanList, 0, 'f', 1 ).arg( double( t.nsecsElapsed() ) / 1e6, 0, 'f', 1 )
-		.arg( mb( qint64( d.grid.size() + d.height.size() + d.recs.size() + d.binTex.size() + d.ids.size() ) * 4 ) ) );
+		.arg( mb( qint64( d.grid.size() + d.height.size() + d.recs.size() + d.binTex.size() + d.ids.size() ) * 4 ) )
+		.arg( uncut ? QStringLiteral( "; streamed: uncut, open %1,%2..%3,%4 centres the pages" ).arg( cx0 ).arg( cy0 ).arg( cx1 ).arg( cy1 )
+			: QString() ) );
 	docs().insert( nif, std::move( d ) );
 }
 
@@ -1557,6 +1561,8 @@ bool vkDraw( Scene * scene, NifSkopeOpenGLContext::Program * prog, int block, in
 		no = "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan twin";
 	else if ( !prog->wwShadowFrame )
 		no = "WW_FRAME_UBO off: GL's program is not the Vulkan twin";
+	else if ( prog->wwDefs != "WW_CELL_FOGLEAK+WW_FRAME_UBO" )	// lane VKFAR15: RT GI / ReSTIR keys read inputs the twin has no slot for
+		no = "an RT GI / ReSTIR key in GL's program (cellDdgiAtlas, cellRestir, cellGiHalf): the twin is the base key only";
 	else if ( idxOff & 1 )
 		no = "an odd element offset";
 	else if ( const auto dit = docs().constFind( scene->nifModel ); dit == docs().constEnd() || ( dit->gpu.vkShared & 7 ) != 7 ) {

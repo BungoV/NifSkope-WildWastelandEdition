@@ -10,6 +10,8 @@ BSD License - see nifskope.h
 #include "features/ao/cellaodecal.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
+#include "features/vkframe/vkpresent.h"	// lane VKAO3: the pass on the present device
+#include "features/vkframe/vkaodecal.h"
 
 #include <QElapsedTimer>
 #include <QFile>
@@ -18,6 +20,9 @@ BSD License - see nifskope.h
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <string>
 #include <vector>
 
 namespace
@@ -66,6 +71,10 @@ struct DecalGpu
 	std::vector<ModelGpu> models;
 	GLuint target = 0, selfId = 0, fbo = 0;
 	int w = 0, h = 0;
+	std::uint64_t gen = 0;		// lane VKAO3: the model set's upload generation (the route's volume / vertex twins follow it)
+	bool shared = false;		// target and selfId are shared R32F of the present device (shareTargets)
+	int noW = 0, noH = 0;		// a size the present device refused (not asked again)
+	std::shared_ptr<char> keys;	// their two sharedTarget keys (a stable address: the DecalGpu moves with its hash)
 };
 
 QHash<const void *, DecalGpu> & gpus()
@@ -92,6 +101,8 @@ void uploadModels( NifSkopeOpenGLContext::GLFunctions * fn, DecalGpu & g, const 
 {
 	freeModels( fn, g );
 	g.set = &S;
+	static std::uint64_t gens = 0;
+	g.gen = ++gens;	// lane VKAO3
 	g.models.resize( S.models.size() );
 	for ( size_t i = 0; i < S.models.size(); i++ ) {
 		const aovol::Volume & v = S.models[i].vol;
@@ -138,12 +149,13 @@ void uploadModels( NifSkopeOpenGLContext::GLFunctions * fn, DecalGpu & g, const 
 	}
 }
 
-void alloc( NifSkopeOpenGLContext::GLFunctions * fn, DecalGpu & g, int W, int H, GLuint depthRb )
+void alloc( NifSkopeOpenGLContext::GLFunctions * fn, DecalGpu & g, int W, int H, GLuint depthRb, bool depthTex )
 {
 	if ( !g.target ) {
 		fn->glGenTextures( 1, &g.target );
 		fn->glGenTextures( 1, &g.selfId );
-		fn->glGenFramebuffers( 1, &g.fbo );
+		if ( !g.fbo )	// lane VKAO3: kept when the shared targets went (shareTargets)
+			fn->glGenFramebuffers( 1, &g.fbo );
 	}
 	if ( g.w != W || g.h != H ) {
 		for ( GLuint t : { g.target, g.selfId } ) {
@@ -162,7 +174,224 @@ void alloc( NifSkopeOpenGLContext::GLFunctions * fn, DecalGpu & g, int W, int H,
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.fbo );
 	fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g.target, 0 );
 	fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, g.selfId, 0 );
-	fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, depthRb );
+	if ( depthTex )	// lane VKAO3: the AO pass's shared depth texture (the view on Vulkan)
+		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, depthRb, 0 );
+	else
+		fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, depthRb );
+}
+
+// lane VKAO3: the view's terms, shared by GL's uniforms and the present device's copies
+struct ViewMath
+{
+	double sc = 1.0, Rv[3][3] = {}, tv[3] = {}, cam[3] = {};
+};
+
+ViewMath viewMath( const Transform & vt )
+{
+	ViewMath m;
+	m.sc = vt.scale != 0.0f ? double( vt.scale ) : 1.0;
+	for ( int i = 0; i < 3; i++ ) {
+		m.tv[i] = double( vt.translation[i] );
+		for ( int j = 0; j < 3; j++ )
+			m.Rv[i][j] = double( vt.rotation( i, j ) );
+	}
+	for ( int k = 0; k < 3; k++ ) {	// the camera, world: -Rv^T tv / sc
+		m.cam[k] = 0.0;
+		for ( int j = 0; j < 3; j++ )
+			m.cam[k] -= m.Rv[j][k] * m.tv[j] / m.sc;
+	}
+	return m;
+}
+
+// one copy's aoClip rows, aoM (w: the model-space camera) and aoN (one copy of the math for both routes)
+struct CopyMath
+{
+	float clip[4][4], M[3][4], N[3][3];
+};
+
+template <class PM>
+CopyMath copyMath( const AoDecalSet::Copy & c, const ViewMath & m, const PM & pm )
+{
+	CopyMath o;
+	const double sc = m.sc;
+	const auto & Rv = m.Rv;
+	const auto & tv = m.tv;
+	const auto & cam = m.cam;
+	// model -> view: A = sc s Rv Rc, b = sc Rv t + tv; then the projection (pm[col][row])
+	double A[3][3], b[3];
+	for ( int i = 0; i < 3; i++ ) {
+		b[i] = tv[i];
+		for ( int j = 0; j < 3; j++ ) {
+			double a = 0.0;
+			for ( int k = 0; k < 3; k++ )
+				a += Rv[i][k] * c.R[k * 3 + j];
+			A[i][j] = sc * c.s * a;
+			b[i] += sc * Rv[i][j] * c.t[j];
+		}
+	}
+	for ( int row = 0; row < 4; row++ ) {
+		double e[4] = { 0, 0, 0, double( pm[3][row] ) };
+		for ( int i = 0; i < 3; i++ ) {
+			for ( int j = 0; j < 3; j++ )
+				e[j] += double( pm[i][row] ) * A[i][j];
+			e[3] += double( pm[i][row] ) * b[i];
+		}
+		for ( int k = 0; k < 4; k++ )
+			o.clip[row][k] = float( e[k] );
+	}
+	// view -> model: M = Rc^T Rv^T / (s sc), b' = Rc^T (cam - t) / s; normals Rc^T Rv^T
+	for ( int i = 0; i < 3; i++ ) {
+		double M[3] = { 0, 0, 0 }, N[3] = { 0, 0, 0 }, bb = 0.0;
+		for ( int j = 0; j < 3; j++ ) {
+			for ( int k = 0; k < 3; k++ )
+				N[j] += c.R[k * 3 + i] * Rv[j][k];
+			M[j] = N[j] / ( c.s * sc );
+			bb += c.R[j * 3 + i] * ( cam[j] - c.t[j] ) / c.s;
+		}
+		for ( int j = 0; j < 3; j++ ) {
+			o.M[i][j] = float( M[j] );
+			o.N[i][j] = float( N[j] );
+		}
+		o.M[i][3] = float( bb );
+	}
+	return o;
+}
+
+std::uintptr_t targetKey( const DecalGpu & g, int i )
+{
+	return reinterpret_cast<std::uintptr_t>( g.keys.get() + i );
+}
+
+/* lane VKAO3: target and selfId as shared R32F targets of the present device while want (the route draws into them in
+ * place); false: GL's own, as before (why: the share's refusal) */
+bool shareTargets( NifSkopeOpenGLContext::GLFunctions * fn, DecalGpu & g, int W, int H, bool want, std::string & why )
+{
+	if ( !g.keys )
+		g.keys = std::shared_ptr<char>( new char[2](), std::default_delete<char[]>() );
+	const std::uintptr_t kT = targetKey( g, 0 ), kS = targetKey( g, 1 );
+	if ( g.shared && ( !want || !WwVkPresent::sharedTargetIs( kT, g.target ) || !WwVkPresent::sharedTargetIs( kS, g.selfId )
+		|| g.w != W || g.h != H ) ) {
+		WwVkPresent::sharedTargetDrop( kT );	// the present device's names: dropped there, not deleted here
+		WwVkPresent::sharedTargetDrop( kS );
+		g.target = g.selfId = 0;
+		g.w = g.h = 0;
+		g.shared = false;
+	}
+	if ( !want )
+		g.noW = g.noH = 0;
+	if ( !want || g.shared )
+		return g.shared;
+	if ( g.noW == W && g.noH == H ) {
+		why = "the shared targets were refused at " + std::to_string( W ) + "x" + std::to_string( H );
+		return false;
+	}
+	unsigned a = 0, b = 0;
+	if ( !WwVkPresent::sharedTarget( kT, 0, W, H, 1, GL_R32F, a, why ) || !WwVkPresent::sharedTarget( kS, 0, W, H, 1, GL_R32F, b, why ) ) {
+		WwVkPresent::sharedTargetDrop( kT );
+		WwVkPresent::sharedTargetDrop( kS );
+		g.noW = W;
+		g.noH = H;
+		why = "a shared target failed: " + why;
+		return false;
+	}
+	if ( g.target ) {	// GL's own
+		fn->glDeleteTextures( 1, &g.target );
+		fn->glDeleteTextures( 1, &g.selfId );
+	}
+	for ( const GLuint t : { GLuint( a ), GLuint( b ) } ) {
+		fn->glBindTexture( GL_TEXTURE_2D, t );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+	}
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	g.target = a;
+	g.selfId = b;
+	g.w = W;
+	g.h = H;
+	g.shared = true;
+	return true;
+}
+
+// lane VKAO3: the whole pass on the present device (vkaodecal.inc); the copies GL would skip are skipped (counted)
+template <class PM>
+bool vkPass( const DecalGpu & g, const AoDecalSet & S, bool add, unsigned gbufTex, std::uintptr_t depthKey, int W, int H,
+	const ViewMath & vm, const PM & pm, int & skipped, std::string & why )
+{
+	WwVkPresent::AoDecalRun run;
+	run.w = W;
+	run.h = H;
+	run.gbuf = gbufTex;
+	run.add = add;
+	run.ds = depthKey;
+	run.target = targetKey( g, 0 );
+	run.selfId = targetKey( g, 1 );
+	run.proj[0] = float( pm[0][0] );
+	run.proj[1] = float( pm[1][1] );
+	run.proj[2] = float( pm[2][0] );
+	run.proj[3] = float( pm[2][1] );
+	run.sc = float( vm.sc );
+	run.copies.reserve( S.copies.size() );
+	skipped = 0;
+	for ( size_t ci = 0; ci < S.copies.size(); ci++ ) {
+		const AoDecalSet::Copy & c = S.copies[ci];
+		if ( c.model < 0 || size_t( c.model ) >= g.models.size() || !g.models[size_t( c.model )].vao ) {
+			skipped++;
+			continue;
+		}
+		const ModelGpu & mg = g.models[size_t( c.model )];
+		const aovol::Volume & v = S.models[size_t( c.model )].vol;
+		const CopyMath cm = copyMath( c, vm, pm );
+		WwVkPresent::AoDecalCopy d;
+		std::memcpy( d.clip, cm.clip, sizeof( d.clip ) );
+		std::memcpy( d.M, cm.M, sizeof( d.M ) );
+		std::memcpy( d.N, cm.N, sizeof( d.N ) );
+		for ( int k = 0; k < 3; k++ ) {
+			d.lo[k] = float( v.lo[k] );
+			d.hi[k] = float( v.hi[k] );
+			d.c[k] = float( v.c[k] );
+			d.dims[k] = int( v.dims[k] );
+		}
+		for ( int k = 0; k < 9; k++ )
+			d.coef[k] = float( v.coef[k] );
+		d.fade = float( v.fade );
+		d.rcut = float( v.rcut );
+		d.self = float( ci + 1 );
+		d.vol = mg.vol;
+		d.vbo = mg.vbo;
+		d.maskVerts = int( mg.maskVerts );
+		d.volGen = g.gen;
+		run.copies.push_back( d );
+	}
+	return WwVkPresent::aoDecalRun( run, why );
+}
+
+// lane VKAO3: the `vk aodecal:` line (on GL: when its reason changes; on Vulkan: the counters every 5 s)
+void vkSay( bool onVk, const std::string & glWhy )
+{
+	static std::string said;
+	static QElapsedTimer at;
+	if ( !onVk ) {
+		const std::string line = "vk aodecal: on GL (" + glWhy + ")";
+		if ( line != said ) {
+			said = line;
+			std::fprintf( stderr, "%s\n", line.c_str() );
+		}
+		return;
+	}
+	if ( at.isValid() && at.elapsed() < 5000 && said.rfind( "vk aodecal: on V", 0 ) == 0 )
+		return;
+	at.start();
+	const WwVkPresent::AoDecalStat st = WwVkPresent::takeAoDecalStat();
+	char b[640];
+	std::snprintf( b, sizeof( b ), "vk aodecal: on Vulkan %d runs (%d copies, %d draws, %d twin copies, %d pipelines in %.1f ms; "
+		"drawing thread %.3f ms, max %.3f; fails %d%s%s; on GL %d%s%s)", st.runs, st.copies, st.draws, st.twinCopies, st.pipelines,
+		st.buildMs, st.runs > 0 ? st.cpuMs / st.runs : 0.0, st.maxMs, st.fails, st.failWhy.empty() ? "" : ": ", st.failWhy.c_str(),
+		st.gl, st.glWhy.empty() ? "" : ": ", st.glWhy.c_str() );
+	said = b;
+	std::fprintf( stderr, "%s\n", b );
 }
 
 }	// namespace
@@ -190,7 +419,8 @@ QString wwCellAoDecalEcho()
 	return st().last;
 }
 
-unsigned wwCellAoDecalRun( Scene * scene, unsigned gbufTex, unsigned depthRb, int W, int H )
+unsigned wwCellAoDecalRun( Scene * scene, unsigned gbufTex, unsigned depthRb, int W, int H, bool depthTex, unsigned depthFmt,
+	std::uintptr_t depthKey )
 {
 	if ( !scene || !scene->renderer )
 		return 0;
@@ -208,10 +438,39 @@ unsigned wwCellAoDecalRun( Scene * scene, unsigned gbufTex, unsigned depthRb, in
 	DecalGpu & g = gpus()[r];
 	if ( g.set != &S )
 		uploadModels( fn, g, S );
-	alloc( fn, g, W, H, GLuint( depthRb ) );
+	/* lane VKAO3: behind WW_VKVIEW=1 (red WW_VKVIEW_AODECAL_RED=1: GL) the pass runs on the present device (vkaodecal.inc)
+	 * into shared targets, on the AO pass's shared depth; every refusal is named in the `vk aodecal:` line and GL draws */
+	const bool vkWant = WwVkPresent::shareWanted( "WW_VKVIEW_AODECAL_RED" );
+	std::string vkNo;
+	if ( vkWant ) {
+		if ( !s.dump.isEmpty() )
+			vkNo = "WW_CELL_AODECAL_DUMP (GL's pass only)";
+		else if ( !depthTex || !depthKey )
+			vkNo = "the opaque depth is GL's renderbuffer (WW_VKVIEW_AODEPTH_RED=1 or its share refused)";
+		else if ( depthFmt != GL_DEPTH24_STENCIL8 )
+			vkNo = "the opaque depth is not D24S8 (the pre-pass's format " + std::to_string( depthFmt ) + ")";
+		else
+			vkNo = WwVkPresent::aoDecalRefusal();
+	}
+	const bool vkShared = shareTargets( fn, g, W, H, vkWant && vkNo.empty(), vkNo );
+	alloc( fn, g, W, H, GLuint( depthRb ), depthTex );
 	if ( fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
 		s.last = QStringLiteral( "refused(target incomplete)" );
 		return 0;
+	}
+	if ( vkShared ) {
+		int vkSkipped = 0;
+		if ( vkPass( g, S, s.add, gbufTex, depthKey, W, H, viewMath( scene->view ), r->globalUniforms->projectionMatrix, vkSkipped, vkNo ) ) {
+			vkSay( true, std::string() );
+			s.last = QStringLiteral( "on %1x%2 copies %3 drawn %4 skipped %5 red %6 ms %7 vk" ).arg( W ).arg( H )
+				.arg( S.copies.size() ).arg( S.copies.size() - size_t( vkSkipped ) ).arg( vkSkipped )
+				.arg( s.add ? QStringLiteral( "add" ) : QStringLiteral( "none" ) ).arg( timer.elapsed() );
+			return g.target;
+		}
+	}
+	if ( vkWant ) {
+		WwVkPresent::aoDecalOnGl( vkNo.c_str() );
+		vkSay( false, vkNo );
 	}
 	NifSkopeOpenGLContext::Program * prog = r->useProgram( "cell_aodecal.prog" );
 	if ( !prog ) {
@@ -254,20 +513,11 @@ unsigned wwCellAoDecalRun( Scene * scene, unsigned gbufTex, unsigned depthRb, in
 	const auto & pm = r->globalUniforms->projectionMatrix;
 	prog->uni4f_l( prog->uniLocation( "aoProj" ), FloatVector4( pm[0][0], pm[1][1], pm[2][0], pm[2][1] ) );
 	prog->uni2f_l( prog->uniLocation( "aoSize" ), float( W ), float( H ) );
-	const Transform & vt = scene->view;
-	const double sc = vt.scale != 0.0f ? double( vt.scale ) : 1.0;
+	const ViewMath vm = viewMath( scene->view );	// lane VKAO3: shared with the present device's copies
+	const double sc = vm.sc;
+	const auto & Rv = vm.Rv;
+	const auto & tv = vm.tv;
 	prog->uni1f( "aoSc", float( sc ) );
-	double Rv[3][3], tv[3], cam[3];
-	for ( int i = 0; i < 3; i++ ) {
-		tv[i] = double( vt.translation[i] );
-		for ( int j = 0; j < 3; j++ )
-			Rv[i][j] = double( vt.rotation( i, j ) );
-	}
-	for ( int k = 0; k < 3; k++ ) {	// the camera, world: -Rv^T tv / sc
-		cam[k] = 0.0;
-		for ( int j = 0; j < 3; j++ )
-			cam[k] -= Rv[j][k] * tv[j] / sc;
-	}
 	int drawn = 0, culled = 0;
 	for ( size_t ci = 0; ci < S.copies.size(); ci++ ) {
 		const AoDecalSet::Copy & c = S.copies[ci];
@@ -277,38 +527,12 @@ unsigned wwCellAoDecalRun( Scene * scene, unsigned gbufTex, unsigned depthRb, in
 		}
 		const ModelGpu & mg = g.models[size_t( c.model )];
 		const aovol::Volume & v = S.models[size_t( c.model )].vol;
-		// model -> view: A = sc s Rv Rc, b = sc Rv t + tv; then the projection (pm[col][row])
-		double A[3][3], b[3];
+		const CopyMath cm = copyMath( c, vm, pm );	// lane VKAO3: the same floats as before, one copy of the math
+		for ( int row = 0; row < 4; row++ )
+			prog->uni4f_l( prog->uniLocation( "aoClip[%d]", row ), FloatVector4( cm.clip[row][0], cm.clip[row][1], cm.clip[row][2], cm.clip[row][3] ) );
 		for ( int i = 0; i < 3; i++ ) {
-			b[i] = tv[i];
-			for ( int j = 0; j < 3; j++ ) {
-				double a = 0.0;
-				for ( int k = 0; k < 3; k++ )
-					a += Rv[i][k] * c.R[k * 3 + j];
-				A[i][j] = sc * c.s * a;
-				b[i] += sc * Rv[i][j] * c.t[j];
-			}
-		}
-		for ( int row = 0; row < 4; row++ ) {
-			double e[4] = { 0, 0, 0, double( pm[3][row] ) };
-			for ( int i = 0; i < 3; i++ ) {
-				for ( int j = 0; j < 3; j++ )
-					e[j] += double( pm[i][row] ) * A[i][j];
-				e[3] += double( pm[i][row] ) * b[i];
-			}
-			prog->uni4f_l( prog->uniLocation( "aoClip[%d]", row ), FloatVector4( float( e[0] ), float( e[1] ), float( e[2] ), float( e[3] ) ) );
-		}
-		// view -> model: M = Rc^T Rv^T / (s sc), b' = Rc^T (cam - t) / s; normals Rc^T Rv^T
-		for ( int i = 0; i < 3; i++ ) {
-			double M[3] = { 0, 0, 0 }, N[3] = { 0, 0, 0 }, bb = 0.0;
-			for ( int j = 0; j < 3; j++ ) {
-				for ( int k = 0; k < 3; k++ )
-					N[j] += c.R[k * 3 + i] * Rv[j][k];
-				M[j] = N[j] / ( c.s * sc );
-				bb += c.R[j * 3 + i] * ( cam[j] - c.t[j] ) / c.s;
-			}
-			prog->uni4f_l( prog->uniLocation( "aoM[%d]", i ), FloatVector4( float( M[0] ), float( M[1] ), float( M[2] ), float( bb ) ) );
-			prog->uni3f_l( prog->uniLocation( "aoN[%d]", i ), float( N[0] ), float( N[1] ), float( N[2] ) );
+			prog->uni4f_l( prog->uniLocation( "aoM[%d]", i ), FloatVector4( cm.M[i][0], cm.M[i][1], cm.M[i][2], cm.M[i][3] ) );
+			prog->uni3f_l( prog->uniLocation( "aoN[%d]", i ), cm.N[i][0], cm.N[i][1], cm.N[i][2] );
 		}
 		prog->uni3f_l( prog->uniLocation( "aoLo" ), v.lo[0], v.lo[1], v.lo[2] );
 		prog->uni3f_l( prog->uniLocation( "aoHi" ), v.hi[0], v.hi[1], v.hi[2] );

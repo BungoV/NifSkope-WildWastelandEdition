@@ -11,8 +11,10 @@
  *                              sides 256/128, 512/256, 1024/512 px a cell, near split k = 2, 1, 0.5 screen pixels a texel.
  * Pins WW_CELL_FARGROUND=baked|lookup|cached, WW_CELL_FARGROUND_QUALITY=low|medium|high (ultra reads as high); red
  * WW_CELL_FARGROUND_RED=nodecals (no decals) | baked (the twins never chosen) | oldpages (FARDRAW1's decal-only pages
- * over the live splat, fo4_cellfgc) | nocompress (RGBA8 pools). All live.
- * Not covered: normals stay the sheet's, no .loda AO, the PBR route and the streamed ring 0 keep the sheet. */
+ * over the live splat, fo4_cellfgc) | nocompress (RGBA8 pools), all live; nostream (a streamed open prepares
+ * nothing) is read at the far append (a cell open or a far rebuild).
+ * Not covered: normals stay the sheet's, no .loda AO, the PBR route keeps the sheet. Streamed opens (VKFAR14): uncut,
+ * every ring-0 cell, crossings only hide and show the shapes (cellfgcut.h). */
 
 #include "gl/glcontext.hpp"
 
@@ -33,8 +35,9 @@ bool qualityPinned();
 
 //! At the far field's append, after ring 0's terrain: blocks [blockFirst, blockLast) are its shapes, the ring
 //! rect and its cut in cells. Reads the grid and the decal records (CPU); pictures load on first use.
+//! uncut (a streamed open): every cell drawn, the cut only centres the cached pages.
 void prepare( const void * nif, const EsmWorld & world, const QString & lodlPath, int blockFirst, int blockLast,
-	int rx0, int ry0, int rx1, int ry1, int cx0, int cy0, int cx1, int cy1, QStringList * notes );
+	int rx0, int ry0, int rx1, int ry1, int cx0, int cy0, int cx1, int cy1, bool uncut, QStringList * notes );
 void forget( const void * nif );
 //! The twin a ring-0 shape draws with: 0 none (the baked sheet), 1 lookup, 2 old pages (red), 3 cached pages.
 int twinFor( const void * nif, int block );

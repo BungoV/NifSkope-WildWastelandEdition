@@ -61,7 +61,8 @@ bool wwCellAoLean();
 struct WwCellAoTargets
 {
 	unsigned int gbuf = 0;		// full size RGBA32F, bottom row first: view normal, linear depth (game units)
-	unsigned int depthRb = 0;	// its depth-stencil renderbuffer
+	unsigned int depthRb = 0;	// its depth-stencil renderbuffer (lane VKAO3: or a 2D texture, depthTex)
+	bool depthTex = false;		// lane VKAO3: depthRb is a shared 2D texture (the view on Vulkan): attach it with glFramebufferTexture2D
 	unsigned int depthFmt = 0;	// lane VKWATER4: its internal format (D24S8, or the pre-pass's)
 	unsigned int mip[5] = {};	// 1..4: min-of-2x2 depth (R32F), top row first
 	int w = 0, h = 0, mipW[5] = {}, mipH[5] = {};

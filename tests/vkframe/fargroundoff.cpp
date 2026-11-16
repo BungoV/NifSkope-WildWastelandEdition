@@ -164,6 +164,8 @@ void sharedTargetDrop( std::uintptr_t key )
 }
 }  // namespace WwVkPresent
 
+#include "../../src/features/far-ground/cellfgcut.h"	// lane VKFAR14: Doc's cut (this tree)
+
 namespace Rung
 {
 #include "rung_tu.inc"

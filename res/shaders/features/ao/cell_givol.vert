@@ -23,7 +23,7 @@ void main()
 	vec4 b = texelFetch( volShapes, 3 * s + 1 );
 	vec4 c = texelFetch( volShapes, 3 * s + 2 );
 	int f = gl_VertexID / 6, k = gl_VertexID % 6;
-	vec2 q = FC[k < 3 ? k : k == 3 ? 0 : k - 1];
+	vec2 q = FC[k < 3 ? k : k == 3 ? 0 : k - 2];
 	vec3 l = 0.5 * ( FN[f] + q.x * FU[f] + q.y * FV[f] ) * ( b.xyz + 2.0 * volGrow );
 	vec4 w = vec4( volRot( c.xyz ) * l + a.xyz, 1.0 );
 	gl_Position = vec4( dot( volClip[0], w ), dot( volClip[1], w ), dot( volClip[2], w ), dot( volClip[3], w ) );

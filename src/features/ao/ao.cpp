@@ -41,6 +41,8 @@
 #include "features/shared/glstatememo.h"	// lane EMPTY240 R11-2: the obscurance pass's state reads and target checks kept
 #include "gl/cellunirec.h"	// lane PERFFIX1: the cell-uniform class record
 #include "features/vkframe/vkpresent.h"	// lane VKLIGHT1: the AO stages on the present device
+#include "features/vkframe/vkvolmask.h"	// lane VKAO4: the GI volume mask on the present device
+#include "features/vkframe/vkrtbuf.h"	// lane VKBUF2: cellGiHalf / cellGiHalfKey on the present device by name
 #include <cstring>
 #include "features/clouds/cloudvol.h"	// lane LIGHTNING2: a storm's flash on the exterior ambient (wwLightningGround)
 #include "cellworldanim.h"	// lane NIFXLIGHT3: the world clock a .nifx light's dimmer follows
@@ -180,6 +182,10 @@ struct AoGpu
 	AoTarget gbuf;			// full size: view normal + linear depth (RGBA32F), with a depth-stencil buffer
 	GLuint gbufDepth = 0;
 	GLenum gbufFmt = 0;		// MODULES1: its format (the pre-pass's while the pre-pass feeds it)
+	GLuint gbufDepthTex = 0;	// lane VKAO3: its shared twin while the view is on Vulkan (depthShare), attached instead of it
+	int gbufDepthTexW = 0, gbufDepthTexH = 0, gbufDepthNoW = 0, gbufDepthNoH = 0;	// its shape; a shape the share refused
+	GLenum gbufDepthTexFmt = 0, gbufDepthNoFmt = 0;
+	std::shared_ptr<char> gbufDepthKey;	// its sharedTarget key (a stable address: the AoGpu moves with its hash)
 	GLuint preFbo = 0, preDs = 0;	// MODULES1: the depth pre-pass, multisampled as the linear frame
 	int preW = 0, preH = 0, preS = 0;
 	GLenum preFmt = 0;
@@ -205,8 +211,12 @@ struct AoGpu
 	int giStep = 2;			// 2 half resolution, 1 full
 	bool giReady = false;	// this frame's screen GI
 	bool giShared = false;	// lane VKWATER3: giHalf.tex and giKey are shared targets of the present device (giShare)
+	std::shared_ptr<char> giHalfVk, giKeyVk;	// lane VKBUF2: their sharedTarget keys (a stable address: the AoGpu moves with its hash)
 	bool volOn = false;		// this frame's volumes' mask was drawn
 	AoTarget volMask;		// lane PERF1: full size, the pixel's interior volume's room + 1 (R32F; 0 none)
+	bool volShared = false;	// lane VKAO4: volMask.tex is a shared target of the present device (volShare)
+	int volNoW = 0, volNoH = 0;	// a size the share refused
+	std::shared_ptr<char> volKey;	// its sharedTarget key (a stable address: the AoGpu moves with its hash)
 	GLuint volBuf = 0, volTex = 0, volVao = 0;	// the shapes, 3 RGBA32F texels each (a buffer texture)
 	std::vector<float> volData;	// what volBuf holds
 	bool giUnits = false;	// the GPU has WwCellUnit::GiHalfKey
@@ -221,6 +231,55 @@ QHash<const void *, AoGpu> & aoGpus()
 {
 	static QHash<const void *, AoGpu> g;
 	return g;
+}
+
+/* lane VKAO3: while the view is on Vulkan (red WW_VKVIEW_AODEPTH_RED=1) the opaque pass's depth-stencil is a shared texture
+ * of the present device (D24S8, or the pre-pass's D32F_S8), so the AO decals' route (vkaodecal.inc) uses it in place; every
+ * attach of it goes through depthAttach. The view off (or a refusal): gbufDepth, the renderbuffer, as before */
+bool depthShare( AoGpu & g, int W, int H, GLenum fmt )
+{
+	if ( !g.gbufDepthKey )
+		g.gbufDepthKey = std::make_shared<char>( 0 );
+	const std::uintptr_t key = reinterpret_cast<std::uintptr_t>( g.gbufDepthKey.get() );
+	const bool want = WwVkPresent::shareWanted( "WW_VKVIEW_AODEPTH_RED" ) && ( fmt == GL_DEPTH24_STENCIL8 || fmt == GL_DEPTH32F_STENCIL8 );
+	if ( g.gbufDepthTex && ( !want || !WwVkPresent::sharedTargetIs( key, g.gbufDepthTex ) || g.gbufDepthTexW != W
+		|| g.gbufDepthTexH != H || g.gbufDepthTexFmt != fmt ) ) {
+		WwVkPresent::sharedTargetDrop( key );	// the present device's name: dropped there, not deleted here
+		g.gbufDepthTex = 0;
+		g.gbufDepthOn = 0;
+		g.gbufOkKey = 0;
+	}
+	if ( !want )
+		g.gbufDepthNoW = g.gbufDepthNoH = 0;
+	if ( !want || g.gbufDepthTex )
+		return g.gbufDepthTex != 0;
+	if ( g.gbufDepthNoW == W && g.gbufDepthNoH == H && g.gbufDepthNoFmt == fmt )
+		return false;
+	unsigned t = 0;
+	std::string why;
+	if ( !WwVkPresent::sharedTarget( key, 0, W, H, 1, fmt, t, why ) || !t ) {
+		WwVkPresent::sharedTargetDrop( key );
+		g.gbufDepthNoW = W;
+		g.gbufDepthNoH = H;
+		g.gbufDepthNoFmt = fmt;
+		qInfo().noquote() << "vk aodepth: the opaque depth stays GL's renderbuffer (" << QString::fromStdString( why ) << ")";
+		return false;
+	}
+	g.gbufDepthTex = t;
+	g.gbufDepthTexW = W;
+	g.gbufDepthTexH = H;
+	g.gbufDepthTexFmt = fmt;
+	g.gbufDepthOn = 0;
+	g.gbufOkKey = 0;
+	return true;
+}
+
+void depthAttach( NifSkopeOpenGLContext::GLFunctions * fn, GLenum fb, const AoGpu & g )
+{
+	if ( g.gbufDepthTex )
+		fn->glFramebufferTexture2D( fb, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, g.gbufDepthTex, 0 );
+	else
+		fn->glFramebufferRenderbuffer( fb, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, g.gbufDepth );
 }
 
 void aoAlloc( NifSkopeOpenGLContext::GLFunctions * fn, AoTarget & t, int w, int h, GLenum ifmt, GLenum fmt, bool linear )
@@ -273,6 +332,82 @@ void giEcho( const QString & line )
 	std::fprintf( stderr, "cell gi rate: %s\n", qPrintable( line ) );
 }
 
+/* lane VKAO4: while the view is on Vulkan (red WW_VKVIEW_VOLMASK_RED=1) the volume mask is a shared R32F of the present
+ * device, so its route (vkvolmask.inc) draws it in place. The view off (or a refusal): aoAlloc's own texture, as before */
+bool volShare( NifSkopeOpenGLContext::GLFunctions * fn, AoGpu & g, int W, int H, bool want, std::string & why )
+{
+	if ( !g.volKey )
+		g.volKey = std::make_shared<char>( 0 );
+	const std::uintptr_t key = reinterpret_cast<std::uintptr_t>( g.volKey.get() );
+	if ( g.volShared && ( !want || !WwVkPresent::sharedTargetIs( key, g.volMask.tex ) || g.volMask.w != W || g.volMask.h != H ) ) {
+		WwVkPresent::sharedTargetDrop( key );	// the present device's name: dropped there, not deleted here
+		g.volMask.tex = 0;
+		g.volMask.w = g.volMask.h = 0;
+		g.volShared = false;
+	}
+	if ( !want )
+		g.volNoW = g.volNoH = 0;
+	if ( !want || g.volShared )
+		return g.volShared;
+	if ( g.volNoW == W && g.volNoH == H ) {
+		why = "the volume mask's share was refused at this size";
+		return false;
+	}
+	unsigned t = 0;
+	std::string no;
+	if ( !WwVkPresent::sharedTarget( key, 0, W, H, 1, GL_R32F, t, no ) || !t ) {
+		WwVkPresent::sharedTargetDrop( key );
+		g.volNoW = W;
+		g.volNoH = H;
+		why = "the volume mask's share failed: " + no;
+		return false;
+	}
+	if ( g.volMask.tex )
+		fn->glDeleteTextures( 1, &g.volMask.tex );
+	fn->glBindTexture( GL_TEXTURE_2D, t );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	if ( !g.volMask.fbo )
+		fn->glGenFramebuffers( 1, &g.volMask.fbo );
+	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.volMask.fbo );
+	fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t, 0 );
+	g.volMask.tex = t;
+	g.volMask.w = W;
+	g.volMask.h = H;
+	g.volShared = true;
+	return true;
+}
+
+// lane VKAO4: the `vk volmask:` line (on GL: when its reason changes; on Vulkan: the counters every 5 s)
+void volSay( bool onVk, const std::string & glWhy )
+{
+	static std::string said;
+	static QElapsedTimer at;
+	if ( !onVk ) {
+		const std::string line = "vk volmask: on GL (" + glWhy + ")";
+		if ( line != said ) {
+			said = line;
+			std::fprintf( stderr, "%s\n", line.c_str() );
+		}
+		return;
+	}
+	if ( at.isValid() && at.elapsed() < 5000 && said.rfind( "vk volmask: on V", 0 ) == 0 )
+		return;
+	at.start();
+	const WwVkPresent::VolMaskStat st = WwVkPresent::takeVolMaskStat();
+	char b[640];
+	std::snprintf( b, sizeof( b ), "vk volmask: on Vulkan %d runs (%d draws, %d shapes, %d twin copies, %d pipelines in %.1f ms; "
+		"drawing thread %.3f ms, max %.3f; fails %d%s%s; on GL %d%s%s)", st.runs, st.draws, st.shapes, st.twinCopies, st.pipelines,
+		st.buildMs, st.runs > 0 ? st.cpuMs / st.runs : 0.0, st.maxMs, st.fails, st.failWhy.empty() ? "" : ": ", st.failWhy.c_str(),
+		st.gl, st.glWhy.empty() ? "" : ": ", st.glWhy.c_str() );
+	said = b;
+	std::fprintf( stderr, "%s\n", b );
+}
+
 /* lane PERF1: the GI volume mask (the Division deck's D4: the volumes drawn into the stencil). Each interior shape's
  * hull, grown by the bias, back faces only, depth-tested against the shared opaque pass (a hull wholly in front of the
  * surface draws nothing); cell_givol.frag tests the surface's point a bias in front against the shape and writes its
@@ -296,23 +431,33 @@ bool giVolMaskPass( Scene * scene, AoGpu & g, const WwCellGi * G, int W, int H, 
 		fn->glBindBuffer( GL_TEXTURE_BUFFER, 0 );
 		g.volData = G->volShapes;
 	}
+	/* lane VKAO4: behind WW_VKVIEW=1 (red WW_VKVIEW_VOLMASK_RED=1: GL) the pass runs on the present device (vkvolmask.inc)
+	 * into the shared mask, on the AO pass's shared depth; every refusal is named in the `vk volmask:` line and GL draws */
+	const bool vkWant = WwVkPresent::shareWanted( "WW_VKVIEW_VOLMASK_RED" );
+	std::string vkNo;
+	if ( vkWant ) {
+		if ( !g.gbufDepthTex || !g.gbufDepthKey )
+			vkNo = "the opaque depth is GL's renderbuffer (WW_VKVIEW_AODEPTH_RED=1 or its share refused)";
+		else if ( g.gbufDepthTexFmt != GL_DEPTH24_STENCIL8 )
+			vkNo = "the opaque depth is not D24S8 (the pre-pass's format " + std::to_string( g.gbufDepthTexFmt ) + ")";
+		else if ( !g.gbuf.tex )
+			vkNo = "no g-buffer";
+		else
+			vkNo = WwVkPresent::volMaskRefusal();
+	}
+	const bool vkShared = volShare( fn, g, W, H, vkWant && vkNo.empty(), vkNo );
 	aoAlloc( fn, g.volMask, W, H, GL_R32F, GL_RED, false );
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.volMask.fbo );
-	fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, g.gbufDepth );
+	depthAttach( fn, GL_FRAMEBUFFER, g );	// lane VKAO3
 	const GLenum one = GL_COLOR_ATTACHMENT0;
 	fn->glDrawBuffers( 1, &one );
 	if ( fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE )
 		return false;
-	NifSkopeOpenGLContext::Program * prog = r->useProgram( "cell_givol.prog" );
-	if ( !prog )
-		return false;
-	fn->glViewport( 0, 0, W, H );
-	const GLfloat zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-	fn->glClearBufferfv( GL_COLOR, 0, zero );
 	// world -> clip (the projection after posView = sc R world + t), and view -> world (cell_lights.glsl cellRow)
 	const Transform & vt = scene->view;
 	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
 	const auto & pm = r->globalUniforms->projectionMatrix;
+	float volClip[4][4], volRow[3][4];	// lane VKAO4: kept for the Vulkan route too
 	for ( int row = 0; row < 4; row++ ) {
 		double e[4] = { 0, 0, 0, double( pm[3][row] ) };
 		for ( int i = 0; i < 3; i++ ) {
@@ -320,16 +465,53 @@ bool giVolMaskPass( Scene * scene, AoGpu & g, const WwCellGi * G, int W, int H, 
 				e[j] += double( pm[i][row] ) * double( vt.rotation( i, j ) ) * double( sc );
 			e[3] += double( pm[i][row] ) * double( vt.translation[i] );
 		}
-		prog->uni4f_l( prog->uniLocation( "volClip[%d]", row ), FloatVector4( float( e[0] ), float( e[1] ), float( e[2] ), float( e[3] ) ) );
+		for ( int j = 0; j < 4; j++ )
+			volClip[row][j] = float( e[j] );
 	}
 	for ( int k = 0; k < 3; k++ ) {
 		float w = 0.0f;
 		for ( int j = 0; j < 3; j++ )
 			w -= vt.rotation( j, k ) * vt.translation[j];
-		prog->uni4f_l( prog->uniLocation( "volRow[%d]", k ), FloatVector4( vt.rotation( 0, k ) / sc, vt.rotation( 1, k ) / sc,
-			vt.rotation( 2, k ) / sc, w / sc ) );
+		volRow[k][0] = vt.rotation( 0, k ) / sc;
+		volRow[k][1] = vt.rotation( 1, k ) / sc;
+		volRow[k][2] = vt.rotation( 2, k ) / sc;
+		volRow[k][3] = w / sc;
 	}
 	const float bias = 0.75f * G->roomsCell;	// the room grid's read (cell_lights.glsl cellGiVolAt)
+	if ( vkShared ) {
+		WwVkPresent::VolMaskRun run;
+		run.w = W;
+		run.h = H;
+		run.gbuf = g.gbuf.tex;
+		run.ds = reinterpret_cast<std::uintptr_t>( g.gbufDepthKey.get() );
+		run.target = reinterpret_cast<std::uintptr_t>( g.volKey.get() );
+		run.shapes = G->volShapes;
+		std::memcpy( run.clip, volClip, sizeof( volClip ) );
+		std::memcpy( run.row, volRow, sizeof( volRow ) );
+		run.bias = bias;
+		run.grow = bias + 1.0f;
+		run.proj[0] = p00;
+		run.proj[1] = p11;
+		if ( WwVkPresent::volMaskRun( run, vkNo ) ) {
+			fn->glViewport( 0, 0, W, H );
+			volSay( true, std::string() );
+			return true;
+		}
+	}
+	if ( vkWant ) {
+		WwVkPresent::volMaskOnGl( vkNo.c_str() );
+		volSay( false, vkNo );
+	}
+	NifSkopeOpenGLContext::Program * prog = r->useProgram( "cell_givol.prog" );
+	if ( !prog )
+		return false;
+	fn->glViewport( 0, 0, W, H );
+	const GLfloat zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	fn->glClearBufferfv( GL_COLOR, 0, zero );
+	for ( int row = 0; row < 4; row++ )
+		prog->uni4f_l( prog->uniLocation( "volClip[%d]", row ), FloatVector4( volClip[row][0], volClip[row][1], volClip[row][2], volClip[row][3] ) );
+	for ( int k = 0; k < 3; k++ )
+		prog->uni4f_l( prog->uniLocation( "volRow[%d]", k ), FloatVector4( volRow[k][0], volRow[k][1], volRow[k][2], volRow[k][3] ) );
 	prog->uni1f( "volBias", bias );
 	prog->uni1f( "volGrow", bias + 1.0f );
 	prog->uni2f( "volProj", p00, p11 );
@@ -390,14 +572,21 @@ bool giVolMaskPass( Scene * scene, AoGpu & g, const WwCellGi * G, int W, int H, 
 /* lane VKWATER3 G4: while the view is on Vulkan the screen GI and its key are shared targets of the present device, so the
  * cell twins' RT GI variant reads them with no copy (red WW_VKVIEW_GIHALF_RED=1, or a refusal: GL's own, as before; the
  * twins then refuse the draws: "GL textures with no twin"). Sizes them hw x hh; aoAlloc and the key's upload then keep them */
-void giShare( NifSkopeOpenGLContext::GLFunctions * fn, AoGpu & g, int hw, int hh )
+/* lane VKBUF2: found by name ("cellGiHalf", "cellGiHalfKey": vkrtbuf.h rtImgOf), keyed by heap bytes the AoGpu holds (an
+ * address inside a QHash value moves). A lookup answers only while GL's program reads them (wwCellAoDraw's bind): the screen
+ * GI this frame, a rate the draws read, no GI debug view, no probe picture (that binds the volumes' mask on cellGiHalf) */
+void giShare( NifSkopeOpenGLContext::GLFunctions * fn, AoGpu & g, const void * rk, int hw, int hh )
 {
-	const std::uintptr_t kHalf = reinterpret_cast<std::uintptr_t>( &g.giHalf.tex ), kKey = reinterpret_cast<std::uintptr_t>( &g.giKey );
+	if ( !g.giHalfVk )
+		g.giHalfVk = std::make_shared<char>( 0 );
+	if ( !g.giKeyVk )
+		g.giKeyVk = std::make_shared<char>( 0 );
+	const std::uintptr_t kHalf = reinterpret_cast<std::uintptr_t>( g.giHalfVk.get() ), kKey = reinterpret_cast<std::uintptr_t>( g.giKeyVk.get() );
 	const bool want = WwVkPresent::shareWanted( "WW_VKVIEW_GIHALF_RED" );
 	if ( g.giShared && ( !want || !WwVkPresent::sharedTargetIs( kHalf, g.giHalf.tex ) || !WwVkPresent::sharedTargetIs( kKey, g.giKey )
 		|| g.giHalf.w != hw || g.giHalf.h != hh ) ) {
-		WwVkPresent::sharedTargetDrop( kHalf );	// the present device's names: dropped there, not deleted here
-		WwVkPresent::sharedTargetDrop( kKey );
+		WwVkPresent::rtImgDrop( WwVkPresent::kRtImgGiHalf, kHalf );	// the present device's names: dropped there, not deleted here
+		WwVkPresent::rtImgDrop( WwVkPresent::kRtImgGiHalfKey, kKey );
 		g.giHalf.tex = g.giKey = 0;
 		g.giHalf.w = g.giHalf.h = g.giKeyW = g.giKeyH = 0;
 		g.giShared = false;
@@ -406,9 +595,13 @@ void giShare( NifSkopeOpenGLContext::GLFunctions * fn, AoGpu & g, int hw, int hh
 		return;
 	unsigned a = 0, b = 0;
 	std::string why;
-	if ( !WwVkPresent::sharedTarget( kHalf, 0, hw, hh, 1, GL_RGBA32F, a, why ) || !WwVkPresent::sharedTarget( kKey, 0, hw, hh, 1, GL_RGBA32F, b, why ) ) {
-		WwVkPresent::sharedTargetDrop( kHalf );
-		WwVkPresent::sharedTargetDrop( kKey );
+	if ( !g.giHalf.fbo )
+		fn->glGenFramebuffers( 1, &g.giHalf.fbo );
+	// the key first: the GI goes on the pass's attachment 0 only once both are made (rtImgShare sets NEAREST, clamp, one level)
+	if ( !WwVkPresent::rtImgShare( WwVkPresent::kRtImgGiHalfKey, kKey, hw, hh, 0, 0, b, why )
+		|| !WwVkPresent::rtImgShare( WwVkPresent::kRtImgGiHalf, kHalf, hw, hh, g.giHalf.fbo, 0, a, why ) ) {
+		WwVkPresent::rtImgDrop( WwVkPresent::kRtImgGiHalf, kHalf );
+		WwVkPresent::rtImgDrop( WwVkPresent::kRtImgGiHalfKey, kKey );
 		static std::string said;
 		if ( said != why ) {
 			said = why;
@@ -420,24 +613,34 @@ void giShare( NifSkopeOpenGLContext::GLFunctions * fn, AoGpu & g, int hw, int hh
 		fn->glDeleteTextures( 1, &g.giHalf.tex );
 	if ( g.giKey )
 		fn->glDeleteTextures( 1, &g.giKey );
-	for ( const unsigned t : { a, b } ) {
-		fn->glBindTexture( GL_TEXTURE_2D, t );
-		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
-		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
-		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
-		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
-		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
-	}
-	fn->glBindTexture( GL_TEXTURE_2D, 0 );
-	if ( !g.giHalf.fbo )
-		fn->glGenFramebuffers( 1, &g.giHalf.fbo );
-	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.giHalf.fbo );
-	fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, a, 0 );
 	g.giHalf.tex = a;
 	g.giKey = b;
 	g.giHalf.w = g.giKeyW = hw;
 	g.giHalf.h = g.giKeyH = hh;
 	g.giShared = true;
+	const auto fresh = [rk]( std::string & w ) {
+		const auto it = aoGpus().constFind( rk );
+		if ( it == aoGpus().constEnd() || !it->giShared ) {
+			w = "the screen GI is GL's (not shared)";
+			return false;
+		}
+		const int rate = wwCellGiRate();
+		if ( !it->giReady || !( rate == 0 || rate == 1 || rate == 4 ) ) {
+			w = "no screen GI this frame";
+			return false;
+		}
+		if ( wwCellGiVis() != 0 ) {
+			w = "a GI debug view (the draws read no screen GI)";
+			return false;
+		}
+		if ( wwCellLitProbePicture() ) {
+			w = "a probe picture (GL binds the volumes' mask on cellGiHalf)";
+			return false;
+		}
+		return true;
+	};
+	WwVkPresent::rtImgOwner( WwVkPresent::kRtImgGiHalf, fresh );
+	WwVkPresent::rtImgOwner( WwVkPresent::kRtImgGiHalfKey, fresh );
 }
 
 void giHalfPass( Scene * scene, AoGpu & g, int W, int H, float p00, float p11 )
@@ -451,8 +654,9 @@ void giHalfPass( Scene * scene, AoGpu & g, int W, int H, float p00, float p11 )
 	 * (tests/ddgiscreen: rel err <= 1e-3), half bilinears across texels with other normals (p99 0.11 there) */
 	const int rate = wwCellGiRate();
 	g.giStep = rate == 1 || ( rate == 0 && !wwCellPrtOn() ) ? 1 : 2;
-	const int hw = ( W + g.giStep - 1 ) / g.giStep, hh = ( H + g.giStep - 1 ) / g.giStep;
-	giShare( fn, g, hw, hh );
+	const int hw = WwVkPresent::rtImgSize( W, g.giStep ), hh = WwVkPresent::rtImgSize( H, g.giStep );
+	giShare( fn, g, r, hw, hh );
+	WwVkPresent::rtImgSay();  // once a pass, after both slots (the `vk rtimg:` line)
 	aoAlloc( fn, g.giHalf, hw, hh, GL_RGBA32F, GL_RGBA, false );
 	if ( !g.giKey )
 		fn->glGenTextures( 1, &g.giKey );
@@ -1103,6 +1307,7 @@ void wwCellAoPass( Scene * scene, bool run )
 			a.preNote = QStringLiteral( "geom (the pre-pass target is incomplete)" );
 	}
 	const GLenum gbufFmt = usePre ? g.preFmt : GLenum( GL_DEPTH24_STENCIL8 );
+	const bool depthTex = depthShare( g, W, H, gbufFmt );	// lane VKAO3: the shared twin while the view is on Vulkan
 
 	// the targets
 	aoAlloc( fn, g.gbuf, W, H, GL_RGBA32F, GL_RGBA, false );
@@ -1117,7 +1322,9 @@ void wwCellAoPass( Scene * scene, bool run )
 		fn->glGetRenderbufferParameteriv( GL_RENDERBUFFER, GL_RENDERBUFFER_WIDTH, &rbw );
 		fn->glGetRenderbufferParameteriv( GL_RENDERBUFFER, GL_RENDERBUFFER_HEIGHT, &rbh );
 	}
-	if ( rbw != W || rbh != H || g.gbufFmt != gbufFmt ) {
+	if ( depthTex )
+		g.gbufFmt = gbufFmt;	// lane VKAO3: the shared texture holds the depth (the renderbuffer keeps its storage)
+	else if ( rbw != W || rbh != H || g.gbufFmt != gbufFmt ) {
 		fn->glBindRenderbuffer( GL_RENDERBUFFER, g.gbufDepth );
 		fn->glRenderbufferStorage( GL_RENDERBUFFER, gbufFmt, W, H );
 		g.gbufFmt = gbufFmt;
@@ -1129,7 +1336,7 @@ void wwCellAoPass( Scene * scene, bool run )
 	fn->glBindRenderbuffer( GL_RENDERBUFFER, 0 );
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.gbuf.fbo );
 	if ( g.gbufDepthOn != g.gbuf.fbo || gbufAsk ) {
-		fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, g.gbufDepth );
+		depthAttach( fn, GL_FRAMEBUFFER, g );	// lane VKAO3
 		g.gbufDepthOn = g.gbuf.fbo;
 		g.gbufOkKey = 0;
 	}
@@ -1322,7 +1529,8 @@ void wwCellAoPass( Scene * scene, bool run )
 	}
 	// the AO decal (src/gl/cellaodecalgl.h) copies over this opaque pass, into its own target
 	if ( g.decalUnit >= 0 && wwCellAoDecalHas( scene->nifModel ) )
-		g.decal = GLuint( wwCellAoDecalRun( scene, g.gbuf.tex, g.gbufDepth, W, H ) );
+		g.decal = GLuint( wwCellAoDecalRun( scene, g.gbuf.tex, g.gbufDepthTex ? g.gbufDepthTex : g.gbufDepth, W, H, g.gbufDepthTex != 0,
+			g.gbufFmt, g.gbufDepthTex ? reinterpret_cast<std::uintptr_t>( g.gbufDepthKey.get() ) : 0 ) );	// lane VKAO3
 
 	// 2. the full-screen passes (cell_ao.frag)
 	PassTime::subBegin( PassTime::AoStages );
@@ -1537,7 +1745,8 @@ bool wwCellAoTargets( Scene * scene, WwCellAoTargets & out )
 	if ( !g.ready || g.doc != scene->nifModel )
 		return false;
 	out.gbuf = g.gbuf.tex;
-	out.depthRb = g.gbufDepth;
+	out.depthRb = g.gbufDepthTex ? g.gbufDepthTex : g.gbufDepth;	// lane VKAO3: the shared texture while the view is on Vulkan
+	out.depthTex = g.gbufDepthTex != 0;
 	out.depthFmt = g.gbufFmt;
 	out.w = g.gbuf.w;
 	out.h = g.gbuf.h;

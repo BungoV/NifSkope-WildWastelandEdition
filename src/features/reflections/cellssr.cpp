@@ -561,7 +561,10 @@ void wwCellSsrPass( Scene * scene, bool run )
 		g.emission.h = H;
 	}
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.scene.fbo );
-	fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, ao.depthRb );
+	if ( ao.depthTex )	// lane VKAO3: the AO pass's shared depth texture (the view on Vulkan)
+		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, ao.depthRb, 0 );
+	else
+		fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, ao.depthRb );
 	fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, wantEmit ? g.emission.tex : 0, 0 );
 	const GLenum sceneBufs[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
 	fn->glDrawBuffers( wantEmit ? 2 : 1, sceneBufs );
@@ -686,7 +689,10 @@ void wwCellSsrPass( Scene * scene, bool run )
 			ssrVkSay( false, vkOff );
 		}
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.wray.fbo );
-		fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, ao.depthRb );
+		if ( ao.depthTex )	// lane VKAO3: the AO pass's shared depth texture (the view on Vulkan)
+			fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, ao.depthRb, 0 );
+		else
+			fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, ao.depthRb );
 		if ( fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE ) {
 			fn->glViewport( 0, 0, W, H );
 			fn->glClearBufferfv( GL_COLOR, 0, none4 );
@@ -704,7 +710,7 @@ void wwCellSsrPass( Scene * scene, bool run )
 				unsigned depthTwin = 0;
 				std::string why;
 				if ( WwVkPresent::waterRayDepth( reinterpret_cast<std::uintptr_t>( &s.vkRayDepth ), ao.depthRb, ao.depthFmt, W, H,
-						depthTwin, why ) ) {
+						depthTwin, why, ao.depthTex ) ) {
 					s.vkRayFbo = g.wray.fbo;
 					s.vkRayColor = g.wray.tex;
 					s.vkRayDepth = depthTwin;

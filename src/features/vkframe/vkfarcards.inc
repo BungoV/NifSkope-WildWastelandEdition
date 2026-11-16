@@ -277,7 +277,7 @@ const Shared * farTwinFind( std::uintptr_t key )
 }
 
 constexpr GLenum kFcTexBuffer = 0x8C2A, kFcBindingTexBuffer = 0x8C2C, kFcRgba32f = 0x8814, kFcRgba32i = 0x8D82, kFcRgba32ui = 0x8D70,
-	kFcR32i = 0x8235, kFcRg8 = 0x822B, kFcRg32f = 0x8230;
+	kFcR32i = 0x8235, kFcRg8 = 0x822B, kFcRg32f = 0x8230;  // lane VKBUF1: RG32F (ReSTIR's ratio, cellRestir)
 
 VkFormat fcTexelFormat( GLenum f )
 {
@@ -656,7 +656,7 @@ bool farTexelBuffer( std::uintptr_t key, unsigned glFmt, std::size_t bytes, unsi
 		return fail( "the present device or GL's entry points are not ready in this context" );
 	const VkFormat fmt = fcTexelFormat( GLenum( glFmt ) );
 	if ( fmt == VK_FORMAT_UNDEFINED )
-		return fail( "GL format " + std::to_string( glFmt ) + " has no far-card texel buffer (RGBA32F / RGBA32I / RGBA32UI / R32I / RG8)" );
+		return fail( "GL format " + std::to_string( glFmt ) + " has no far-card texel buffer (RGBA32F / RGBA32I / RGBA32UI / R32I / RG8 / RG32F)" );
 	const std::size_t tb = fcTexelBytes( GLenum( glFmt ) );
 	if ( bytes < tb || bytes % tb )
 		return fail( "a far-card texel buffer of " + std::to_string( bytes ) + " bytes (whole " + std::to_string( tb ) + "-byte texels)" );

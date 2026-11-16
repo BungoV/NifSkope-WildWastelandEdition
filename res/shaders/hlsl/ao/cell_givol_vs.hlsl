@@ -36,7 +36,7 @@ void vert_main()
 	float4 b = volShapes.Load( 3 * s + 1 );
 	float4 c = volShapes.Load( 3 * s + 2 );
 	int f = gl_VertexID / 6, k = gl_VertexID % 6;
-	float2 q = FC[k < 3 ? k : k == 3 ? 0 : k - 1];
+	float2 q = FC[k < 3 ? k : k == 3 ? 0 : k - 2];
 	float3 l = 0.5 * ( FN[f] + q.x * FU[f] + q.y * FV[f] ) * ( b.xyz + 2.0 * volGrow );
 	float4 w = float4( mul(l, volRot( c.xyz )) + a.xyz, 1.0 );
 	gl_Position = float4( dot( volClip[0], w ), dot( volClip[1], w ), dot( volClip[2], w ), dot( volClip[3], w ) );

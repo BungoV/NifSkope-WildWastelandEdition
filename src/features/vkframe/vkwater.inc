@@ -1313,7 +1313,7 @@ std::string waterDrawRefusal()
 	return std::string();
 }
 
-bool waterRayDepth( std::uintptr_t key, unsigned rb, unsigned glFmt, int w, int h, unsigned & tex, std::string & why )
+bool waterRayDepth( std::uintptr_t key, unsigned rb, unsigned glFmt, int w, int h, unsigned & tex, std::string & why, bool srcTex )
 {
 	Gl & g = gl();
 	tex = 0;
@@ -1331,10 +1331,11 @@ bool waterRayDepth( std::uintptr_t key, unsigned rb, unsigned glFmt, int w, int 
 	// the copy's GL error is read once a new twin (glGetError is a driver round trip: not every pass)
 	static unsigned checked = 0, checkedFmt = 0;
 	static int checkedW = 0, checkedH = 0;	// a GL name can come back for a remade twin: its format and size too
-	const bool ask = t != checked || glFmt != checkedFmt || w != checkedW || h != checkedH;
+	static bool checkedTex = false;  // lane VKAO3: the source's type too
+	const bool ask = t != checked || glFmt != checkedFmt || w != checkedW || h != checkedH || srcTex != checkedTex;
 	if ( ask )
 		while ( g.getError() != 0 ) {}
-	g.copyImageSubData( rb, 0x8D41, 0, 0, 0, 0, t, 0x0DE1, 0, 0, 0, 0, w, h, 1 );  // GL_RENDERBUFFER -> GL_TEXTURE_2D
+	g.copyImageSubData( rb, srcTex ? 0x0DE1 : 0x8D41, 0, 0, 0, 0, t, 0x0DE1, 0, 0, 0, 0, w, h, 1 );  // GL_RENDERBUFFER (or GL_TEXTURE_2D) -> GL_TEXTURE_2D
 	if ( ask ) {
 		if ( const GLenum e = g.getError() ) {
 			why = "glCopyImageSubData of the ray pass's depth: GL error " + std::to_string( e );
@@ -1343,6 +1344,7 @@ bool waterRayDepth( std::uintptr_t key, unsigned rb, unsigned glFmt, int w, int 
 		checked = t;
 		checkedFmt = glFmt;
 		checkedW = w;
+		checkedTex = srcTex;
 		checkedH = h;
 	}
 	tex = t;

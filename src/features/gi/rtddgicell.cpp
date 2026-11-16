@@ -17,6 +17,7 @@
 #include "features/gi/vkasyncrule.h"     // lane VKCOMPUTE1: GL's wait placement
 #include "features/vkframe/vkpresent.h"   // lane VKFAR3: the atlas imported on the present device
 #include "features/vkframe/vkfarcards.h"  // lane VKFAR3: farTexelBuffer (the cascades' buffer on the present device)
+#include "features/vkframe/vkrtbuf.h"  // lane VKBUF1: cellDdgiAtlas / cellRestir on the present device by name
 #include <chrono>
 #include "version.h"
 #include "wwswitch.h"
@@ -1290,6 +1291,9 @@ struct RestirGl
 	float prows[12] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 }, pproj[4] = { 1, 1, 0, 0 };
 	QString last;
 	vkasync::Ledger vk;         // lane VKCOMPUTE1: GL's wait on the last submit, owed until the ratio's first read
+	qint64 vkCopied = -1;       // lane VKBUF1: the step (runs) last copied into the shared cellRestir, at rtBufGen vkGen
+	quint64 vkGen = 0;
+	GLuint vkTex = 0;           // lane VKBUF1: the shared cellRestir's GL texture buffer GL binds while it holds this step
 };
 
 RestirGl & restirGl()
@@ -1321,10 +1325,43 @@ void restirSay( RestirGl & G, const QString & line )
 	std::fflush( stderr );
 }
 
+/*! lane VKBUF1: cellRestir on the present device, asked by a consumer's lookup (WwVkPresent::rtBufOf): the shared buffer
+ *  (made or kept at the ratio's size while the view's size holds) takes the ratio once a step, after GL's wait on the step
+ *  that wrote it (GL work, before the consumer's crossing). A late frame keeps the last copy, as GL keeps the last ratio.
+ *  GL itself keeps reading its own buffer (G.tex): the GL path is unchanged. Red WW_VKVIEW_RTBUF_RED=1 */
+bool restirVkFresh( std::string & why )
+{
+	RestirGl & G = restirGl();
+	G.vkTex = 0;
+	if ( !G.owner || !G.ready || !G.valid || !G.tex || !G.buf[1] ) {
+		why = "no ReSTIR ratio this frame";
+		return false;
+	}
+	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_RTBUF_RED" ) ) {
+		why = "the view is off or its size not settled";
+		return false;
+	}
+	const std::size_t bytes = std::size_t( G.W ) * std::size_t( G.H ) * 8u;
+	unsigned b = 0, t = 0;
+	if ( !WwVkPresent::rtBufShare( WwVkPresent::kRtBufRestir, GL_RG32F, bytes, b, t, why ) )
+		return false;
+	if ( G.vkCopied != G.runs || G.vkGen != WwVkPresent::rtBufGen() ) {
+		restirSettle( G );   // the copy reads the ratio
+		if ( !WwVkPresent::rtBufCopy( WwVkPresent::kRtBufRestir, G.buf[1], bytes, why ) )
+			return false;
+		G.vkCopied = G.runs;
+		G.vkGen = WwVkPresent::rtBufGen();
+	}
+	G.vkTex = GLuint( t );
+	return true;
+}
+
 void restirDropGl( RestirGl & G, Renderer * r )
 {
 	if ( r && G.owner == r ) {
 		restirSettle( G );   // lane VKCOMPUTE1
+		if ( &G == &restirGl() )
+			WwVkPresent::rtBufDrop( WwVkPresent::kRtBufRestir );   // lane VKBUF1: made again at the next lookup
 		auto fn = r->fn;
 		GlShare & sh = glShare();
 		if ( G.tex )
@@ -1397,6 +1434,8 @@ bool restirImport( RestirGl & G, Renderer * r, bakert::DdgiGpuSession * s, int W
 	G.session = s;
 	G.W = W;
 	G.H = H;
+	if ( !gi )
+		WwVkPresent::rtBufOwner( WwVkPresent::kRtBufRestir, restirVkFresh );   // lane VKBUF1
 	return true;
 }
 
@@ -1414,7 +1453,13 @@ void restirUniforms( Renderer * r, NifSkopeOpenGLContext::Program * prog )
 	{	// lane PERFFIX1: through the CELLUNI kit (DSA: the active unit never asked; WW_CELL_UNI_RED=1 the old calls)
 		WwCellUni::Units<std::remove_pointer_t<decltype( fn )>> u( fn, wwCellUniDsa() );
 		u.section();
-		u.bind( WwCellUnit::Restir, GL_TEXTURE_BUFFER, on ? G.tex : 0 );
+		// lane VKBUF1: with the view on Vulkan GL reads the shared copy (the same bytes, copied once a step), so a route
+		// that matches the bound texture buffer finds cellRestir in place, as it finds cellDdgiAtlas; else GL's own buffer
+		GLuint tex = on ? G.tex : 0;
+		std::string vkWhy;
+		if ( on && restirVkFresh( vkWhy ) && G.vkTex )
+			tex = G.vkTex;
+		u.bind( WwCellUnit::Restir, GL_TEXTURE_BUFFER, tex );
 		u.done();
 	}
 	prog->uni1i( "cellRestir", WwCellUnit::Restir );
@@ -2701,7 +2746,7 @@ static void freeCombined( Renderer * r )
 	Combined & K = combined();
 	if ( r && K.owner == r ) {
 		if ( K.shared )
-			WwVkPresent::farTexelBufferDrop( reinterpret_cast<std::uintptr_t>( &K ) );   // its GL names too
+			WwVkPresent::rtBufDrop( WwVkPresent::kRtBufDdgiAtlas );   // its GL names too (lane VKBUF1: the slot's key)
 		else {
 			if ( K.tex )
 				r->fn->glDeleteTextures( 1, &K.tex );
@@ -2714,15 +2759,27 @@ static void freeCombined( Renderer * r )
 	K = Combined();
 }
 
-/*! lane VKFAR3 (row A1): with the view on Vulkan the cascades' buffer is made on the present device (farTexelBuffer, keyed
- *  by &K), so passes on the view read GL's copies in place (WwVkPresent::ddgiAtlasView( &K )). GL's copies are GL work:
- *  a reader behind GL's crossing sees them. Decided again when the switch flips or the buffer grows; a refusal keeps GL's
- *  own buffer until then. Red WW_VKVIEW_DDGI_RED=1 */
+//! lane VKBUF1: a lookup of cellDdgiAtlas (WwVkPresent::rtBufOf) answers while the cascades' shared buffer holds copies
+static bool combinedVkFresh( std::string & why )
+{
+	Combined & K = combined();
+	if ( K.shared && K.tex && K.count > 0 && cascCell( 0 ).live )
+		return true;
+	why = K.shared ? "no cascade copied this frame" : "the cascades' buffer is GL's (not shared)";
+	return false;
+}
+
+/*! lane VKFAR3 (row A1): with the view on Vulkan the cascades' buffer is made on the present device (farTexelBuffer), so
+ *  passes on the view read GL's copies in place (WwVkPresent::ddgiAtlasView( key ), or by name: rtBufOf( "cellDdgiAtlas" )).
+ *  Lane VKBUF1: keyed by the rt buffer slot (WwVkPresent::rtBufShare, a static char), no longer &K. GL's copies are GL
+ *  work: a reader behind GL's crossing sees them. Decided again when the switch flips or the buffer grows; a refusal keeps
+ *  GL's own buffer until then. Reds WW_VKVIEW_DDGI_RED=1, WW_VKVIEW_RTBUF_RED=1 */
 static bool combinedShare( Renderer * r, Combined & K, size_t bytes )
 {
 	unsigned b = 0, tx = 0;
 	std::string why;
-	if ( !WwVkPresent::farTexelBuffer( reinterpret_cast<std::uintptr_t>( &K ), GL_RGBA32F, bytes, b, tx, why ) ) {
+	WwVkPresent::rtBufOwner( WwVkPresent::kRtBufDdgiAtlas, combinedVkFresh );
+	if ( !WwVkPresent::rtBufShare( WwVkPresent::kRtBufDdgiAtlas, GL_RGBA32F, bytes, b, tx, why ) ) {
 		say( QStringLiteral( "rtddgi cell: vk ddgi: the cascades' buffer stays GL's (%1)" ).arg( QString::fromStdString( why ) ) );
 		K.buf = K.tex = 0;   // a grown one was freed before the make failed
 		K.shared = false;
@@ -2736,6 +2793,7 @@ static bool combinedShare( Renderer * r, Combined & K, size_t bytes )
 	K.bytes = bytes;
 	K.attach = false;
 	say( QStringLiteral( "rtddgi cell: vk ddgi: the cascades' buffer on the present device (%1 MB)" ).arg( double( bytes ) / 1048576.0, 0, 'f', 1 ) );
+	WwVkPresent::rtBufSay();
 	return true;
 }
 
@@ -2762,7 +2820,8 @@ static void combinedUpdate( Renderer * r, int n, const void * nif )
 		return;
 	auto fn = r->fn;
 	bool relayout = false;
-	const bool share = WwVkPresent::shareKept( "WW_VKVIEW_DDGI_RED" );   // lane VKFAR3: before the layout (a free resets it)
+	// lane VKFAR3: before the layout (a free resets it); lane VKBUF1: the rt buffers' red too
+	const bool share = WwVkPresent::shareKept( "WW_VKVIEW_DDGI_RED" ) && !WwVkPresent::rtBufRed();
 	if ( K.buf && share != K.shareWanted ) {
 		freeCombined( r );
 		relayout = true;
@@ -3123,7 +3182,7 @@ const void * rtddgiCellVkAtlas( Scene * scene, unsigned * glBuf )
 		return nullptr;
 	if ( glBuf )
 		*glBuf = K.buf;
-	return &K;
+	return reinterpret_cast<const void *>( WwVkPresent::rtBufKey( WwVkPresent::kRtBufDdgiAtlas ) );   // lane VKBUF1
 }
 
 // lane INTGI1 (SSGIHO-INT): the densest read volume's smallest spacing (cascade 0 under the cascades), 0 when none is up

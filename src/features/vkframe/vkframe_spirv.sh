@@ -326,6 +326,49 @@ fxt() {
 }
 fxt fargnd_view_vs core/water_view_vs
 ls -la fargnd_view_ps.spv.h fargnd_view_vs.spv.h
+# lane VKFAR16: the probe relight (cell_reflrelight.prog, cellreflprobe.cpp) on fxg / fxt's shifts (its vertex stage declares
+# nothing), and fxr: fxg's flags + the all-on route's RT GI key (WW_CELL_RESTIR + RTDDGI + RTDDGI_CASCADES), the `_rt_ps` twins
+fxr() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T ps_6_0 -E main -fvk-b-shift 0 0 -fvk-t-shift 64 0 -fvk-s-shift 128 0 -fvk-u-shift 192 0 -fspv-preserve-bindings -D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 -D WW_CELL_RESTIR=1 -D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxg reflrelight_view_ps reflections/cell_reflrelight_ps
+fxr reflrelight_view_rt_ps reflections/cell_reflrelight_ps
+fxt reflrelight_view_vs reflections/cell_reflrelight_vs
+ls -la reflrelight_view_ps.spv.h reflrelight_view_rt_ps.spv.h reflrelight_view_vs.spv.h
+# lane VKFAR21: the probe G-buffer capture (cell_reflcap.prog, cellreflprobe.cpp) on fxg / fxt's shifts; the loader builds it
+# with no define and fxg's two defines are inert there (ReflectionsBindingsVk.hlsli has no #if)
+fxg reflcap_view_ps reflections/cell_reflcap_ps
+fxt reflcap_view_vs reflections/cell_reflcap_vs
+ls -la reflcap_view_ps.spv.h reflcap_view_vs.spv.h
+# lane VKAO3: the baked AO decals (cell_aodecal.prog, cellaodecalgl.cpp, vkaodecal.inc) on fxg / fxt's shifts; the loader builds
+# them with no define and fxg's two defines are inert there (AoBindingsVk.hlsli has no #if). PS b31 at 31, aoGbuf 64 / 128,
+# aoVol 65 / 129; VS b31 at 287
+fxg aodecal_view_ps ao/cell_aodecal_ps
+fxt aodecal_view_vs ao/cell_aodecal_vs
+ls -la aodecal_view_ps.spv.h aodecal_view_vs.spv.h
+# lane VKAO4: the GI volume mask (cell_givol.prog, ao.cpp giVolMaskPass, vkvolmask.inc) on fxg / fxt's shifts; no define (fxg's two
+# are inert: AoBindingsVk.hlsli has no #if). PS b31 at 31, volShapes 64, volGbuf 65 / 129; VS b31 at 287, volShapes 200
+fxg volmask_view_ps ao/cell_givol_ps
+fxt volmask_view_vs ao/cell_givol_vs
+ls -la volmask_view_ps.spv.h volmask_view_vs.spv.h
+# lane VKAIR5: the air inject's stage 0 (cell_volair.prog, cellvolair.cpp vaPassInner, vkairinject.inc) on fxg / fxt's shifts. The
+# loader's default key adds WW_CELL_AIR_SKYVIEW: fxa = fxg's flags + it, fxar = fxr's flags (the all-on RT GI key) + it
+fxa() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T ps_6_0 -E main -fvk-b-shift 0 0 -fvk-t-shift 64 0 -fvk-s-shift 128 0 -fvk-u-shift 192 0 -fspv-preserve-bindings -D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 -D WW_CELL_AIR_SKYVIEW=1 -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxar() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T ps_6_0 -E main -fvk-b-shift 0 0 -fvk-t-shift 64 0 -fvk-s-shift 128 0 -fvk-u-shift 192 0 -fspv-preserve-bindings -D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 -D WW_CELL_RESTIR=1 -D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_AIR_SKYVIEW=1 -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxa airinject_view_ps air/cell_volair_ps
+fxar airinject_view_rt_ps air/cell_volair_ps
+fxt airinject_view_vs air/cell_volair_vs
+ls -la airinject_view_ps.spv.h airinject_view_rt_ps.spv.h airinject_view_vs.spv.h
 # lane VKFAR7: the TAA mask's reactive pass (taainputs.cpp pass 4, vktaareactive.inc): pixel stage on fx()'s shifts (b31 at 31,
 # BaseMap at 64 / 128), vertex stage on fxb()'s (its b31 at 32)
 fx taareactive_view_ps post/taa_reactive_ps

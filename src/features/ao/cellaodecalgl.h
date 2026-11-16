@@ -12,6 +12,7 @@ BSD License - see nifskope.h
 
 #include <QString>
 
+#include <cstdint>
 #include <memory>
 
 class Scene;
@@ -23,8 +24,10 @@ bool wwCellAoDecalHas( const void * nif );
 //! the document has decal copies AND the AO decals row is on (the shared opaque pass is then needed)
 bool wwCellAoDecalWanted( const void * nif );
 /*! called by wwCellAoPass after the opaque pass, its framebuffer still bound: gbufTex (view normal, linear depth),
- *  depthRb (its depth-stencil), W x H. Returns the R32F target's texture, 0 when no decal ran this frame. */
-unsigned wwCellAoDecalRun( Scene * scene, unsigned gbufTex, unsigned depthRb, int W, int H );
+ *  depthRb (its depth-stencil), W x H. Returns the R32F target's texture, 0 when no decal ran this frame. Lane VKAO3: depthTex,
+ *  depthRb is the AO pass's shared texture (format depthFmt, sharedTarget key depthKey): the pass may run on the present device. */
+unsigned wwCellAoDecalRun( Scene * scene, unsigned gbufTex, unsigned depthRb, int W, int H, bool depthTex = false, unsigned depthFmt = 0,
+	std::uintptr_t depthKey = 0 );
 QString wwCellAoDecalEcho();
 
 #endif // CELLAODECALGL_H

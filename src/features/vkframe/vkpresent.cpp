@@ -143,6 +143,7 @@ constexpr GLenum kTexture2D = 0x0DE1, kRgba8 = 0x8058, kScissorTest = 0x0C11, kR
 constexpr GLenum kTexture3D = 0x806F, kTexBinding3D = 0x806A, kTexture2DArray = 0x8C1A, kTexBinding2DArray = 0x8C1D,
 	kGlRg32f = 0x8230, kGlRg16f = 0x822F, kGlR32f = 0x822E, kGlR8 = 0x8229, kGlRg8 = 0x822B, kGlRg16 = 0x822C;
 constexpr GLenum kDepth16 = 0x81A5;  // lane VKSHADOW1: the sun cascades' D16 2D array
+constexpr GLenum kGlR11fG11fB10f = 0x8C3A;  // lane VKFAR17: the reflection probe atlas
 constexpr GLenum kTextureCubeArray = 0x9009, kTexBindingCubeArray = 0x900A;  // lane VKFAR6 (L8 term 5): the lamps' D16 cubes
 constexpr GLenum kDepth24 = 0x81A6, kDepth32f = 0x8CAC;  // lane VKOBJ1: the objects' prepass (X8_D24 / D32F, multisample)
 constexpr GLenum kGlR32ui = 0x8236, kGlRg32ui = 0x823C, kGlR8ui = 0x8232;  // lane VKWATER2: the water's index / atlas lookups
@@ -311,6 +312,7 @@ struct Vk
 	VKP( vkCmdDispatch ); VKP( vkCreateComputePipelines );
 	// lane VKSHADOW1: the sun cascades' depth draws (indexed indirect, GL's polygon offset as the depth bias)
 	bool depthBiasClamp = false, multiDrawIndirect = false, firstInstance = false;
+	bool depthClamp = false, independentBlend = false;  // lane VKAO3: the AO decals' box (GL_DEPTH_CLAMP) and per-attachment masks
 	VKP( vkCmdBindVertexBuffers ); VKP( vkCmdBindIndexBuffer ); VKP( vkCmdDrawIndexedIndirect ); VKP( vkCmdSetDepthBias );
 	// lane VKAIR1: the air's stencil reference, the zero textures' clear
 	VKP( vkCmdSetStencilReference ); VKP( vkCmdClearColorImage );
@@ -626,6 +628,10 @@ bool makeDevice( std::string & why )
 	v.multiDrawIndirect = offered.multiDrawIndirect == VK_TRUE;
 	en.drawIndirectFirstInstance = offered.drawIndirectFirstInstance;
 	v.firstInstance = offered.drawIndirectFirstInstance == VK_TRUE;
+	en.depthClamp = offered.depthClamp;  // lane VKAO3: vkaodecal.inc refuses by name without them
+	v.depthClamp = offered.depthClamp == VK_TRUE;
+	en.independentBlend = offered.independentBlend;
+	v.independentBlend = offered.independentBlend == VK_TRUE;
 	// lane VKOBJ2: descriptor indexing + draw parameters for the bindless maps (Vulkan 1.2 core structs; the table refuses
 	// without them), GL's anisotropic filtering for their samplers
 	en.samplerAnisotropy = offered.samplerAnisotropy;
@@ -1599,6 +1605,7 @@ VkFormat vkFormatOf( GLenum f, bool & depth )
 	case kGlR8ui: return VK_FORMAT_R8_UINT;  // waterSkyAtlas
 	case kGlRgba32ui: return VK_FORMAT_R32G32B32A32_UINT;  // lane VKFAR3: fgGrid
 	case kGlRgba16ui: return VK_FORMAT_R16G16B16A16_UINT;  // lane VKFAR3: fgCells
+	case kGlR11fG11fB10f: return VK_FORMAT_B10G11R11_UFLOAT_PACK32;  // lane VKFAR17: the probe atlas (R in the low bits on both)
 	default: return VK_FORMAT_UNDEFINED;
 	}
 }
@@ -4183,8 +4190,8 @@ bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned g
 	samples = std::max( samples, 1 );
 	if ( samples > 1 && type != 0 )
 		return fail( "a multisample shared target is 2D only" );
-	if ( type == 3 && !depth )
-		return fail( "a shared cube array is depth only" );  // L8 term 5: the lamps' D16 cubes
+	if ( type == 3 && d % 6 )  // L8 term 5: the lamps' D16 cubes; lane VKFAR17: colour too (the probe relight's rpAlb / rpNd)
+		return fail( "a shared cube array is six layers a cube (" + std::to_string( d ) + " layers)" );
 	levels = depth || samples > 1 ? 1 : std::max( levels, 1 );
 	auto it = shareds().find( key );
 	if ( it != shareds().end() ) {
@@ -9596,6 +9603,7 @@ ObjStat takeObjStat()
 #include "features/vkframe/vkpost7.inc"  // lane VKFAR2 P7: DoF, motion blur and object blur in the deferred tone pass
 #include "features/vkframe/vkobjpipe.inc"  // lane VKOBJ4: the bl twins' shaded pipelines (row G4 slice 4)
 #include "features/vkframe/vkddgi.inc"  // lane VKFAR3: the DDGI probe atlas imported from bakert's device
+#include "features/vkframe/vkrtbuf.inc"  // lane VKBUF1: cellDdgiAtlas / cellRestir on the present device by name
 
 namespace
 {
@@ -10409,3 +10417,8 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 #include "features/vkframe/vkdepthmax.inc"  // lane VKSMALL2: the frame's farthest depth (cellhdr.cpp depthMaxMake)
 #include "features/vkframe/vkvrs.inc"  // lane VKSMALL3: the shading rate images (cellvrs.cpp wwCellVrsBuild)
 #include "features/vkframe/vkfxres.inc"  // lane VKSMALL5: the soft-effect layer (cellfxres.cpp wwCellFxResDraw)
+#include "features/vkframe/vkreflrelight.inc"  // lane VKFAR19: the reflection probe relight into the shared atlas
+#include "features/vkframe/vkreflcapture.inc"  // lane VKFAR22: the reflection probes' G-buffer capture into the shared cubes
+#include "features/vkframe/vkaodecal.inc"  // lane VKAO3: the baked AO decals (cellaodecalgl.cpp)
+#include "features/vkframe/vkvolmask.inc"  // lane VKAO4: the GI volume mask (ao.cpp giVolMaskPass)
+#include "features/vkframe/vkairinject.inc"  // lane VKAIR5: the air inject's stage 0 (cellvolair.cpp vaPassInner)
