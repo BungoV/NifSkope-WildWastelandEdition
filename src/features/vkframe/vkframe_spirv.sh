@@ -323,6 +323,12 @@ ls -la reflrelight_view_ps.spv.h reflrelight_view_rt_ps.spv.h reflrelight_view_v
 fxg reflcap_view_ps reflections/cell_reflcap_ps
 fxt reflcap_view_vs reflections/cell_reflcap_vs
 ls -la reflcap_view_ps.spv.h reflcap_view_vs.spv.h
+# lane VKAO3: the baked AO decals (cell_aodecal.prog, cellaodecalgl.cpp, vkaodecal.inc) on fxg / fxt's shifts; the loader builds
+# them with no define and fxg's two defines are inert there (AoBindingsVk.hlsli has no #if). PS b31 at 31, aoGbuf 64 / 128,
+# aoVol 65 / 129; VS b31 at 287
+fxg aodecal_view_ps ao/cell_aodecal_ps
+fxt aodecal_view_vs ao/cell_aodecal_vs
+ls -la aodecal_view_ps.spv.h aodecal_view_vs.spv.h
 # lane VKFAR7: the TAA mask's reactive pass (taainputs.cpp pass 4, vktaareactive.inc): pixel stage on fx()'s shifts (b31 at 31,
 # BaseMap at 64 / 128), vertex stage on fxb()'s (its b31 at 32)
 fx taareactive_view_ps post/taa_reactive_ps

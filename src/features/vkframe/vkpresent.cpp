@@ -286,6 +286,7 @@ struct Vk
 	VKP( vkCmdDispatch ); VKP( vkCreateComputePipelines );
 	// lane VKSHADOW1: the sun cascades' depth draws (indexed indirect, GL's polygon offset as the depth bias)
 	bool depthBiasClamp = false, multiDrawIndirect = false, firstInstance = false;
+	bool depthClamp = false, independentBlend = false;  // lane VKAO3: the AO decals' box (GL_DEPTH_CLAMP) and per-attachment masks
 	VKP( vkCmdBindVertexBuffers ); VKP( vkCmdBindIndexBuffer ); VKP( vkCmdDrawIndexedIndirect ); VKP( vkCmdSetDepthBias );
 	// lane VKAIR1: the air's stencil reference, the zero textures' clear
 	VKP( vkCmdSetStencilReference ); VKP( vkCmdClearColorImage );
@@ -601,6 +602,10 @@ bool makeDevice( std::string & why )
 	v.multiDrawIndirect = offered.multiDrawIndirect == VK_TRUE;
 	en.drawIndirectFirstInstance = offered.drawIndirectFirstInstance;
 	v.firstInstance = offered.drawIndirectFirstInstance == VK_TRUE;
+	en.depthClamp = offered.depthClamp;  // lane VKAO3: vkaodecal.inc refuses by name without them
+	v.depthClamp = offered.depthClamp == VK_TRUE;
+	en.independentBlend = offered.independentBlend;
+	v.independentBlend = offered.independentBlend == VK_TRUE;
 	// lane VKOBJ2: descriptor indexing + draw parameters for the bindless maps (Vulkan 1.2 core structs; the table refuses
 	// without them), GL's anisotropic filtering for their samplers
 	en.samplerAnisotropy = offered.samplerAnisotropy;
@@ -9633,3 +9638,4 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 #include "features/vkframe/vklamp.inc"  // lane VKLAMP1: the lamps' plain shadow cubes (celllamps.cpp)
 #include "features/vkframe/vkreflrelight.inc"  // lane VKFAR19: the reflection probe relight into the shared atlas
 #include "features/vkframe/vkreflcapture.inc"  // lane VKFAR22: the reflection probes' G-buffer capture into the shared cubes
+#include "features/vkframe/vkaodecal.inc"  // lane VKAO3: the baked AO decals (cellaodecalgl.cpp)
