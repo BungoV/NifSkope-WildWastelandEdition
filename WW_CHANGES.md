@@ -1,3 +1,17 @@
+## VKAIR14 (2026-11-16): the air's temporal inject (stage 1, 64 layers) draws on Vulkan
+
+Changed, not built, not checked in the app. Offline: tests/vkframe/airtemporalview.sh passes (GATE OK, 28 of 28 reds fired).
+- With the view on Vulkan (WW_VKVIEW=1), stage 1 of the air with a history (cellvolair.cpp vaPassInner) draws on the
+  present device: one render pass a slice over the shared inject and the other strata history, every slice its own
+  descriptor set and b31 copy (volLayer = k), all 64 in one hand-off to the worker (Work k = -1, no new work kind).
+  Twins: the air inject's own (no new SPIR-V). Stage 1's inputs are now shared targets while this runs
+  (vaStage1Reader on); stage 4's (the blue noise, the lamp history) stay GL's own (vaStage4Reader off).
+- Refused to GL by name, in the new `vk airtemporal:` line: the history in not shared, an input that is a target the pass
+  draws (feedback), a key the twin was not built for, the DDGI atlas or ReSTIR's buffer bound as GL-owned texel buffers
+  (ReSTIR's is always GL-owned today, so the all-on route stays on GL for this stage). The DDGI cascades' buffer is read
+  in place when it is the present device's.
+- Red `WW_VKVIEW_AIRTEMPORAL_RED=1` keeps GL and GL's own inputs.
+
 ## VKFAR15 (2026-11-15): the far ground and far LOD rings stay on GL while RT GI or ReSTIR is on
 
 Changed, not built, not checked live.

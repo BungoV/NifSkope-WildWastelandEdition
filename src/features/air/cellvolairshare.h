@@ -14,8 +14,15 @@
 
 #include "features/vkframe/vkpresent.h"
 
-//! the |3 reader on Vulkan exists (VKAIR11 step 3 turns this on with the route; until then nothing is shared)
+//! the |3 reader on Vulkan exists (lane VKAIR14: vkairtemporal.inc, gate tests/vkframe/airtemporalview.sh)
 inline bool vaStage1Reader()
+{
+	return true;
+}
+
+//! stage 4's reader (the lamp volume's walk) on Vulkan exists: until it lands its own inputs (the blue noise, lvHist) stay
+//! GL's own while stage 1's are shared
+inline bool vaStage4Reader()
 {
 	return false;
 }
