@@ -378,9 +378,24 @@ struct VkFarArm
 	GLFunctions * fn = nullptr;
 	GLuint prog = 0;
 	unsigned int color = 0;
+	int v = 0;	// lane VKFAR26: the twin, farLodTwinOf
 };
 VkFarArm g_vkFarArm;
 char g_vkFarKeys[160];	// the twins' keys (key + slot index)
+char g_vkFarRtKeys[2][208];	// lane VKFAR26: the RT / DG twins' keys (their farStream sits at key + 200)
+
+/* lane VKFAR26: GL's program key -> the rings' twin: 0 the base key, 1 the all-on RT key (ReSTIR + RTDDGI + cascades), 2 the
+ * DG key (the Ray-traced GI row with no RT preset); -1 none (ReSTIR GI and every other key: GL draws) */
+int farLodTwinOf( const std::string & d )
+{
+	if ( d == "WW_CELL_FOGLEAK+WW_FRAME_UBO" )
+		return 0;
+	if ( d == "WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO" )
+		return 1;
+	if ( d == "WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO" )
+		return 2;
+	return -1;
+}
 
 void farLodVkArm( GLFunctions * fn, NifSkopeOpenGLContext::Program * prog, int splatPass )
 {
@@ -391,6 +406,7 @@ void farLodVkArm( GLFunctions * fn, NifSkopeOpenGLContext::Program * prog, int s
 	}
 	const char * no = nullptr;
 	unsigned int color = 0;
+	const int v = farLodTwinOf( prog->wwDefs );
 	if ( splatPass > 0 )
 		no = "a splat pass (blended twin, no Vulkan twin yet)";
 	else if ( std::string( prog->name ) != "fo4_cellcsm.prog" )
@@ -401,8 +417,10 @@ void farLodVkArm( GLFunctions * fn, NifSkopeOpenGLContext::Program * prog, int s
 		no = "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan twin";
 	else if ( !prog->wwShadowFrame )
 		no = "WW_FRAME_UBO off: GL's program is not the Vulkan twin";
-	else if ( prog->wwDefs != "WW_CELL_FOGLEAK+WW_FRAME_UBO" )	// lane VKFAR15: RT GI / ReSTIR keys read inputs the twin has no slot for
-		no = "an RT GI / ReSTIR key in GL's program (cellDdgiAtlas, cellRestir, cellGiHalf): the twin is the base key only";
+	else if ( prog->wwDefs.find( "RESTIRGI" ) != std::string::npos )	// lane VKFAR26: the base, RT and DG keys have twins
+		no = "ReSTIR GI's key in GL's program (no rings twin)";
+	else if ( v < 0 )
+		no = "a key in GL's program with no rings twin (base, RT, DG only)";
 	else {
 		GLint drawFb = 0;
 		fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFb );
@@ -413,7 +431,7 @@ void farLodVkArm( GLFunctions * fn, NifSkopeOpenGLContext::Program * prog, int s
 	if ( no )
 		WwVkPresent::farLodOnGl( no );
 	else
-		g_vkFarArm = VkFarArm { fn, prog->id, color };
+		g_vkFarArm = VkFarArm { fn, prog->id, color, v };
 	WwVkPresent::farLodSay( true, nullptr );
 }
 
@@ -433,7 +451,10 @@ bool farLodVkDraw( Copy & k, const std::vector<CellMeshInst::Cmd> & cmds )
 	static WwVkPresent::WaterRun r;
 	r = WwVkPresent::WaterRun();
 	a.fn->glBindVertexArray( k.vao );
-	WwVkPresent::farLodStateOf( a.fn, a.prog, r );
+	if ( a.v )	// lane VKFAR26: the RT / DG twin reads GL's RT GI inputs too
+		WwVkPresent::farLodRtStateOf( a.fn, a.prog, r, a.v );
+	else
+		WwVkPresent::farLodStateOf( a.fn, a.prog, r );
 	wwCellHdrFrameSize( r.w, r.h );
 	r.color = a.color;
 	r.cmds.reserve( cmds.size() );
@@ -446,9 +467,9 @@ bool farLodVkDraw( Copy & k, const std::vector<CellMeshInst::Cmd> & cmds )
 		c.baseInstance = m.baseInstance;
 		r.cmds.push_back( c );
 	}
-	r.key = reinterpret_cast<std::uintptr_t>( g_vkFarKeys );
+	r.key = reinterpret_cast<std::uintptr_t>( a.v ? g_vkFarRtKeys[a.v - 1] : g_vkFarKeys );
 	std::string why;
-	const bool ok = WwVkPresent::farLodRun( r, why );
+	const bool ok = a.v ? WwVkPresent::farLodRtRun( r, a.v, why ) : WwVkPresent::farLodRun( r, why );
 	a.fn->glBindVertexArray( 0 );
 	if ( !ok ) {
 		WwVkPresent::farLodOnGl( why.c_str() );
