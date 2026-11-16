@@ -347,7 +347,12 @@ def cloudshadow_jobs():
     def job(name, u, rule, reds):
         return dict(name='cloudshadow_' + name, size=(n, n), hlsl=hl, glsl=gl, defines=[], uniforms=u, textures=T,
                     rule=rule, reds=reds, min_cloud=n * n // 20)
-    return [job('vol', dict(base, csMode=[1]), MARCH_RULE,
+    sh = dict(mapped, csMode=[3], csSheetN=[2])
+    diag = [k, 0.0, 0.0, k, 1.3 * k, 0.0, 0.0, 1.3 * k] + [0.0] * 24
+    probes = [dict(job('nohex', dict(sh, csSheetP=[4.0, 0.0, 0.00465, 0.0]), CS_RULE, []), name='probe_cs_nohex'),
+              dict(job('tap1', dict(sh, csSheetP=[1.0, 0.0, 0.00465, 0.0]), CS_RULE, []), name='probe_cs_tap1'),
+              dict(job('diag', dict(sh, csSheetP=[1.0, 0.0, 0.00465, 0.0], csSheetA=diag), CS_RULE, []), name='probe_cs_diag')]
+    return probes + [job('vol', dict(base, csMode=[1]), MARCH_RULE,
                 [('od += kCvSigma * d * dh / csS.z;', 'od += kCvSigma * d * dh / csS.z * 0.98f;')]),
             job('band', dict(mapped, csMode=[3]), CS_RULE, [('kept *= 1.0 - c;', 'kept *= 1.0 - c * 0.98f;')]),
             # seeding fix after run 1 (the bar unchanged): at the march's density tau was so thick that exp(-tau) was
@@ -377,7 +382,7 @@ def jobs(want, tex):
         want = list(want) + [j['name'] for j in clouds]
     cs = cloudshadow_jobs()  # lane VKCLOUD1: only when named ('cloudshadow' = all of them)
     if 'cloudshadow' in (want or []):
-        want = list(want) + [j['name'] for j in cs]
+        want = list(want) + [j['name'] for j in cs if not j['name'].startswith('probe_')]
     # probes (only when named): one term off at a time, to find which one carries a difference
     full = 2 | 4 | 8 | 64 | 16384 | 65536 | 131072
     leak = ('air/volsky_view_ps.hlsl', ['WW_CELL_FOGLEAK'])

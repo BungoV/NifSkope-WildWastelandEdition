@@ -70,7 +70,7 @@ float csSheetAlpha( int i, float2 st, float mip )
 float2 csSheetHash( float2 s )
 {
 	s = frac( s * float2( 1271.5151, 3337.8237 ) );
-	s += dot( s, s.yx + 19.19 );
+	s += mad( s.y, s.x + 19.19, s.x * ( s.y + 19.19 ) );	// lane VKCLOUD1: dot in NV GL's fma order (the hash amplifies a last bit)
 	return frac( ( s.xx + s.yy ) * s.yx );
 }
 
