@@ -174,6 +174,9 @@ fxb skystars_view_vs clouds/lookdev_clouds_vs
 fxk skystars_view_ps clouds/lookdev_clouds_ps
 fxb skymoon_view_vs core/lookdev_bill_vs
 fxk skymoon_view_ps sky/sky_moon_ps
+# lane VKCLOUD4: the cloud map (cloudmap.cpp buildMap, vkcloudmap.inc), the readable sources themselves: the vertex stage
+# here (its b31 at 32), the pixel stage on fx()'s shifts (its b31 at 31) below
+fxb cloudmap_view_vs clouds/cloudmap_vs
 ls -la skystars_view_vs.spv.h skystars_view_ps.spv.h skymoon_view_vs.spv.h skymoon_view_ps.spv.h
 # lane VKFAR2 P9: the lens-flare sprites in the tone pass (vkflare.inc): lens_flare.hlsl's pixel entry as it stands, its
 # vertex entry through lens_flare_view_vs.hlsl (renamed main). PostFxBindingsVk.hlsli's own bindings, unused ones stripped
@@ -320,6 +323,7 @@ fx lamp_view_ps lights/lamp_view_ps
 ls -la lamp_view_vs.spv.h lamp_view_ps.spv.h
 # lane VKCLOUD1: the cloud shadow map (cloudshadow.cpp, vkcloudshadow.inc), the readable source itself on fx()'s shifts
 fx cloud_shadowmap_view_ps clouds/cloud_shadowmap_ps
+fx cloudmap_view_ps clouds/cloudmap_ps
 # lane VKWATER4: the water look off (fo4_water.prog), frozen from the old fo4_water_ps FOGLEAK + FRAME_UBO spirv-cross file
 fxkw water_view_off_ps water/water_view_off_ps
 # lane VKWATER4 (L7): the camera-underwater fog (cell_underwater.prog + its per-sample _ms), frozen twins: both outputs at

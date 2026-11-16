@@ -83,6 +83,7 @@ VKFRAME_FX = {'volsky_view_ps': 'air/volsky_view_ps', 'cloud_march_view_ps': 'cl
 	'taareactive_view_ps': 'post/taa_reactive_ps'}	# lane VKFAR7: the TAA mask's reactive pass
 VKFRAME_FX['lamp_view_ps'] = 'lights/lamp_view_ps'	# lane VKLAMP1: the lamps' plain shadow cube faces
 VKFRAME_FX['cloud_shadowmap_view_ps'] = 'clouds/cloud_shadowmap_ps'	# lane VKCLOUD1: the cloud shadow map
+VKFRAME_FX['cloudmap_view_ps'] = 'clouds/cloudmap_ps'	# lane VKCLOUD4: the cloud map (the readable source itself)
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FX]
 # lane VKFAR1: the far dots' vertex stage, the script's `fxv <name> <dir/file>` lines (fx()'s shifts, vs_6_0)
 VKFRAME_FXV = {'fardots_view_vs': 'far-lod/cell_fardots_view_vs',
@@ -136,6 +137,7 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 VKFRAME_FXB_ARGS = ['-fvk-bind-register', 'b0', '0', '0', '0', '-fvk-bind-register', 'b31', '0', '32', '0', '-fspv-preserve-bindings']
 VKFRAME_FXB = {'skystars_view_vs': 'clouds/lookdev_clouds_vs', 'skymoon_view_vs': 'core/lookdev_bill_vs',
 	'taareactive_view_vs': 'post/taa_reactive_vs'}	# lane VKFAR7: the TAA mask's reactive pass
+VKFRAME_FXB['cloudmap_view_vs'] = 'clouds/cloudmap_vs'	# lane VKCLOUD4: the cloud map's vertex stage (its b31 at 32)
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXB]
 # lane VKFAR3 G3: the far ground's pixel stages, the script's `fxg <name> <dir/file>` lines (fxk()'s shifts + the app's variant)
 VKFRAME_FXG_ARGS = VKFRAME_SKY_ARGS + ['-fspv-preserve-bindings', '-D', 'WW_CELL_FOGLEAK=1', '-D', 'WW_FRAME_UBO=1']
