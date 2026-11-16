@@ -1462,7 +1462,7 @@ int main( int argc, char ** argv )
 							all += bytes;
 						}
 					}
-					glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+					// the harness packs at 1 everywhere (main): a 4 here overran the noise-twin readback of the next variant
 					return glGetError() == GL_NO_ERROR;
 				};
 				auto glMarch = [&]( const InSet & z ) {
