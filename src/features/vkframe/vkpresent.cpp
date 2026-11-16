@@ -68,6 +68,7 @@
 #include "features/vkframe/csm_remap_view_ps.spv.h"
 #include "features/vkframe/csm_at_view_vs.spv.h"  // lane VKSHADOW8: the cascades' alpha-tested casters
 #include "features/vkframe/csm_at_view_ps.spv.h"
+#include "features/vkframe/csm_sway_view_vs.spv.h"  // lane VKSHADOW10: the cascades' swaying casters
 // lane VKAIR1: the air over the sky (cell_volsky), the clouds' march + resolve (and their accumulation twins)
 #include "features/vkframe/volsky_view_ps.spv.h"
 #include "features/vkframe/cloud_march_view_ps.spv.h"
@@ -7892,6 +7893,7 @@ struct CsmPlace
 	std::uint32_t firstIndex = 0, verts = 0, indices = 0;
 	std::int32_t baseVertex = 0;
 	bool uv = false;  // lane VKSHADOW8: its uvs copied into muv
+	bool wind = false;  // lane VKSHADOW10: its wind weights copied into mwind
 };
 struct Csm
 {
@@ -7940,10 +7942,17 @@ struct Csm
 	VkPipeline atPipe[2] = { VK_NULL_HANDLE, VK_NULL_HANDLE };
 	VkDescriptorPool atPool = VK_NULL_HANDLE;
 	std::vector<VkDescriptorSet> atSets, dSet;
+	// lane VKSHADOW10: the swaying casters (csm_sway_view_vs, no fragment stage): the wind weights beside mpos (4 bytes a
+	// vertex at the same base vertex, binding 3) and their pipelines (0 culled, 1 two-sided; push kCsmSwayPush vertex bytes)
+	CsmBuf mwind;
+	VkPipelineLayout swLayout = VK_NULL_HANDLE;
+	VkShaderModule swVs = VK_NULL_HANDLE;
+	VkPipeline swPipe[2] = { VK_NULL_HANDLE, VK_NULL_HANDLE };
 };
 constexpr std::uint32_t kCsmCmdBytes = 20;
 constexpr std::uint32_t kCsmAtPush = 24;   // lane VKSHADOW8: uvScale, uvOffset, alpha, alphaThreshold (after the 64-byte clip)
 constexpr std::uint32_t kCsmAtSets = 256;  // lane VKSHADOW8: distinct alpha maps a run
+constexpr std::uint32_t kCsmSwayPush = 128;  // lane VKSHADOW10: clip, viewMatrix columns + block centre, block w / amp / time
 constexpr std::uint32_t kCsmRemapPush = 28;  // lane VKSHADOW6: layer, srcX, srcY, srcW, srcH, zScale, zBias  // GpuDriven::DrawCmd = VkDrawIndexedIndirectCommand
 
 Csm & csmS()
@@ -8183,7 +8192,45 @@ bool csmStatic( std::string & why )
 			}
 		}
 	}
-	S.pipelines = 5;
+	// lane VKSHADOW10: the swaying casters (csm_sway_view_vs, lookdev_csmdepth.vert's far wind): the casters' state plus the
+	// wind weights (binding 3, location 5), vertex stage only like the solid pipelines
+	{
+		const VkPushConstantRange spr { VK_SHADER_STAGE_VERTEX_BIT, 0, kCsmSwayPush };
+		VkShaderModuleCreateInfo svm { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+		svm.codeSize = sizeof( vkframe_csm_sway_view_vs_spv );
+		svm.pCode = vkframe_csm_sway_view_vs_spv;
+		VkPipelineLayoutCreateInfo sl { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+		sl.pushConstantRangeCount = 1;
+		sl.pPushConstantRanges = &spr;
+		if ( v.vkCreateShaderModule( v.dev, &svm, nullptr, &S.swVs ) != VK_SUCCESS
+			|| v.vkCreatePipelineLayout( v.dev, &sl, nullptr, &S.swLayout ) != VK_SUCCESS ) {
+			why = "the cascades' sway shader module / pipeline layout failed";
+			return false;
+		}
+		VkPipelineShaderStageCreateInfo sst = st;
+		sst.module = S.swVs;
+		const VkVertexInputBindingDescription svb[3] = { vb[0], vb[1], { 3, 4, VK_VERTEX_INPUT_RATE_VERTEX } };
+		const VkVertexInputAttributeDescription sva[6] = { va[0], va[1], va[2], va[3], va[4], { 5, 3, VK_FORMAT_R32_SFLOAT, 0 } };
+		VkPipelineVertexInputStateCreateInfo svi { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+		svi.vertexBindingDescriptionCount = 3;
+		svi.pVertexBindingDescriptions = svb;
+		svi.vertexAttributeDescriptionCount = 6;
+		svi.pVertexAttributeDescriptions = sva;
+		rs.depthBiasEnable = VK_TRUE;
+		ds.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+		gp.stageCount = 1;
+		gp.pStages = &sst;
+		gp.pVertexInputState = &svi;
+		gp.layout = S.swLayout;
+		for ( int k = 0; k < 2; k++ ) {
+			rs.cullMode = k ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
+			if ( v.vkCreateGraphicsPipelines( v.dev, tone().cache, 1, &gp, nullptr, &S.swPipe[k] ) != VK_SUCCESS ) {
+				why = std::string( "vkCreateGraphicsPipelines (the cascades' sway, " ) + ( k ? "two-sided" : "culled" ) + ") failed";
+				return false;
+			}
+		}
+	}
+	S.pipelines = 7;
 	S.buildMs = nowMs() - t0;
 	toneCacheSave();
 	S.made = true;
@@ -8405,6 +8452,12 @@ bool csmPool( const WwVkPresent::CsmRun & t, int red, std::string & why )
 		return red == 1;
 	};
 	std::uint64_t liveV = 0, liveI = 0, missV = 0, missI = 0;
+	// lane VKSHADOW10: the wind weight (a vec4 colour's alpha) of each vertex into mwind at the mesh's base vertex
+	auto putWind = [&S]( std::int32_t baseVertex, const WwVkPresent::CsmMesh & me ) {
+		float * o = static_cast<float *>( S.mwind.ptr ) + std::size_t( baseVertex );
+		for ( std::uint32_t i = 0; i < me.verts; i++ )
+			o[i] = me.wind[4 * std::size_t( i ) + 3];
+	};
 	for ( std::size_t m = 0; m < t.nMeshes; m++ ) {
 		if ( !used[m] )
 			continue;
@@ -8416,7 +8469,7 @@ bool csmPool( const WwVkPresent::CsmRun & t, int red, std::string & why )
 			missI += me.indices;
 		}
 	}
-	if ( !S.mpos.buf || !S.midx.buf || !S.muv.buf || S.posUsed + missV > S.mpos.cap / 12 || S.idxUsed + missI > S.midx.cap / 2 ) {
+	if ( !S.mpos.buf || !S.midx.buf || !S.muv.buf || !S.mwind.buf || S.posUsed + missV > S.mpos.cap / 12 || S.idxUsed + missI > S.midx.cap / 2 ) {
 		S.st.repacks++;
 		if ( red != 2 ) {
 			S.pool.clear();
@@ -8425,7 +8478,8 @@ bool csmPool( const WwVkPresent::CsmRun & t, int red, std::string & why )
 		const std::uint64_t needV = 2 * ( red == 2 ? S.posUsed + missV : liveV ), needI = 2 * ( red == 2 ? S.idxUsed + missI : liveI );
 		if ( !csmBuf( S.mpos, VkDeviceSize( needV ) * 12, false, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, why, "the cascades' mesh positions" )
 			|| !csmBuf( S.midx, VkDeviceSize( needI ) * 2, false, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, why, "the cascades' mesh indices" )
-			|| !csmBuf( S.muv, VkDeviceSize( needV ) * 8, false, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, why, "the cascades' mesh uvs" ) ) {
+			|| !csmBuf( S.muv, VkDeviceSize( needV ) * 8, false, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, why, "the cascades' mesh uvs" )
+			|| !csmBuf( S.mwind, VkDeviceSize( needV ) * 4, false, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, why, "the cascades' mesh wind" ) ) {
 			S.pool.clear();
 			S.posUsed = S.idxUsed = 0;
 			return false;
@@ -8442,6 +8496,10 @@ bool csmPool( const WwVkPresent::CsmRun & t, int red, std::string & why )
 				std::memcpy( static_cast<char *>( S.muv.ptr ) + std::size_t( kp.baseVertex ) * 8, me.uv, std::size_t( me.verts ) * 8 );
 				kp.uv = true;
 			}
+			if ( me.wind && !kp.wind ) {  // lane VKSHADOW10: a kept mesh a sway draw now wants the wind weights of
+				putWind( kp.baseVertex, me );
+				kp.wind = true;
+			}
 			continue;
 		}
 		CsmPlace p;
@@ -8457,6 +8515,9 @@ bool csmPool( const WwVkPresent::CsmRun & t, int red, std::string & why )
 		p.uv = me.uv != nullptr;  // lane VKSHADOW8: the uvs at the same base vertex
 		if ( p.uv )
 			std::memcpy( static_cast<char *>( S.muv.ptr ) + std::size_t( p.baseVertex ) * 8, me.uv, std::size_t( me.verts ) * 8 );
+		p.wind = me.wind != nullptr;  // lane VKSHADOW10: the colours' alpha at the same base vertex
+		if ( p.wind )
+			putWind( p.baseVertex, me );
 		S.pool[me.key] = p;
 		S.st.copies++;
 		S.st.copyKb += double( std::size_t( me.verts ) * 12 + std::size_t( me.indices ) * 2 ) / 1024.0;
@@ -8473,8 +8534,8 @@ bool csmWork( std::string & why )
 	VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	v.vkBeginCommandBuffer( S.cmd, &bi );
-	const VkBuffer vbs[2] = { S.pos.buf, S.mats.buf }, mvbs[3] = { S.mpos.buf, S.mats.buf, S.muv.buf };  // VKSHADOW8: 2 = uvs
-	const VkDeviceSize vbo[3] = { 0, 0, 0 };
+	const VkBuffer vbs[2] = { S.pos.buf, S.mats.buf }, mvbs[4] = { S.mpos.buf, S.mats.buf, S.muv.buf, S.mwind.buf };  // VKSHADOW8: 2 = uvs, VKSHADOW10: 3 = wind
+	const VkDeviceSize vbo[4] = { 0, 0, 0, 0 };
 	for ( std::size_t f = 0; f < S.fbs.size(); f++ ) {
 		const CsmFb & F = S.fbs[f];
 		bool any = false;
@@ -8514,16 +8575,16 @@ bool csmWork( std::string & why )
 			}
 			// lane VKSHADOW8: an alpha-tested draw (its map's set) takes pipelines 3 / 4 (2 is the remap)
 			const VkDescriptorSet set = S.dSet[k];
-			const int p = ( D.cull ? 0 : 1 ) + ( set ? 3 : 0 );
+			const int p = ( D.cull ? 0 : 1 ) + ( set ? 3 : D.sway ? 5 : 0 );  // lane VKSHADOW10: a sway draw takes 5 / 6
 			if ( p != bound )
-				v.vkCmdBindPipeline( S.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, set ? S.atPipe[p - 3] : S.pipe[p] );
+				v.vkCmdBindPipeline( S.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, set ? S.atPipe[p - 3] : D.sway ? S.swPipe[p - 5] : S.pipe[p] );
 			if ( set && ( set != boundSet || p != bound ) )
 				v.vkCmdBindDescriptorSets( S.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, S.atLayout, 0, 1, &set, 0, nullptr );
 			boundSet = set;
 			bound = p;
 			if ( int( D.mesh ) != form ) {
 				form = int( D.mesh );
-				v.vkCmdBindVertexBuffers( S.cmd, 0, D.mesh ? 3 : 2, D.mesh ? mvbs : vbs, vbo );
+				v.vkCmdBindVertexBuffers( S.cmd, 0, D.mesh ? 4 : 2, D.mesh ? mvbs : vbs, vbo );
 				v.vkCmdBindIndexBuffer( S.cmd, D.mesh ? S.midx.buf : S.idx.buf, 0, VK_INDEX_TYPE_UINT16 );
 			}
 			const VkViewport vp { 0.0f, 0.0f, float( D.vw ), float( D.vh ), 0.0f, 1.0f };
@@ -8536,7 +8597,21 @@ bool csmWork( std::string & why )
 			v.vkCmdSetViewport( S.cmd, 0, 1, &vp );
 			v.vkCmdSetScissor( S.cmd, 0, 1, &sc );
 			v.vkCmdSetDepthBias( S.cmd, D.unit, D.clamp, D.slope );  // glPolygonOffset( slope, unit ): the same D16 law
-			v.vkCmdPushConstants( S.cmd, set ? S.atLayout : S.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, D.clip );
+			if ( D.sway ) {  // lane VKSHADOW10: clip, viewMatrix's columns with the block centre in .w, block w / amp / time
+				float sp[32] = {};
+				std::memcpy( sp, D.clip, 64 );
+				for ( int c = 0; c < 3; c++ ) {
+					for ( int r = 0; r < 3; r++ )
+						sp[16 + 4 * c + r] = D.swayView[3 * c + r];
+					sp[16 + 4 * c + 3] = D.swayBlock[c];
+				}
+				sp[28] = D.swayBlock[3];
+				sp[29] = D.swayAmp;
+				sp[30] = D.swayTime;
+				v.vkCmdPushConstants( S.cmd, S.swLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, kCsmSwayPush, sp );
+			} else {
+				v.vkCmdPushConstants( S.cmd, set ? S.atLayout : S.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, D.clip );
+			}
 			if ( set ) {
 				const float ap[6] = { D.uvScale[0], D.uvScale[1], D.uvOffset[0], D.uvOffset[1], D.atAlpha, D.atRef };
 				v.vkCmdPushConstants( S.cmd, S.atLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 64, kCsmAtPush, ap );
@@ -8589,7 +8664,7 @@ void csmDrop()
 	S.pending = false;
 	csmFbsDrop();
 	S.fbGen = 0;
-	for ( CsmBuf * b : { &S.pos, &S.idx, &S.mats, &S.cmds, &S.mpos, &S.midx, &S.muv } )
+	for ( CsmBuf * b : { &S.pos, &S.idx, &S.mats, &S.cmds, &S.mpos, &S.midx, &S.muv, &S.mwind } )
 		csmBufFree( *b, gl().ok && b->glCtx == gl().ctx );
 	S.pool.clear();
 	S.posUsed = S.idxUsed = 0;
@@ -8692,6 +8767,18 @@ bool csmRun( const CsmRun & t, std::string & why )
 		for ( std::uint32_t k = D.first; k < D.first + D.n; k++ )
 			if ( !t.meshes[t.mdraws[4 * std::size_t( k )]].uv )
 				return refuse( "alpha uv: an alpha-tested draw's mesh has no uvs" );
+	}
+	// lane VKSHADOW10: a sway draw is a plain mesh draw (not alpha-tested), and every mesh it draws carries its wind weights
+	int nSway = 0;
+	for ( const CsmDraw & D : t.d ) {
+		if ( !D.sway )
+			continue;
+		nSway++;
+		if ( !D.mesh || D.remap || D.atTex )
+			return refuse( "a sway draw that is not a plain mesh draw" );
+		for ( std::uint32_t k = D.first; k < D.first + D.n; k++ )
+			if ( !t.meshes[t.mdraws[4 * std::size_t( k )]].wind )
+				return refuse( "sway wind: a sway draw's mesh has no wind weights" );
 	}
 	// the last run is done before its command buffer, buffers and framebuffers are touched again
 	if ( std::string fw; !fenceDone( S.fence, S.pending, "csm", fw ) )
@@ -8852,6 +8939,7 @@ bool csmRun( const CsmRun & t, std::string & why )
 	S.st.remapRed += S.rmRed ? nRemap : 0;
 	S.st.alphaDraws += nAlpha;
 	S.st.alphaTex += nAlphaTex;
+	S.st.swayDraws += nSway;
 	S.st.cpuMs += ms;
 	S.st.maxMs = std::max( S.st.maxMs, ms );
 	return true;
@@ -9817,6 +9905,8 @@ void csmSay( bool wanted, const char * glWhy )
 		line += QStringLiteral( ", %1 cache remaps" ).arg( st.remaps );
 	if ( st.alphaDraws > 0 )  // lane VKSHADOW9: alpha-tested casters drawn in the crossing, their base maps
 		line += QStringLiteral( ", %1 alpha draws (%2 base maps)" ).arg( st.alphaDraws ).arg( st.alphaTex );
+	if ( st.swayDraws > 0 )  // lane VKSHADOW10: swaying casters drawn in the crossing
+		line += QStringLiteral( ", %1 sway draws" ).arg( st.swayDraws );
 	line += pool;
 	said = line;
 	qInfo().noquote() << line;

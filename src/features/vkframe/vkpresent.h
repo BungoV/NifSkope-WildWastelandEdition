@@ -463,6 +463,11 @@ struct CsmDraw
 	 * same through features/shadows/shadowatsampler.h); every mesh the draws use needs CsmMesh::uv */
 	unsigned atTex = 0;
 	float uvScale[2] = { 1.0f, 1.0f }, uvOffset[2] = { 0.0f, 0.0f }, atAlpha = 1.0f, atRef = 0.0f;
+	/* lane VKSHADOW10: sway (mesh draws only, not alpha-tested): lookdev_csmdepth.vert's far wind with lodTreeAnim 1
+	 * (csm_sway_view_vs.hlsl): farSwayAmp, this cascade's farSwayTime, farSwayBlock (view space centre, half size) and
+	 * globalUniforms.viewMatrix (GL column-major mat3); every mesh the draw uses needs CsmMesh::wind */
+	bool sway = false;
+	float swayAmp = 0.0f, swayTime = 0.0f, swayBlock[4] = {}, swayView[9] = {};
 };
 /* Lane VKSHADOW4 (item 3 part 1): a per-draw caster (sunshadow.cpp drawShape, the whole shape or its cullIdx ranges) as a
  * mesh csmRun keeps on the device while (key, gen) and its sizes match (vklamp.inc lampPool's law): key = the shape,
@@ -476,6 +481,7 @@ struct CsmMesh
 	const std::uint16_t * idx = nullptr;  //!< triangle list, mesh-local
 	std::uint32_t indices = 0;
 	const float * uv = nullptr;           //!< lane VKSHADOW7: vec2 per vertex (alpha-tested draws; gen covers it too)
+	const float * wind = nullptr;         //!< lane VKSHADOW10: vec4 colours per vertex, .a = the wind weight (sway draws; gen covers it)
 };
 struct CsmRun
 {
@@ -517,6 +523,8 @@ struct CsmStat
 	int remaps = 0, remapRed = 0;
 	//! lane VKSHADOW7: alpha-tested draws run, the distinct textures they bound in the run
 	int alphaDraws = 0, alphaTex = 0;
+	//! lane VKSHADOW10: sway draws run
+	int swayDraws = 0;
 	double copyKb = 0.0;
 };
 CsmStat takeCsmStat();
