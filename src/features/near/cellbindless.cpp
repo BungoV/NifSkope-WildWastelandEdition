@@ -24,9 +24,6 @@
 #include <vector>
 
 bool wwFrameLog();	// gl/cellcull.cpp
-bool rtddgiCellShaderDefine();      // lane VKOBJ5 (vkBlDraw): src/features/gi/rtddgicell.cpp, WW_CELL_RTDDGI in the cell programs
-bool rtddgiRestirShaderDefine();    // WW_CELL_RESTIR
-bool rtddgiRestirGiShaderDefine();  // WW_CELL_RESTIRGI
 
 #include "features/vkframe/vkobjtex.h"	// lane VKOBJ3: the cache's BC twins in the Vulkan bindless table
 #include "features/vkframe/vkobjpipe.h"	// lane VKOBJ4: a run's multi-draw on Vulkan (WW_VKOBJ_SHADE)
@@ -643,13 +640,15 @@ bool vkBlDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * coun
 				blWhy[i] = w;
 		return false;
 	};
-	/* the shipped bl twins are the code-default route; the RT GI variant (WW_CELL_RTDDGI + cascades + RESTIR / RESTIRGI) is
-	 * lane VKWATER3's: until its twin lands, such a program stays on GL with the reason in the line */
-	const char * no = ::rtddgiCellShaderDefine() ? "WW_CELL_RTDDGI in GL's program: no Vulkan twin"
-		: ::rtddgiRestirShaderDefine() ? "WW_CELL_RESTIR in GL's program: no Vulkan twin"
-		: ::rtddgiRestirGiShaderDefine() ? "WW_CELL_RESTIRGI in GL's program: no Vulkan twin" : nullptr;
-	if ( no )
+	/* lane VKOBJ20: the twin variant by GL's pixel-stage key, as the run route picks it (objBlVariant: 0 the app's base key, 1 the
+	 * all-on route's RT GI key, any other key refuses by name). The RT variant is taken for the decal-fade pieces only (the kept
+	 * placements and the bands, blview `colour rt single` / `colour rt fade`); other singles on the RT key stay on GL, named */
+	const char * no = nullptr;
+	const int variant = WwVkPresent::objBlVariant( prog->wwDefs, no );
+	if ( variant < 0 )
 		return refuse( no );
+	if ( variant == 1 && !fadeBand )
+		return refuse( "the RT GI variant on a single outside the decal fade: not gated on the bl route" );
 	// lane VKOBJ19: a decal-fade piece blends by its own alpha (GL's loose alpha, mirrored per call by objBlLoose)
 	if ( rigid && !fadeBand && gf->glIsEnabled( GL_BLEND ) )
 		return refuse( "a blended rigid shape (the opaque route only)" );
@@ -665,6 +664,7 @@ bool vkBlDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * coun
 	WW_SWITCH_STATIC( QString, redOwnName, wwEnv( "WW_VKVIEW_OBJOWN_RED" ).trimmed() );
 	WwVkPresent::ObjBlShade s;
 	s.twin = twin;
+	s.rt = variant == 1;
 	s.prog = prog->id;
 	if ( own ) {
 		s.poolKey = reinterpret_cast<std::uintptr_t>( &blOwnKey );
