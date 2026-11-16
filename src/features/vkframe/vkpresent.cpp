@@ -1599,6 +1599,7 @@ VkFormat vkFormatOf( GLenum f, bool & depth )
 	case kRgba16f: return VK_FORMAT_R16G16B16A16_SFLOAT;
 	case kRgba32f: return VK_FORMAT_R32G32B32A32_SFLOAT;
 	case kRgba8: return VK_FORMAT_R8G8B8A8_UNORM;
+	case 0x8C43: return VK_FORMAT_R8G8B8A8_SRGB;  // lane VKFLIGHT7: SRGB8_ALPHA8, the env cube (sampled with the decode on)
 	case kGlRg32f: return VK_FORMAT_R32G32_SFLOAT;
 	case kGlRg16f: return VK_FORMAT_R16G16_SFLOAT;
 	case kGlR32f: return VK_FORMAT_R32_SFLOAT;

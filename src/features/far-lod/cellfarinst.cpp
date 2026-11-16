@@ -13,6 +13,7 @@
 #include "features/exposure/cellhdr.h"	// lane VKFAR2: the shared tone frame
 #include "features/vkframe/vkpresent.h"	// lane VKFAR2: the far LOD rings on the Vulkan view (row G3)
 #include "features/vkframe/vkwater.h"
+#include "features/near/cellglzone.h"	// lane VKFLIGHT7: the zone names the pass of a foreign draw target
 
 #include <QElapsedTimer>
 #include <QHash>
@@ -397,6 +398,21 @@ int farLodTwinOf( const std::string & d )
 	return -1;
 }
 
+/* lane VKFLIGHT7: bungo's flight (11-16) kept ~10350 ring draws a window on GL; which target refused, named by the zone
+ * of the pass on hand (obscurance = the AO geometry pass into its g-buffer) */
+static const char * farLodTargetWhy( GLuint drawFb )
+{
+	if ( wwCellHdrIsFrame( drawFb ) )
+		return "the draw target is not the shared tone frame (the linear frame, not shared this frame)";
+	switch ( WwBl::glZones().cur ) {
+	case WwBl::ZoneObscurance: return "the draw target is not the shared tone frame (another framebuffer: the obscurance g-buffer pass)";
+	case WwBl::ZoneOpaque: return "the draw target is not the shared tone frame (another framebuffer: in the opaque pass)";
+	case WwBl::ZoneSorted: return "the draw target is not the shared tone frame (another framebuffer: in the sorted pass)";
+	case WwBl::ZoneOverlays: return "the draw target is not the shared tone frame (another framebuffer: in the overlays)";
+	default: return "the draw target is not the shared tone frame (another framebuffer: a capture or probe pass, no zone)";
+	}
+}
+
 void farLodVkArm( GLFunctions * fn, NifSkopeOpenGLContext::Program * prog, int splatPass )
 {
 	g_vkFarArm = VkFarArm();
@@ -429,7 +445,7 @@ void farLodVkArm( GLFunctions * fn, NifSkopeOpenGLContext::Program * prog, int s
 		fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFb );
 		color = wwCellHdrVkToneColor( GLuint( drawFb ) );
 		if ( !color )
-			no = "the draw target is not the shared tone frame";
+			no = farLodTargetWhy( GLuint( drawFb ) );
 	}
 	if ( no )
 		WwVkPresent::farLodOnGl( no );

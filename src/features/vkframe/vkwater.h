@@ -38,17 +38,18 @@ struct WaterSlot
 	// lane VKWATER3: the texture's sampling state (the draw's VkSampler), a texel buffer's data store
 	unsigned magF = 0x2601, minF = 0x2601, wrap[3] = { 0x2901, 0x2901, 0x2901 }, cmpMode = 0, cmpFunc = 0x0203;
 	int baseLevel = 0;
+	unsigned srgbDecode = 0x8A49;  //!< lane VKFLIGHT7: GL_TEXTURE_SRGB_DECODE_EXT (0x8A4A: GL skips the decode)
 	unsigned dataBuf = 0;
 	long long bufBytes = 0;
 };
 
 //! why an input cannot move (0: it takes a twin)
 enum WaterBlock { kWaterOk = 0, kWaterBc, kWaterIntFormat, kWaterFormat, kWaterCubeArray, kWaterTexelBuffer, kWaterAniso,
-	kWaterSamplerObj, kWaterKind, kWaterBlocks };
+	kWaterSamplerObj, kWaterKind, kWaterSrgbSkip, kWaterBlocks };
 inline const char * waterBlockName( int b )
 {
 	static const char * const k[kWaterBlocks] = { "ok", "BC formats", "integer formats", "other formats", "cube-map arrays",
-		"texel buffers", "anisotropic sampling", "sampler objects", "sampler kinds" };
+		"texel buffers", "anisotropic sampling", "sampler objects", "sampler kinds", "sRGB with the decode skipped" };
 	return b >= 0 && b < kWaterBlocks ? k[b] : "?";
 }
 
@@ -133,6 +134,9 @@ inline int waterSlotBlock( const WaterSlot & s, const WaterCaps & c )
 		return kWaterSamplerObj;
 	if ( s.aniso > 1.0f && !c.aniso )
 		return kWaterAniso;
+	// lane VKFLIGHT7: an sRGB view always decodes; GL's 2D maps skip it (gltexloaders), its env cubes do not
+	if ( s.srgbDecode == 0x8A4A && ( s.glFmt == 0x8C41 || s.glFmt == 0x8C43 || ( s.glFmt >= 0x8C4C && s.glFmt <= 0x8C4F ) || s.glFmt == 0x8E8D ) )
+		return kWaterSrgbSkip;
 	if ( waterBcFormat( s.glFmt ) )
 		return c.bc ? kWaterOk : kWaterBc;
 	if ( waterIntFormat( s.glFmt ) && !c.intFormats )
@@ -269,6 +273,8 @@ template <class Fn> void waterCensusOf( Fn * fn, unsigned prog, WaterCensus & c 
 					fn->glGetTexParameteriv( kTarget[s.kind], 0x884C, &cm );     // GL_TEXTURE_COMPARE_MODE / FUNC
 					fn->glGetTexParameteriv( kTarget[s.kind], 0x884D, &cf );
 					fn->glGetTexParameteriv( kTarget[s.kind], 0x813C, &bl );     // GL_TEXTURE_BASE_LEVEL
+					int sd = 0x8A49;
+					fn->glGetTexParameteriv( kTarget[s.kind], 0x8A48, &sd );     // lane VKFLIGHT7: GL_TEXTURE_SRGB_DECODE_EXT
 					s.magF = unsigned( magF );
 					s.minF = unsigned( minF );
 					for ( int k = 0; k < 3; k++ )
@@ -276,6 +282,7 @@ template <class Fn> void waterCensusOf( Fn * fn, unsigned prog, WaterCensus & c 
 					s.cmpMode = unsigned( cm );
 					s.cmpFunc = unsigned( cf );
 					s.baseLevel = bl;
+					s.srgbDecode = unsigned( sd );
 					const bool mip = minF >= 0x2700 && minF <= 0x2703;
 					while ( mip && s.levels <= maxL && s.levels < 16 ) {
 						int lw = 0;

@@ -22,6 +22,7 @@ BSD License - see nifskope.h
 #include "features/vkframe/vkpresent.h"	// lane VKFAR3: ring 0 on the Vulkan view (row G3)
 #include "features/vkframe/vkfarcards.h"	// lane VKGROUND5: the BC1 page pools as far twins
 #include "features/vkframe/vkwater.h"
+#include "features/near/cellglzone.h"	// lane VKFLIGHT7: the zone names the pass of a foreign draw target
 #include "features/vkframe/vkfgpaint.h"	// lane VKGROUND7: the page paint on the present device
 
 #include <QElapsedTimer>
@@ -1671,6 +1672,19 @@ bool wantsFrames( Scene * scene )
 
 static int farGroundTwinOf( const std::string & d );
 
+/* lane VKFLIGHT7: bungo's flight (11-16) refused 5167 far ground draws a window "another framebuffer"; the zone set by
+ * the pass on hand names it (obscurance = the AO geometry pass into its g-buffer) */
+static const char * fgForeignFbWhy()
+{
+	switch ( WwBl::glZones().cur ) {
+	case WwBl::ZoneObscurance: return "the draw target is not the shared tone frame (another framebuffer: the obscurance g-buffer pass)";
+	case WwBl::ZoneOpaque: return "the draw target is not the shared tone frame (another framebuffer: in the opaque pass)";
+	case WwBl::ZoneSorted: return "the draw target is not the shared tone frame (another framebuffer: in the sorted pass)";
+	case WwBl::ZoneOverlays: return "the draw target is not the shared tone frame (another framebuffer: in the overlays)";
+	default: return "the draw target is not the shared tone frame (another framebuffer: a capture or probe pass, no zone)";
+	}
+}
+
 /* lane VKGROUND3: a ring-0 shape of mode 2 (Show > Far ground: Live, cached pages; fo4_cellcsmfgp) on the Vulkan view, one
  * crossing a shape (red WW_VKVIEW_FARGROUNDLIVE_RED=1). Its inputs are the cell table and the two page pools: never copied
  * a draw, so the draw waits on GL until they are on the present device (key slots 3..5) */
@@ -1708,7 +1722,7 @@ static bool vkDrawLive( Scene * scene, NifSkopeOpenGLContext::Program * prog, in
 		color = wwCellHdrVkToneColor( GLuint( drawFb ) );
 		if ( !color )	// lane VKFLIGHT1: which one (bungo's flight: 7239 draws a window, the source unnamed)
 			no = wwCellHdrIsFrame( GLuint( drawFb ) ) ? "the draw target is not the shared tone frame (the linear frame, not shared this frame)"
-				: "the draw target is not the shared tone frame (another framebuffer: a capture or probe pass)";
+				: fgForeignFbWhy();
 	}
 	if ( !no ) {
 		GLint cur = 0;
@@ -1823,7 +1837,7 @@ bool vkDraw( Scene * scene, NifSkopeOpenGLContext::Program * prog, int block, in
 		color = wwCellHdrVkToneColor( GLuint( drawFb ) );
 		if ( !color )	// lane VKFLIGHT1: which one (bungo's flight: 7239 draws a window, the source unnamed)
 			no = wwCellHdrIsFrame( GLuint( drawFb ) ) ? "the draw target is not the shared tone frame (the linear frame, not shared this frame)"
-				: "the draw target is not the shared tone frame (another framebuffer: a capture or probe pass)";
+				: fgForeignFbWhy();
 	}
 	if ( !no ) {
 		GLint cur = 0;
