@@ -750,9 +750,8 @@ void wwTaaInputsPass( Scene * scene )
 		if ( g.vk && !cvDrew )
 			t.refusals++;
 		const QString key = cvDrew ? QStringLiteral( "vulkan" ) : QStringLiteral( "gl: " ) + QString::fromStdString( cvWhy );
-		if ( key != t.said || t.passes % 600 == 0 ) {
-			if ( g.vk )
-				static_cast<void>( WwVkPresent::takeCamVelStat() );
+		if ( g.vk && ( key != t.said || t.passes % 600 == 0 ) ) {	// the view off: no line (as objvel's)
+			static_cast<void>( WwVkPresent::takeCamVelStat() );
 			t.said = key;
 			qInfo().noquote() << QStringLiteral( "vk camvel: runs=%1 gl=%2 refusals=%3%4" ).arg( t.runs ).arg( t.gl )
 				.arg( t.refusals ).arg( cvDrew ? QString() : QStringLiteral( " glWhy=" ) + QString::fromStdString( cvWhy ) );

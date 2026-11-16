@@ -345,14 +345,21 @@ void camVelDrop()
 
 namespace WwVkPresent
 {
-std::string camVelRefusal()
+// the refusal with S.mx already held (camVelRun holds it)
+static std::string cvRefusalHeld( camvel::CvState & S )
 {
-	camvel::CvState & S = camvel::cvState();
 	if ( S.broken )
 		return S.brokenWhy;
 	if ( !vk().ok || !gl().ok || gl().ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
 		return "the present device or GL's entry points are not ready in this context";
 	return std::string();
+}
+
+std::string camVelRefusal()
+{
+	camvel::CvState & S = camvel::cvState();
+	std::lock_guard<std::mutex> lk( S.mx );
+	return cvRefusalHeld( S );
 }
 
 bool camVelRun( const CamVelRun & r, std::string & why )
@@ -374,7 +381,7 @@ bool camVelRun( const CamVelRun & r, std::string & why )
 		S.brokenWhy = "camvel on Vulkan broke: " + w;
 		return refuse( S.brokenWhy );
 	};
-	if ( const std::string no = camVelRefusal(); !no.empty() )
+	if ( const std::string no = cvRefusalHeld( S ); !no.empty() )
 		return refuse( no );
 	// the targets: the owner's shared g.vel / g.depth at the pass's size
 	const Shared * tv = sharedFind( r.velKey );
