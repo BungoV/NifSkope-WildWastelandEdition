@@ -237,3 +237,232 @@ void rtBufSay()
 }
 
 }  // namespace WwVkPresent
+
+// lane VKBUF2 (2026-11-16): the screen GI's images by name (vkrtbuf.h rtImg*): RGBA32F sharedTargets under the owner's keys
+namespace
+{
+struct RtImgs
+{
+	std::uintptr_t key[WwVkPresent::kRtImgSlots] = {};  // the owner's key the slot names (0: none)
+	unsigned tex[WwVkPresent::kRtImgSlots] = {};        // its GL name at the share
+	int w[WwVkPresent::kRtImgSlots] = {}, h[WwVkPresent::kRtImgSlots] = {};
+	std::function<bool( std::string & )> fresh[WwVkPresent::kRtImgSlots];
+	WwVkPresent::RtImgStat st;
+	std::uint64_t gen = 0;
+	std::string said;
+	std::chrono::steady_clock::time_point saidAt {};
+};
+
+RtImgs & rtImgs()
+{
+	static RtImgs * r = new RtImgs;  // never destroyed, like rtBufs
+	return *r;
+}
+
+constexpr const char * kRtImgNames[WwVkPresent::kRtImgSlots] = { "cellGiHalf", "cellGiHalfKey" };
+constexpr unsigned kRtImgFmt = 0x8814;  // GL_RGBA32F
+
+bool rtImgSlotOk( int slot )
+{
+	return slot >= 0 && slot < WwVkPresent::kRtImgSlots;
+}
+}  // namespace
+
+namespace WwVkPresent
+{
+
+const char * rtImgName( int slot )
+{
+	return rtImgSlotOk( slot ) ? kRtImgNames[slot] : nullptr;
+}
+
+int rtImgSlotOf( const char * name )
+{
+	for ( int s = 0; name && s < kRtImgSlots; s++ )
+		if ( std::strcmp( name, kRtImgNames[s] ) == 0 )
+			return s;
+	return -1;
+}
+
+bool rtImgRed()
+{
+#ifdef WW_VKPRESENT_NO_QT
+	const char * v = std::getenv( "WW_VKVIEW_GIHALF_RED" );
+	return v && std::atoi( v ) == 1;
+#else
+	return wwEnvInt( "WW_VKVIEW_GIHALF_RED" ) == 1;
+#endif
+}
+
+bool rtImgShare( int slot, std::uintptr_t key, int w, int h, unsigned fbo, int attach, unsigned & tex, std::string & why )
+{
+	tex = 0;
+	if ( !rtImgSlotOk( slot ) || !key ) {
+		why = "no rt image slot " + std::to_string( slot ) + " or no key";
+		return false;
+	}
+	RtImgs & R = rtImgs();
+	if ( rtImgRed() ) {
+		why = "red WW_VKVIEW_GIHALF_RED=1";
+		R.st.why[slot] = why;
+		return false;
+	}
+	// made / kept read off the target's own size and format: a remade one can take the old GL name again (driver reuse)
+	const Shared * s0 = sharedFind( key );
+	const unsigned before = s0 ? s0->tex : 0;
+	const bool kept = s0 && s0->img && s0->type == 0 && s0->w == w && s0->h == h && s0->d == 1 && s0->levels == 1 && s0->glFmt == kRtImgFmt;
+	unsigned t = 0;
+	if ( !sharedTarget( key, 0, w, h, 1, kRtImgFmt, t, why ) ) {
+		sharedTargetDrop( key );
+		R.st.why[slot] = why;
+		if ( R.key[slot] == key ) {
+			R.key[slot] = 0;
+			R.tex[slot] = 0;
+			R.w[slot] = R.h[slot] = 0;
+			R.st.w[slot] = R.st.h[slot] = 0;
+			if ( before )
+				R.st.dropped[slot]++;
+			R.gen++;
+		}
+		rtImgSay();
+		return false;
+	}
+	Gl & g = gl();
+	if ( !kept || t != before ) {  // made (or remade at a new size): GL's sampling state, as giHalfPass set it on its own texture
+		g.bindTexture( kTexture2D, t );
+		g.texParameteri( kTexture2D, kTexMinFilter, kNearest );
+		g.texParameteri( kTexture2D, kTexMagFilter, kNearest );
+		g.texParameteri( kTexture2D, 0x2802 /* GL_TEXTURE_WRAP_S */, 0x812F /* GL_CLAMP_TO_EDGE */ );
+		g.texParameteri( kTexture2D, 0x2803 /* GL_TEXTURE_WRAP_T */, 0x812F );
+		g.texParameteri( kTexture2D, 0x813D /* GL_TEXTURE_MAX_LEVEL */, 0 );
+		g.bindTexture( kTexture2D, 0 );
+		if ( before )
+			R.st.dropped[slot]++;
+		R.st.made[slot]++;
+	}
+	if ( fbo ) {
+		g.bindFramebuffer( kFramebuffer, fbo );
+		g.framebufferTexture2D( kFramebuffer, GLenum( kColorAttach0 + attach ), kTexture2D, t, 0 );
+	}
+	if ( !kept || t != before || R.key[slot] != key || R.tex[slot] != t )
+		R.gen++;
+	R.key[slot] = key;
+	R.tex[slot] = t;
+	R.w[slot] = R.st.w[slot] = w;
+	R.h[slot] = R.st.h[slot] = h;
+	tex = t;
+	rtImgSay();
+	return true;
+}
+
+void rtImgDrop( int slot, std::uintptr_t key )
+{
+	if ( !rtImgSlotOk( slot ) || !key )
+		return;
+	sharedTargetDrop( key );
+	RtImgs & R = rtImgs();
+	if ( R.key[slot] != key )
+		return;
+	R.key[slot] = 0;
+	R.tex[slot] = 0;
+	R.w[slot] = R.h[slot] = 0;
+	R.st.w[slot] = R.st.h[slot] = 0;
+	R.st.dropped[slot]++;
+	R.gen++;
+	rtImgSay();
+}
+
+void rtImgOwner( int slot, std::function<bool( std::string & why )> fresh )
+{
+	if ( rtImgSlotOk( slot ) )
+		rtImgs().fresh[slot] = std::move( fresh );
+}
+
+bool rtImgOf( const char * name, RtImg & out, std::string & why )
+{
+	out = RtImg();
+	const int slot = rtImgSlotOf( name );
+	if ( slot < 0 ) {
+		why = std::string( "no rt image named " ) + ( name ? name : "(null)" );
+		return false;
+	}
+	RtImgs & R = rtImgs();
+	R.st.lookups[slot]++;
+	auto refuse = [&]( const std::string & w ) {
+		why = w;
+		R.st.refused[slot]++;
+		R.st.why[slot] = w;
+		rtImgSay();
+		return false;
+	};
+	if ( rtImgRed() )
+		return refuse( "red WW_VKVIEW_GIHALF_RED=1" );
+	if ( !R.fresh[slot] )
+		return refuse( "no owner" );
+	if ( !R.key[slot] )
+		return refuse( "not on the present device (never made, or dropped)" );
+	std::string w;
+	if ( !R.fresh[slot]( w ) )
+		return refuse( w );
+	const Shared * s = sharedFind( R.key[slot] );
+	if ( !s || !s->img || s->tex != R.tex[slot] )
+		return refuse( "not on the present device (never made, or dropped)" );
+	if ( s->w != R.w[slot] || s->h != R.h[slot] || s->glFmt != kRtImgFmt )
+		return refuse( "the shared image is " + std::to_string( s->w ) + "x" + std::to_string( s->h ) + ", the owner's " + std::to_string( R.w[slot] )
+			+ "x" + std::to_string( R.h[slot] ) );
+	out.key = R.key[slot];
+	out.glTex = s->tex;
+	out.glFmt = kRtImgFmt;
+	out.w = s->w;
+	out.h = s->h;
+	out.gen = R.gen;
+	rtImgSay();
+	return true;
+}
+
+std::uint64_t rtImgGen()
+{
+	return rtImgs().gen;
+}
+
+RtImgStat rtImgStat()
+{
+	return rtImgs().st;
+}
+
+std::string rtImgLine()
+{
+	const RtImgStat & s = rtImgs().st;
+	std::string l = "vk rtimg:";
+	for ( int k = 0; k < kRtImgSlots; k++ ) {
+		char b[256];
+		std::snprintf( b, sizeof b, "%s %s %dx%d RGBA32F (made %d, dropped %d), lookups %llu, refused %d", k ? ";" : "", kRtImgNames[k], s.w[k],
+			s.h[k], s.made[k], s.dropped[k], static_cast<unsigned long long>( s.lookups[k] ), s.refused[k] );
+		l += b;
+		if ( !s.why[k].empty() )
+			l += " [last refusal: " + s.why[k] + "]";
+	}
+	l += rtImgRed() ? "; RED WW_VKVIEW_GIHALF_RED=1" : "; red off";
+	return l;
+}
+
+void rtImgSay()
+{
+	RtImgs & R = rtImgs();
+	const auto now = std::chrono::steady_clock::now();
+	if ( R.saidAt.time_since_epoch().count() != 0 && now - R.saidAt < std::chrono::seconds( 5 ) )
+		return;
+	std::string l = rtImgLine();
+	if ( l == R.said )
+		return;
+	R.said = std::move( l );
+	R.saidAt = now;
+#ifdef WW_VKPRESENT_NO_QT
+	std::fprintf( stderr, "%s\n", R.said.c_str() );
+	std::fflush( stderr );
+#else
+	qInfo().noquote() << QString::fromStdString( R.said );
+#endif
+}
+
+}  // namespace WwVkPresent
