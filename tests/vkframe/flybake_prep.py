@@ -66,7 +66,7 @@ r = np.random.RandomState(17)  # fxview_prep.py's structured coverage map
 m = r.rand(32, 32, 4).astype(np.float32)
 for ax in (0, 1):
     m = (m + np.roll(m, 1, ax) + np.roll(m, -1, ax)) / 3.0
-T['cvMap'] = Tex('2d', 'rgba32f', m, 'linear', 'clamp')
+T['cvMap'] = Tex('2d', 'rgba8', np.round(m * 255.0), 'linear', 'clamp')  # lane VKCLOUD11: the app's GL_RGBA8 (cloudmap.cpp)
 T['cvShape'] = Tex('3d', 'r8', T['cvShape'].data, 'linear', 'repeat', mips=1)  # cloudvol.cpp: mipmapped
 T['cvDetail'] = Tex('3d', 'r8', T['cvDetail'].data, 'linear', 'repeat', mips=1)
 order = ['cvShape', 'cvDetail', 'cvMap']  # cloud_flybake_ps's t0.. (reflected)
