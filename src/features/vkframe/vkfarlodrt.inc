@@ -96,8 +96,11 @@ bool farLodRtRun( const WaterRun & r, int v, std::string & why )
 		why = "no far LOD RT twin " + std::to_string( v ) + " (1 RT, 2 DG)";
 		return false;
 	}
-	/* lane VKFAR27: cellGiHalf / cellGiHalfKey are GL's own (not shared): while GL's program reads them (cellGiHalfOn 1, set per
-	 * mesh by wwCellAoDraw whenever the half-rate screen GI ran) the draw stays on GL, by name */
+	/* lane VKFAR27 / VKFAR30: while GL's program reads the half-rate screen GI (cellGiHalfOn 1, set per mesh by wwCellAoDraw
+	 * whenever it ran), the RT twin (1) reads cellGiHalf / cellGiHalfKey in place, VKBUF2's shared images found by name
+	 * (vkrtbuf.h rtImgOf): each bound GL name must be the shared one. twinRun binds the shared view (farSharedOf) and writes the
+	 * descriptor sets on every run, so a remake (rtImgGen moved) needs no cache here. A name that is not shared, or not the
+	 * bound one, stays on GL by name. The DG twin (2) does not read the screen GI: refused by name. */
 	const FxField * fs = v == 2 ? kT_farlodDgPs : kT_farlodRtPs;
 	const int nf = v == 2 ? int( sizeof( kT_farlodDgPs ) / sizeof( kT_farlodDgPs[0] ) ) : int( sizeof( kT_farlodRtPs ) / sizeof( kT_farlodRtPs[0] ) );
 	for ( int i = 0; i < nf; i++ )
@@ -105,10 +108,35 @@ bool farLodRtRun( const WaterRun & r, int v, std::string & why )
 			std::int32_t on = 0;
 			if ( fs[i].offset + 4 <= r.psBytes )
 				std::memcpy( &on, r.psLoose + fs[i].offset, 4 );
-			if ( on != 0 ) {
+			if ( on == 0 )
+				continue;
+			std::string w;
+			if ( v == 2 )
+				w = "the DG twin does not read cellGiHalf / cellGiHalfKey (GL's half-rate screen GI)";
+			for ( const char * nm : { "cellGiHalf", "cellGiHalfKey" } ) {
+				if ( !w.empty() )
+					break;
+				RtImg img;
+				std::string iw;
+				if ( !rtImgOf( nm, img, iw ) ) {
+					w = std::string( nm ) + ": " + iw;
+					break;
+				}
+				const WaterSlot * s = nullptr;
+				for ( const WaterSlot & x : r.census.inputs )
+					if ( x.name == nm )
+						s = &x;
+				if ( !s )
+					w = std::string( nm ) + ": GL's program has no such sampler";
+				else if ( s->tex != img.glTex )
+					w = std::string( nm ) + ": GL binds its own texture, not the shared one";
+				else if ( farSharedOf( s->tex ) != img.key )
+					w = std::string( nm ) + ": the shared image is not the bound name's";
+			}
+			if ( !w.empty() ) {
 				FxStat & S = farlod::farLodRtOf( v ).st;
 				S.fails++;
-				S.failWhy = why = "cellGiHalfOn 1: cellGiHalf / cellGiHalfKey are not shared (GL's half-rate screen GI)";
+				S.failWhy = why = "cellGiHalfOn 1: " + w;
 				return false;
 			}
 		}
