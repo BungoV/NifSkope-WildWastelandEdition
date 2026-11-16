@@ -3,7 +3,8 @@ identical uniforms, textures, UBO data and vertices, and compare the readbacks.
   python -I -X utf8 tests/hlsllive/a4_diff.py <tree> <spv dir> [--only substr] [--plant] [--apply] [--seeds N]
 Verdict per program: EXACT (every byte equal) | BOUND (equal NaN mask, max |diff|/max(1,|ref|) <= 1e-4: the GLSL compiler and the
 DXC path contract multiply-adds differently) | FAIL (anything else) | NOCOV (the GLSL render wrote no pixel over all seeds: nothing
-was proven) | SKIP (a program did not build here). --plant adds 0.37 to one float uniform in the SPIR-V run only: the gate must
+was proven) | SKIP (a program did not build here) | HLSLONLY (a numeric FAIL on a program in HLSL_ONLY: the HLSL carries a
+feature its GLSL base lacks by design; printed with the reason, kept on HLSL by --apply; NaN/inf/GL-error FAILs stay FAIL). --plant adds 0.37 to one float uniform in the SPIR-V run only: the gate must
 turn at least one program FAIL (the red). --apply rewrites <spv dir>/spirv/programs.txt: FAIL programs become `FAIL a4 ...` (the loader
 then keeps GLSL for them); the old file is kept as programs_prea4.txt. Writes <spv dir>/spirv/a4.txt.
 HLSLFIX2 shards: `--shard i/N` renders only the programs whose crc32(name) % N == i (one hidden context per process) and writes
@@ -176,6 +177,15 @@ FIXTURE = ''
 # A value is a number, or the name of a define read from the program's GLSL sources (`#define <name> <int>`).
 REAL_INTS = {'fgMode': 'WW_FARGROUND', 'fgDecalsOn': '1'}
 REALV = {}
+
+# BATCH1121 11-16: programs whose HLSL holds a feature the GLSL base lacks by design (HLSL is the reference, no GLSL work). A
+# numeric FAIL there (detail 'max rel ...') prints as HLSLONLY with the reason; any other FAIL stays FAIL; --plant ignores this.
+# Bisected (fo4_cell, 6 sets): a097e41e BOUND 6, FO4MATCH1 a60454e3 BOUND 6, 578c168a FAIL 6 (max rel 0.0146 over 342 of 20480).
+_SUNPASS = ("FO4MATCH1 578c168a: core/fo4_default_ps.hlsl's vanilla path takes the game's sun-pass terms (Schlick^5 + cap 15, "
+            "ambSpecGame, OrenNayar, sunTailGame); the GLSL base keeps the old terms")
+HLSL_ONLY = {p + '.prog': _SUNPASS for p in (
+    'fo4_cell', 'fo4_cellcsm', 'fo4_cellcsmfs', 'fo4_cellfs', 'fo4_cellfgc', 'fo4_cellfgl', 'fo4_cellfgp',
+    'fo4_cellcsmfgc', 'fo4_cellcsmfgl', 'fo4_cellcsmfgp', 'fo4_cellbl', 'fo4_cellcsmbl')}
 
 
 def real_values(unis, texts):
@@ -797,6 +807,8 @@ def main():
                 print('  att %d pix %d comp %d glsl %.6g spv %.6g' % (i // (SZ * SZ * 4), (i // 4) % (SZ * SZ), i % 4, o1[i], o2[i]))
         if verdict in ('EXACT', 'BOUND') and cov == 0:
             verdict, detail = 'NOCOV', 'the GLSL render wrote no pixel over %d seeds' % seeds
+        if verdict == 'FAIL' and not plant and 'max rel ' in detail and name.split('@')[0] in HLSL_ONLY:
+            verdict, detail = 'HLSLONLY', HLSL_ONLY[name.split('@')[0]] + ' | ' + detail
         rows.append((name, group, verdict, detail))
         if verdict != 'SKIP':
             newcache[name] = [ckey, group, verdict, detail]
