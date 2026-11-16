@@ -468,6 +468,8 @@ struct CsmDraw
 	 * globalUniforms.viewMatrix (GL column-major mat3); every mesh the draw uses needs CsmMesh::wind */
 	bool sway = false;
 	float swayAmp = 0.0f, swayTime = 0.0f, swayBlock[4] = {}, swayView[9] = {};
+	//! lane VKSHADOW11: an alpha-tested draw from the QAlpha queue (sunshadow.cpp atSpan through csmSpanMDraws; CsmStat::qAlphaDraws)
+	bool queued = false;
 };
 /* Lane VKSHADOW4 (item 3 part 1): a per-draw caster (sunshadow.cpp drawShape, the whole shape or its cullIdx ranges) as a
  * mesh csmRun keeps on the device while (key, gen) and its sizes match (vklamp.inc lampPool's law): key = the shape,
@@ -502,6 +504,18 @@ struct CsmRun
 	unsigned scratch = 0;           //!< lane VKSHADOW6: the remaps' source, a shared D16 array of `layers` layers (0: no remap draws)
 	std::uintptr_t scratchKey = 0;
 };
+/* lane VKSHADOW11: a QAlpha queue span (sunshadow.cpp atSpan: n 5-word commands from first, all of one pooled shape whose
+ * entry starts at index entryFirst) as mesh draws of that shape's CsmMesh. The pool holds the shape's triangles verbatim
+ * (cellqueue.cpp poolEnsure), so the mesh-local first index = the command's firstIndex - entryFirst; empty commands add nothing */
+inline void csmSpanMDraws( const std::uint32_t * cmds, std::size_t first, std::size_t n, std::uint32_t entryFirst, std::uint32_t mesh,
+	std::uint32_t matrix, std::vector<std::uint32_t> & out )
+{
+	for ( std::size_t k = first; k < first + n; k++ ) {
+		const std::uint32_t * c = cmds + k * 5;
+		if ( c[0] && c[2] >= entryFirst )
+			out.insert( out.end(), { mesh, matrix, c[2] - entryFirst, c[0] } );
+	}
+}
 //! GL current, its own cascade draws issued: the queued draws run on Vulkan into the shared targets. false: why (GL draws them)
 bool csmRun( const CsmRun & t, std::string & why );
 //! lane VKSHADOW9: csmRun would take this alpha map (a BC twin, not sRGB with its decode skipped); false: the caster stays on GL
@@ -525,6 +539,8 @@ struct CsmStat
 	int alphaDraws = 0, alphaTex = 0;
 	//! lane VKSHADOW10: sway draws run
 	int swayDraws = 0;
+	//! lane VKSHADOW11: of the alpha-tested draws, those from the QAlpha queue (CsmDraw::queued)
+	int qAlphaDraws = 0;
 	double copyKb = 0.0;
 };
 CsmStat takeCsmStat();

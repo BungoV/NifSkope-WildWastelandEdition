@@ -1626,9 +1626,10 @@ int main( int argc, char ** argv )
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &keyScr ) );
 	}
 	std::printf( "SHADOWVIEW remap %s\n", rmOk ? "OK" : "FAILED" );
+	bool qaOk = false;  // lane VKSHADOW11: the queued alpha case (shadowview_qalpha.inc, inside the alpha case's block)
 #include "shadowview_alpha.inc"
 #include "shadowview_sway.inc"
-	ok = ok && meshOk && ilOk && rmOk && atOk && swOk;
+	ok = ok && meshOk && ilOk && rmOk && atOk && swOk && qaOk;
 	f.bindFramebuffer( kFb, 0 );
 	for ( int t = 0; t < 2; t++ )
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &keyHome[t] ) );

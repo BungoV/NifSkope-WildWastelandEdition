@@ -499,5 +499,6 @@
 			atOk = atOk && redFails;
 		}
 		WwVkPresent::takeCsmStat();
+#include "shadowview_qalpha.inc"
 	}
 	std::printf( "SHADOWVIEW alpha %s\n", atOk ? "OK" : "FAILED" );
