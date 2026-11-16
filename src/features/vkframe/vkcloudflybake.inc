@@ -403,9 +403,17 @@ bool flyBakeRunN( const FlyBakeRun * t, int n, std::string & why )
 	int smp[3] = {};
 	if ( r.pass == 0 ) {
 		for ( int k = 0; k < kFlyBakeTex; k++ ) {
-			if ( !fxSlot( r.tex[k], views[k], names, S.copies, w ) )
+			// lane VKCLOUD9: an input already on the present device is read in place (as cloudRun); red 8 skips the lookup
+			FxTex x = r.tex[k];
+			if ( !x.shared && x.tex && !( r.red & 8 ) ) {
+				const std::uintptr_t sk = farSharedOf( x.tex );
+				const Shared * s = sk ? sharedFind( sk ) : nullptr;
+				if ( s && s->type == x.type && s->samples == 1 && s->levels == std::max( x.levels, 1 ) )
+					x.shared = sk;
+			}
+			if ( !fxSlot( x, views[k], names, S.copies, w ) )
 				return refuse( "the fly bake's input " + std::to_string( k ) + ": " + w );
-			smp[k] = r.tex[k].sampler;
+			smp[k] = x.sampler;
 		}
 	} else {
 		views[0] = src->view;

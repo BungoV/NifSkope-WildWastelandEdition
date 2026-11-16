@@ -798,7 +798,7 @@ struct FlyBakeRun
 	std::uint8_t loose[kT_flybakeBytes] = {};  //!< b31 packed from GL's program (fxPack, kT_flybake or kT_flysdf); cfLayer is set here
 	int red = 0;                    //!< gates only: 1 every slice into slice 0, 2 slice k into k + 1, 4 the other pass's program;
 	                                //!< lane VKCLOUD9 (read off the first run of a batch): 16 a crossing a pass, 32 every pass on
-	                                //!< pass 0's descriptor set and b31 slots
+	                                //!< pass 0's descriptor set and b31 slots; 8 (lane VKCLOUD9) no shared lookup: pass 0's inputs copied
 };
 //! GL current: one pass over slices [from, to) of t.dst on Vulkan (one render pass a slice), one crossing; false: why, GL draws it
 bool flyBakeRun( const FlyBakeRun & t, std::string & why );
