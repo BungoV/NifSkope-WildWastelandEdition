@@ -675,15 +675,26 @@ int main( int argc, char ** argv )
 			}
 			return glGetError() == GL_NO_ERROR;
 		};
+		// lane VKCLOUD11: the map on for this arm only (the job's mapRect has w 0: cfCoverMax returned the bands' cover and cvMap was
+		// never read, so VKCLOUD10's stalemap / undrawnmap ran blind). The rect is the box's own plus one cell each side; the arm's GL
+		// reference refI is the bake on the plain set with it, and it must differ from gv0 (w 0) in >= 50 texels.
+		if ( !uni.count( "cfOrgKm" ) || uni.at( "cfOrgKm" ).size() < 2 || !uni.count( "cfDim" ) || !uni.count( "cfCellKm" ) )
+			return fatal( "arm I's box uniforms" );
+		UniMap uI = uni;
+		const std::vector<double> org = uni.at( "cfOrgKm" );
+		const double cKm = uni.at( "cfCellKm" )[0], span = uni.at( "cfDim" )[0] * cKm + 2.0 * cKm;
+		uI["cvBands.mapRect"] = std::vector<double> { org[0] - cKm, org[1] - cKm, 1.0 / span, 1.0 };
+		setUnis( pBake, uI );
+		std::vector<std::uint8_t> refI;
 		auto glBake = [&]( const InSet & z ) {
 			use( z );
 			GLuint t = vol3();
 			const bool drew = glPass( 0, 0, t, 0, nz );
 			const std::vector<std::uint8_t> a = read( t );
 			glDeleteTextures( 1, &t );
-			size_t d = drew && a.size() == ref[0].size() ? 0 : 1;
-			for ( size_t i = 0; i < a.size() && i < ref[0].size(); i++ )
-				d += a[i] != ref[0][i];
+			size_t d = drew && a.size() == refI.size() ? 0 : 1;
+			for ( size_t i = 0; i < a.size() && i < refI.size(); i++ )
+				d += a[i] != refI[i];
 			return d;
 		};
 		struct IOut
@@ -705,6 +716,27 @@ int main( int argc, char ** argv )
 		};
 		bool made = make( pl, false, 0, 0, true ) && make( shd, true, 0, 0, true );
 		made = made && shd.s.shared && shd.d.shared && shd.m.shared && !pl.s.shared && !pl.d.shared && !pl.m.shared;
+		{
+			GLuint t = vol3();  // first on the fixture's own textures (tin[] still holds own[]): the plain set must match it
+			const bool drewO = glPass( 0, 0, t, 0, nz );
+			const std::vector<std::uint8_t> oI = read( t );
+			use( pl );
+			const bool drew = drewO && glPass( 0, 0, t, 0, nz );
+			refI = read( t );
+			glDeleteTextures( 1, &t );
+			size_t d = 0, occ = 0, dO = oI.size() == refI.size() ? 0 : 1;
+			for ( size_t i = 0; i < refI.size() && i < oI.size(); i++ )
+				dO += refI[i] != oI[i];
+			for ( size_t i = 0; i < refI.size() && i < ref[0].size(); i++ ) {
+				d += refI[i] != ref[0][i];
+				occ += refI[i] == 255;
+			}
+			const bool mapOn = made && drew && refI.size() == total && d >= 50 && occ > 0 && occ < total && dO == 0;
+			std::printf( "FLYBAKEVIEW I map on (mapRect %.3f %.3f %.6g 1, the arm's own GL reference): GL's bake vs gv0 (mapRect w 0, cvMap never "
+				"read): %zu of %zu texels differ (want >= 50), occupancy %zu; on the plain set vs on the fixture's own textures %zu differ (want 0): "
+				"%s\n", org[0] - cKm, org[1] - cKm, 1.0 / span, d, total, occ, dO, mapOn ? "OK" : "FAIL" );
+			ok = ok && mapOn;
+		}
 		size_t dP = 0, aP = 0, dS = 0, aS = 0;
 		const bool readOk = sameLevels( pl, dP, aP ) && sameLevels( shd, dS, aS );
 		const size_t gp = glBake( pl ), gs = glBake( shd );
@@ -714,9 +746,9 @@ int main( int argc, char ** argv )
 		ok = ok && fixture;
 		iRun( pl );  // warm
 		const IOut p = iRun( pl );
-		arm( "I plain (GL's own names) vs GL", judgeVol( 0, ref[0] ), p.ran );
+		arm( "I plain (GL's own names) vs GL", judgeVol( 0, refI ), p.ran );
 		const IOut s = iRun( shd );
-		arm( "I shared (read in place) vs GL", judgeVol( 0, ref[0] ), s.ran );
+		arm( "I shared (read in place) vs GL", judgeVol( 0, refI ), s.ran );
 		const bool cOk = p.ran && s.ran && p.copies == 3 && s.copies == 0;
 		std::printf( "FLYBAKEVIEW I copies a run: plain %d (want 3), shared %d (want 0): %s\n", p.copies, s.copies, cOk ? "OK" : "FAIL" );
 		const bool named = p.in == 0 && s.in == all3;
@@ -739,7 +771,7 @@ int main( int argc, char ** argv )
 		const bool stale = IS::mapStale( shd.m, kIn + 2, true );
 		const bool remake = make( shd, true, 0, 0, true ) && shd.s.shared && shd.d.shared && shd.m.shared;
 		const IOut g = iRun( shd );
-		const Res rg = judgeVol( 0, ref[0] );
+		const Res rg = judgeVol( 0, refI );
 		const bool green = stale && remake && g.ran && rg.diff == 0 && rg.twice && g.copies == 0 && g.in == all3;
 		std::printf( "FLYBAKEVIEW I remake after a drop: map stale %d, %zu of %zu texels differ, %d copies (want 0), read in place %s: %s\n", int( stale ),
 			rg.diff, rg.total, g.copies, IS::inPlaceNames( g.in ).c_str(), green ? "OK" : "FAIL" );
@@ -754,7 +786,7 @@ int main( int argc, char ** argv )
 			const IOut r = iRun( un );
 			const bool bit = m && ( !r.ran || r.copies != 0 || r.in != all3 );
 			std::printf( "FLYBAKEVIEW red never shared (cloudinshare red 2): %s (%d copies, want 0; read in place %s; INFO S0 %zu texels differ)\n",
-				bit ? "FAIL" : "EXACT", r.copies, IS::inPlaceNames( r.in ).c_str(), judgeVol( 0, ref[0] ).diff );
+				bit ? "FAIL" : "EXACT", r.copies, IS::inPlaceNames( r.in ).c_str(), judgeVol( 0, refI ).diff );
 			if ( !bit ) {
 				std::printf( "FLYBAKEVIEW red never shared PASSED: the gate cannot see it\n" );
 				ok = false;
@@ -766,26 +798,27 @@ int main( int argc, char ** argv )
 			spoil();
 			const bool m = make( shd, true, IS::kRedStale, 0, true );
 			const IOut r = iRun( shd );
-			redArm( "stalenoise (a noise remake not filled)", judgeVol( 0, ref[0] ), r.ran && m );
+			redArm( "stalenoise (a noise remake not filled)", judgeVol( 0, refI ), r.ran && m );
 			ok = restore() && ok;
 		}
 		{
 			spoil();
 			const bool m = make( shd, true, 0, IS::kRedStale, true );
 			const IOut r = iRun( shd );
-			redArm( "stalemap (a map remake not attached to the map's FBO)", judgeVol( 0, ref[0] ), r.ran && m );
+			redArm( "stalemap (a map remake not attached to the map's FBO)", judgeVol( 0, refI ), r.ran && m );
 			ok = restore() && ok;
 		}
 		{
 			spoil();
 			const bool m = make( shd, true, 0, 0, false );
 			const IOut r = iRun( shd );
-			redArm( "undrawnmap (a map remake not drawn again)", judgeVol( 0, ref[0] ), r.ran && m );
+			redArm( "undrawnmap (a map remake not drawn again)", judgeVol( 0, refI ), r.ran && m );
 			ok = restore() && ok;
 		}
 		for ( int k = 0; k < 3; k++ )
 			tin[static_cast<size_t>( k )].gl = own[k];
 		shapeGl = tin[0].gl;
+		setUnis( pBake, uni );
 		for ( int i = 0; i < 4; i++ )
 			WwVkPresent::sharedTargetDrop( kIn + i );
 		for ( GLuint * t : { &pl.s.tex, &pl.d.tex, &pl.m.tex } )

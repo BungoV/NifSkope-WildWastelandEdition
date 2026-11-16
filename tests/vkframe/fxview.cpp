@@ -984,6 +984,7 @@ int main( int argc, char ** argv )
 					return fatal( "a cloud program with a uniform block" );
 			}
 			const UniMap s4 = readUni( jd + "/s4.uni" ), prev = readUni( jd + "/prev.uni" ), res = readUni( jd + "/resolve.uni" );
+			const UniMap * mU = &s4;  // lane VKCLOUD11: the march's uniforms (the INPUTS arm points it at its map-on copy)
 			std::vector<TexIn> tex = readTex( jd );
 			std::vector<std::string> names = accum
 				? std::vector<std::string> { "cvMap", "cvShape", "cvDetail", "cvBlue", "cvSunView", "cvMoonView", "cvScene", "cvTrans" }
@@ -1107,7 +1108,7 @@ int main( int argc, char ** argv )
 				t.marchKey = kM;
 				t.histKey[0] = kH0;
 				t.histKey[1] = kH1;
-				bindMarch( s4 );
+				bindMarch( *mU );
 				for ( size_t k = 0; k < names.size(); k++ ) {
 					WwVkPresent::FxTex & x = t.tex[slotOf( k )];
 					if ( !WwVkPresent::fxTexOf( &ga, pM, names[k].c_str(), is3( k ) ? 1 : 0, x, why ) ) {
@@ -1465,12 +1466,22 @@ int main( int argc, char ** argv )
 					// the harness packs at 1 everywhere (main): a 4 here overran the noise-twin readback of the next variant
 					return glGetError() == GL_NO_ERROR;
 				};
+				// lane VKCLOUD11: the map on for this arm only. The job's mapRect has w 0 (cvMapAt returns the bands' cover, cvMap is never
+				// sampled), so VKCLOUD10's map reds ran blind. The rect covers the march's reach (cvMaxKm) round the camera; the arm takes
+				// its own GL reference on the plain set (aMC ..), and GL's march with it must differ from the job's (w 0) in >= 50 values.
+				UniMap s4m = s4;
+				const double reach = s4.count( "cvMaxKm" ) ? s4.at( "cvMaxKm" )[0] : 60.0;
+				const bool hasCam = s4.count( "cvCamKm" ) && s4.at( "cvCamKm" ).size() >= 2;
+				const double cx = hasCam ? s4.at( "cvCamKm" )[0] : 0.0, cy = hasCam ? s4.at( "cvCamKm" )[1] : 0.0;
+				s4m["cvBands.mapRect"] = std::vector<double> { cx - reach, cy - reach, 1.0 / ( 2.0 * reach ), 1.0 };
+				mU = &s4m;
+				std::vector<float> aMC, aMD, aHC, aHD;
 				auto glMarch = [&]( const InSet & z ) {
 					use( z );
-					bindMarch( s4 );
+					bindMarch( *mU );
 					draw( fbM, mw, mh, pM );
 					f.bindFramebuffer( fFb, 0 );
-					return compareRel( gMC, readRgba16f( mC, mw, mh ) );
+					return compareRel( aMC, readRgba16f( mC, mw, mh ) );
 				};
 				struct InOut
 				{
@@ -1510,6 +1521,26 @@ int main( int argc, char ** argv )
 				// the fixture
 				bool made = make( pl, false, 0, 0, true ) && make( shd, true, 0, 0, true );
 				made = made && shd.s.shared && shd.d.shared && shd.m.shared && !pl.s.shared && !pl.d.shared && !pl.m.shared;
+				bindMarch( *mU );  // first on the fixture's own textures (tex[] still holds own[]): the plain set must match it
+				draw( fbM, mw, mh, pM );
+				f.bindFramebuffer( fFb, 0 );
+				const std::vector<float> oMC = readRgba16f( mC, mw, mh );
+				use( pl );
+				bindMarch( *mU );
+				draw( fbM, mw, mh, pM );
+				bindResolve();
+				draw( fbH0, hw, hh, pR );
+				f.bindFramebuffer( fFb, 0 );
+				aMC = readRgba16f( mC, mw, mh );
+				aMD = readRg32f( mD, mw, mh );
+				aHC = readRgba16f( hC[0], hw, hh );
+				aHD = readRg32f( hD[0], hw, hh );
+				const Rel mp = compareRel( gMC, aMC ), mo = compareRel( oMC, aMC );
+				const bool mapOn = made && mp.n > 0 && mp.differ >= 50 && mo.n > 0 && mo.differ == 0 && glGetError() == GL_NO_ERROR;
+				std::printf( "%s %s INPUTS map on (mapRect %.3f %.3f %.6g 1, the arm's own GL reference): GL's march vs the job's (mapRect w 0, "
+					"cvMap never sampled): %zu of %zu values differ, %zu past rel 1e-3 (want >= 50); on the plain set vs on the fixture's own textures %zu of %zu differ (want 0): %s\n", gTag, var,
+					cx - reach, cy - reach, 1.0 / ( 2.0 * reach ), mp.differ, mp.n, mp.past, mo.differ, mo.n, mapOn ? "OK" : "FAIL" );
+				ok = ok && mapOn;
 				size_t dP = 0, aP = 0, dS = 0, aS = 0;
 				const bool read = sameLevels( pl, dP, aP ) && sameLevels( shd, dS, aS );
 				const Rel gp = glMarch( pl ), gs = glMarch( shd );
@@ -1530,10 +1561,10 @@ int main( int argc, char ** argv )
 					"colour, depth): %s\n", gTag, var, exact ? "EXACT" : "FAIL" );
 				ok = ok && exact;
 				if ( sS.ran ) {
-					ok = rel( "INPUTS march colour", gMC, sS.mc, false ) && ok;
-					ok = rel( "INPUTS march depth", gMD, sS.md, false ) && ok;
-					ok = rel( "INPUTS hist[0] colour", gHC, sS.hc, false ) && ok;
-					ok = rel( "INPUTS hist[0] depth", gHD, sS.hd, false ) && ok;
+					ok = rel( "INPUTS march colour", aMC, sS.mc, false ) && ok;
+					ok = rel( "INPUTS march depth", aMD, sS.md, false ) && ok;
+					ok = rel( "INPUTS hist[0] colour", aHC, sS.hc, false ) && ok;
+					ok = rel( "INPUTS hist[0] depth", aHD, sS.hd, false ) && ok;
 				}
 				const int stills = accum ? 3 : 2;  // cvShape, cvDetail (+ cvBlue): recopied only when sharedGen moved
 				const bool genMoved = pG.copies == pS.copies + stills;
@@ -1618,6 +1649,7 @@ int main( int argc, char ** argv )
 					WwVkPresent::sharedTargetDrop( kIn + i );
 				for ( GLuint * t : { &pl.s.tex, &pl.d.tex, &pl.m.tex } )
 					glDeleteTextures( 1, t );
+				mU = &s4;
 				f.bindFramebuffer( fFb, 0 );
 			}
 			for ( std::uintptr_t k : { kM, kM + 1, kH0, kH0 + 1, kH1, kH1 + 1 } )
