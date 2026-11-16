@@ -33,6 +33,13 @@
 // (rtBufOf answers only for a slot with an owner: the gate now registers one per slot, always fresh, as the app's owners
 // do) and with "an image at b65 no census name maps" (a twin fix, its own commit); DG seed 1 drew 500 distinct colours
 // (flat: the wrong-key red came out BOUND), so both keys now seed from the same rng seed per arm, not one per key.
+// Lane VKFAR29 (bar and reds unchanged): (1) red 0 on seed 1 compared the legacy fo4_cellcsm.frag against twins carrying
+// FO4MATCH1's HLSL-only terms (frt2: 9600 / 23708 samples past 1e-2); per the 11-16 ruling (HLSL is the reference) the .sh
+// builds both RT twins again with the gate-only WW_GLSL_BASE_TERMS into <out>/inc, as fargrounddraw.sh does. (2) Seeding:
+// red 1 reads every ps loose member from the vec4 before it, so the int loop bounds cellAmboCount, cellGiFineN, cellGiLoop8 and
+// cellDdgiCount read the float bits of cellCenter.y, cellRoomsDims.y, cellCtRect.y and cellClusterLog.x (~1e9 iterations a
+// pixel): the GPU hung, Vulkan covered nothing and the next submit returned DEVICE_LOST (frt2 / frt3). Seed 1 (the reds'
+// seed) sets those four components to 0; cellCtOn, cellClusterOn and cellGiRooms are off on seed 1.
 #define FLD_NO_MAIN
 #include "farloddraw.cpp"
 #undef FLD_NO_MAIN
@@ -627,6 +634,24 @@ int main( int argc, char ** argv )
 				setI( k, "cellRestirOn", 1 );
 				setI( k, "cellDdgiOn", 1 );
 				setI( k, "cellGiHalfOn", 0 );
+			}
+			if ( seed == 1 ) {	// lane VKFAR29 seeding (header): the loop bounds' vec4-earlier neighbours zero, red 1 must not hang
+				const struct { const char * n; int comps, c; } nb[4] = { { "cellCenter", 3, 1 }, { "cellRoomsDims", 3, 1 },
+					{ "cellCtRect", 4, 1 }, { "cellClusterLog", 2, 0 } };
+				int zeroed = 0;
+				for ( const auto & z : nb ) {
+					const GLint l = loc( k, z.n );
+					if ( l < 0 )
+						continue;
+					float v[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+					f.useProgram( k.p );
+					f.getUniformfv( k.p, l, v );
+					v[z.c] = 0.0f;
+					( z.comps == 2 ? f.uniform2fv : z.comps == 3 ? f.uniform3fv : f.uniform4fv )( l, 1, v );
+					zeroed++;
+				}
+				std::printf( "FARLODRTDRAW %s seed 1: %d of 4 loop-bound neighbours zeroed (cellCenter.y, cellRoomsDims.y, cellCtRect.y, "
+					"cellClusterLog.x)\n", k.tag, zeroed );
 			}
 			f.bindBuffer( 0x8892, ib );
 			ex.bufferSubData( 0x8892, 0, std::ptrdiff_t( sizeof( kInst ) ), kInst );
