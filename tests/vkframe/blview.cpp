@@ -1149,6 +1149,10 @@ int main( int argc, char ** argv )
 	for ( int tw = 0; tw < 2 && !pfxOnly; tw++ )
 		for ( int kd = 1; kd <= 6; kd++ )
 			kindOk = ( twinOk && colourGate( spvDir + "/spvapp/spirv", handles, anisoAt, aniso1H, tw, kd ) ) && kindOk;
+	// lane VKOBJ20: the decal-fade kept placements (kind 3 singles) and bands (kind 6) on the all-on route's RT GI variant
+	for ( int tw = 0; tw < 2 && !pfxOnly; tw++ )
+		for ( const int kd : { 3, 6 } )
+			kindOk = ( twinOk && colourGate( spvDir + "/spvrt/spirv", handles, anisoAt, aniso1H, tw, kd, std::string(), true ) ) && kindOk;
 	ok = kindOk && ok;
 	ok = colOk && colCsmOk && colPlain && colCsmPlain && colRt && colCsmRt && ok;
 	if ( bc && !pfxOnly ) {  // lane VKWATER3 G4: GL's fo4_cell / fo4_cellcsm against the non-bindless twins through objCellShade

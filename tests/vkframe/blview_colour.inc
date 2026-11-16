@@ -94,6 +94,16 @@ static const char * kColKindName[7] = { "", " skin", " alpha", " single", " own"
  * Vulkan's band crossings at a0, unscaled) must FAIL and move the Vulkan colour off its base. Check: the band's constant-alpha mode
  * (glBlendFunc CONSTANT_ALPHA / ONE_MINUS_CONSTANT_ALPHA, effect programs) must refuse naming the constant (`REFUSED OK`). The
  * harness calls objBlShade, not vkBlDraw: vkBlDraw's admission of a blended rigid band is the app's, read in the census. */
+/* lane VKOBJ20 (11-16; stated before its first run, never widened): kinds 3 `single` and 6 `fade` on the all-on route's RT GI variant
+ * (`colour rt single` / `colour rt fade`, both twins): GL built on the all-on key (blview.sh's spvrt) against the shipped _rt_ps twins
+ * (objBlShade's s.rt), the RT inputs of the `colour rt` row (lights, ReSTIR ratio, DDGI atlas, screen GI + key). Bars as kind 3 / kind 6
+ * (depth EXACT or BOUND, colour EXACT or BOUND 4e-3 of max(1, |GL|), lit >= 0.9 of covered, one crossing a shape / a piece, 0 failed);
+ * GL probes: each RT input off moves GL's colour on >= 20 % of the covered pixels, and kind 6's fade probe as above. Reds that must
+ * FAIL with Vulkan's colour moved off its base (a refusal or 0 moved is not a FAIL): base (13, kind 3), fade (27, kind 6), and the RT
+ * reds restir / atlas / gihalf / gikey (21 .. 24) on each row. GL's redraws (the RT key's frame, the RT probes) draw in the kind's own
+ * form (glDraws: a draw a shape / a piece with its wwDrawBase and alpha); for kind 0 that is the same one multi-draw as before. The
+ * harness calls objBlShade, not vkBlDraw: vkBlDraw's variant pick (objBlVariant, the RT twin for the decal-fade pieces only) is
+ * the app's, checked by the syntax check and the census, not by this gate. */
 void colPrintf( const char * fmt, ... )
 {
 	std::string f2( fmt );
@@ -831,14 +841,10 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 	}
 	shadeRead( gl.depth, &gl.c0, &gl.c1 );
 	glFinish();
-	auto glDraw = [&]( ColOut & o ) {  // GL's draw again (a probe, the RT row's keyed frame)
+	auto glDraw = [&]( ColOut & o ) {  // GL's draw again (a probe, the RT row's keyed frame); lane VKOBJ20: in the kind's own form
 		shadeClear();
 		frameState();
-		f.bindVertexArray( vao );
-		f.bindBuffer( 0x8F3F, sx.ind );
-		sf.multiDrawElementsIndirect( GL_TRIANGLES, GL_UNSIGNED_SHORT, nullptr, GLsizei( sx.cmds.size() / 5 ), 20 );
-		f.bindBuffer( 0x8F3F, 0 );
-		f.bindVertexArray( 0 );
+		glDraws();
 		frameOff();
 		shadeRead( o.depth, &o.c0, &o.c1 );
 		glFinish();
