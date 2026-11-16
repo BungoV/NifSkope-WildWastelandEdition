@@ -641,14 +641,12 @@ bool vkBlDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * coun
 		return false;
 	};
 	/* lane VKOBJ20: the twin variant by GL's pixel-stage key, as the run route picks it (objBlVariant: 0 the app's base key, 1 the
-	 * all-on route's RT GI key, any other key refuses by name). The RT variant is taken for the decal-fade pieces only (the kept
-	 * placements and the bands, blview `colour rt single` / `colour rt fade`); other singles on the RT key stay on GL, named */
+	 * all-on route's RT GI key, any other key refuses by name). Lane VKOBJ22: the RT variant takes every single, as the base does
+	 * (gated on that key by blview `colour rt` single / fade / skin / alpha / own / ssgi and step B's kept ranges, `colour rt stepb`) */
 	const char * no = nullptr;
 	const int variant = WwVkPresent::objBlVariant( prog->wwDefs, no );
 	if ( variant < 0 )
 		return refuse( no );
-	if ( variant == 1 && !fadeBand )
-		return refuse( "the RT GI variant on a single outside the decal fade: not gated on the bl route" );
 	// lane VKOBJ19: a decal-fade piece blends by its own alpha (GL's loose alpha, mirrored per call by objBlLoose)
 	if ( rigid && !fadeBand && gf->glIsEnabled( GL_BLEND ) )
 		return refuse( "a blended rigid shape (the opaque route only)" );
