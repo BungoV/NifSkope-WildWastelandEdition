@@ -44,7 +44,7 @@ bool loadMore()
 	return ex.genVertexArrays && ex.bindVertexArray && ex.vertexAttribPointer && ex.enableVertexAttribArray && ex.blitFramebuffer;
 }
 
-constexpr GLenum kArrayBuf = 0x8892, kElemBuf = 0x8893, kReadFb = 0x8CA8, kDrawFb = 0x8CA9, kR8ui = 0x8232, kRedInt = 0x8D94;
+constexpr GLenum kArrayBuf = 0x8892, kElemBuf = 0x8893, kR8ui = 0x8232, kRedInt = 0x8D94;
 
 const char * kSceneFs = "#version 410 core\n"
 	"uniform vec2 sz; uniform int seed; out vec4 o;\n"
