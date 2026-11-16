@@ -78,6 +78,8 @@
 // lane VKCLOUD2: the march with the fly-through box (cloud_fly / cloud_fly_a)
 #include "features/vkframe/cloud_fly_view_ps.spv.h"
 #include "features/vkframe/cloud_fly_a_view_ps.spv.h"
+#include "features/vkframe/cloud_flybake_view_ps.spv.h"  // lane VKCLOUD5: the fly box's bake (vkcloudflybake.inc)
+#include "features/vkframe/cloud_flysdf_view_ps.spv.h"
 // lane VKFAR1: the far bulb dots as instanced quads (cell_fardots)
 #include "features/vkframe/fardots_view_vs.spv.h"
 #include "features/vkframe/fardots_view_ps.spv.h"
@@ -785,6 +787,8 @@ bool cfRecord( std::string & why );  // lane VKFAR2 (vkcloudfront.inc): fxWork's
 bool precipRecord( std::string & why );  // lane VKFAR2 (vkprecip.inc): fxWork's kind 8, rain / snow
 bool underRecord( std::string & why );  // lane VKWATER4 (vkunder.inc): fxWork's kind 10, the underwater fog
 bool taRecord( std::string & why );  // lane VKFAR7 (vktaareactive.inc): fxWork's kind 11, the TAA mask's reactive pass
+bool flyBakeRecord( std::string & why );  // lane VKCLOUD5 (vkcloudflybake.inc): fxWork's kind 19, the fly box's bake
+void flyBakeDrop();  // lane VKCLOUD5 (vkcloudflybake.inc): the bake's slice views and framebuffers
 void waterDrop();
 void underDrop();  // lane VKWATER4 (vkunder.inc)
 void objDrop();  // lane VKOBJ1
@@ -3939,6 +3943,7 @@ void shutdown()
 	fxDrop();   // lane VKAIR1: the air's and the clouds' crossing semaphores and framebuffers
 	waterDrop();  // lane VKWATER3: the water draw's buffers (GL's names); pipelines and samplers stay with the device
 	underDrop();  // lane VKWATER4 (L7): the underwater draw's framebuffer, depth view and host buffer
+	flyBakeDrop();  // lane VKCLOUD5: the fly bake's slice views and framebuffers
 }
 
 bool viewBegin( int w, int h, int samples, GlProc gp, std::string & why )
@@ -5705,7 +5710,7 @@ struct Fx
 	VkFence fence = VK_NULL_HANDLE;
 	bool pending = false;
 	// this run's job, written by the drawing thread before the hand
-	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1), 3 the far cards (lane VKFAR2), 4 the water draw (lane VKWATER3), 6 the fog bloom (lane VKFAR2), 8 rain / snow (lane VKFAR2), 9 the far ground (lane VKFAR3), 10 the underwater fog (lane VKWATER4), 11 the TAA mask's reactive pass (lane VKFAR7)
+	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1), 3 the far cards (lane VKFAR2), 4 the water draw (lane VKWATER3), 6 the fog bloom (lane VKFAR2), 8 rain / snow (lane VKFAR2), 9 the far ground (lane VKFAR3), 10 the underwater fog (lane VKWATER4), 11 the TAA mask's reactive pass (lane VKFAR7), 19 the fly box's bake (lane VKCLOUD5)
 	VkFramebuffer fbAir = VK_NULL_HANDLE, fbM = VK_NULL_HANDLE, fbR = VK_NULL_HANDLE;
 	int w = 0, h = 0, vp[4] = {}, stencilRef = 1, march = kFxMarch, resolve = kFxResolve, mw = 0, mh = 0, hw = 0, hh = 0;
 	bool blend = false, skipMarch = false;
@@ -6181,6 +6186,11 @@ bool fxWork( std::string & why )
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
 		}
+	} else if ( F.kind == 19 ) {  // lane VKCLOUD5: the fly box's bake, one render pass a slice
+		if ( !flyBakeRecord( why ) ) {
+			v.vkEndCommandBuffer( F.cmd );
+			return false;
+		}
 	} else {
 		if ( !F.fbR || ( !F.skipMarch && !F.fbM ) ) {
 			v.vkEndCommandBuffer( F.cmd );
@@ -6645,6 +6655,7 @@ FxStat takeCloudStat()
 #include "features/vkframe/vkfarcardsdraw.inc"  // lane VKFAR2: the far cards drawn on the view
 #include "features/vkframe/vkfogbloom.inc"  // lane VKFAR2 (row P4b): the fog bloom's own pass
 #include "features/vkframe/vkcloudfront.inc"  // lane VKFAR2 (row P8): the clouds in front of the scene
+#include "features/vkframe/vkcloudflybake.inc"  // lane VKCLOUD5: the fly-through box's bake
 #include "features/vkframe/vkprecip.inc"  // lane VKFAR2 (row L8 slice 1): rain / snow on the view
 
 // lane VKLIGHT1: AO, the contact shadow lines and the SSGI cast as compute on the present device (vkpresent.h LightRun)
