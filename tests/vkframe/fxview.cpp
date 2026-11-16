@@ -1241,6 +1241,105 @@ int main( int argc, char ** argv )
 				std::printf( "%s %s INFO Vulkan's fly vs GL's plain march: %zu of %zu values differ, %zu past rel 1e-3\n", gTag, var,
 					vb.differ, vb.n, vb.past );
 			}
+			// lane VKCLOUD8: cfSdf handed in as a shared target (the app's cloudfly vol[pub] is one since fe65de38): cloudRun
+			// reads it in place (farSharedOf), so a run makes exactly one texture copy fewer than the plain twin's run. Bars:
+			// the fixture (GL's march on the shared field EXACT vs on its own), Vulkan's outputs on the shared field EXACT vs
+			// its outputs on the copied twin (both read GL's texels) and the plain arm's rules vs GL, copies plain - 1.
+			// Reds, each must FAIL: 32 = cloudRun skips the lookup (the copy bar), clear = the shared field rewritten to 255
+			// after GL drew (an in-place read sees it: the march moves off GL's). Warm run first: making the shared target
+			// moves sharedGen, so the next run recopies the still noise.
+			if ( fly ) {
+				using ClearTex = void( WINAPI * )( GLuint, GLint, GLenum, GLenum, const void * );
+				const ClearTex clearTex = reinterpret_cast<ClearTex>( glProc( "glClearTexImage" ) );
+				if ( !clearTex )
+					return fatal( "glClearTexImage" );
+				static char sdfKeys[4];
+				const size_t k = names.size() - 1;
+				const int nx = tex[k].w, ny = tex[k].h, nz = tex[k].d;
+				const std::uintptr_t kS = reinterpret_cast<std::uintptr_t>( &sdfKeys[a] );
+				GLuint sS = 0;
+				if ( !WwVkPresent::sharedTarget( kS, 1, nx, ny, nz, fR8, sS, why, 1 ) )
+					return fatal( "the shared field: " + why );
+				glBindTexture( fT3D, sS );
+				texParams( fT3D, tex[k].filt == "linear", tex[k].wrap == "repeat", false );
+				f.copyImageSubData( tex[k].gl, fT3D, 0, 0, 0, 0, sS, fT3D, 0, 0, 0, 0, nx, ny, nz );
+				std::vector<unsigned char> x( static_cast<size_t>( nx ) * ny * nz ), y( x.size() );
+				glBindTexture( fT3D, tex[k].gl );
+				glGetTexImage( fT3D, 0, fRed, GL_UNSIGNED_BYTE, x.data() );
+				glBindTexture( fT3D, sS );
+				glGetTexImage( fT3D, 0, fRed, GL_UNSIGNED_BYTE, y.data() );
+				size_t fd = 0;
+				for ( size_t i = 0; i < x.size(); i++ )
+					fd += x[i] != y[i];
+				const GLuint own = tex[k].gl;
+				tex[k].gl = sS;  // bindMarch binds it on cfSdf's unit: GL draws and fxTexOf reads the shared name
+				bindMarch( s4 );
+				draw( fbM, mw, mh, pM );
+				f.bindFramebuffer( fFb, 0 );
+				const Rel gs = compareRel( gMC, readRgba16f( mC, mw, mh ) );
+				const bool fixture = fd == 0 && gs.n > 0 && gs.differ == 0 && glGetError() == GL_NO_ERROR;
+				std::printf( "%s %s SHARED fixture: cfSdf copied into a shared target (%zu of %zu texels differ), GL's march on it vs on "
+					"its own (%zu of %zu values differ): %s\n", gTag, var, fd, x.size(), gs.differ, gs.n, fixture ? "EXACT" : "FAIL" );
+				ok = ok && fixture;
+				struct Out
+				{
+					bool ran = false;
+					int copies = 0;
+					std::vector<float> mc, md, hc, hd;
+				};
+				auto run = [&]( int red, GLuint field ) {
+					tex[k].gl = field;
+					Out o;
+					const int c0 = fx().st[1].copies;
+					o.ran = runVk( red, false );
+					o.copies = fx().st[1].copies - c0;
+					if ( o.ran ) {
+						o.mc = readRgba16f( sMC, mw, mh );
+						o.md = readRg32f( sMD, mw, mh );
+						o.hc = readRgba16f( sHC[0], hw, hh );
+						o.hd = readRg32f( sHD[0], hw, hh );
+					}
+					return o;
+				};
+				const Out warm = run( 0, own );
+				const Out plain = run( 0, own );
+				const Out sh = run( 0, sS );
+				const Out r32 = run( 32, sS );
+				auto same = [&]( const std::vector<float> & p, const std::vector<float> & q ) {
+					const Rel r = compareRel( p, q );
+					return r.n > 0 && r.differ == 0;
+				};
+				const bool exact = plain.ran && sh.ran && same( plain.mc, sh.mc ) && same( plain.md, sh.md ) && same( plain.hc, sh.hc )
+					&& same( plain.hd, sh.hd );
+				std::printf( "%s %s SHARED outputs on the shared field vs on the copied twin (march colour, depth, hist[0] colour, depth): %s\n",
+					gTag, var, exact ? "EXACT" : "FAIL" );
+				ok = ok && exact;
+				if ( sh.ran ) {
+					ok = rel( "SHARED march colour", gMC, sh.mc, false ) && ok;
+					ok = rel( "SHARED march depth", gMD, sh.md, false ) && ok;
+					ok = rel( "SHARED hist[0] colour", gHC, sh.hc, false ) && ok;
+					ok = rel( "SHARED hist[0] depth", gHD, sh.hd, false ) && ok;
+				}
+				const bool fewer = warm.ran && plain.ran && sh.ran && plain.copies > 0 && sh.copies == plain.copies - 1;
+				std::printf( "%s %s SHARED copies a run: warm %d, plain twin %d, shared %d (want plain - 1): %s\n", gTag, var, warm.copies,
+					plain.copies, sh.copies, fewer ? "OK" : "FAIL" );
+				ok = ok && fewer;
+				const bool red32 = !r32.ran || r32.copies != plain.copies - 1;
+				std::printf( "%s RED %s %s cloudRun skips the shared lookup (%s; %d copies, plain %d; must FAIL)\n", gTag, red32 ? "FAIL" : "OK",
+					var, r32.ran ? "ran" : "did not run", r32.copies, plain.copies );
+				ok = ok && red32;
+				const unsigned char full = 255;
+				clearTex( sS, 0, fRed, GL_UNSIGNED_BYTE, &full );
+				const Out rc = run( 0, sS );
+				const Rel c = compareRel( gMC, rc.mc ), mv = compareRel( sh.mc, rc.mc );
+				const bool redClear = !rc.ran || !c.ok();
+				std::printf( "%s RED %s %s the shared field rewritten to 255 after GL drew (%s; march %zu of %zu past rel 1e-3 vs GL, %zu values "
+					"moved vs the shared run; must FAIL)\n", gTag, redClear ? "FAIL" : "BOUND", var, rc.ran ? "ran" : "did not run", c.past,
+					c.n, mv.differ );
+				ok = ok && redClear;
+				tex[k].gl = own;
+				WwVkPresent::sharedTargetDrop( kS );
+			}
 			for ( std::uintptr_t k : { kM, kM + 1, kH0, kH0 + 1, kH1, kH1 + 1 } )
 				WwVkPresent::sharedTargetDrop( k );
 			for ( char & k : twins[a] )
