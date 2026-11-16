@@ -7,11 +7,14 @@
 // Mode 2's data as cellfarground.cpp makes it: fgCells RGBA16UI 3 x 3 (r pool 0 none / 1 near / 2 far, g layer, b fade),
 // fgPagesN / fgPagesF BC1 (0x83F0) 2D arrays (256 / 128 px, 3 layers, mips to 4 px, LINEAR_MIPMAP_LINEAR, CLAMP, anisotropy
 // 8) of one smooth field a layer, its 2x2-box mip chain, each level BC1-encoded (never random blocks). fgGridMap puts the
-// cell corner (5000, 7900) inside the fixture's world square: on screen a near cell, a far cell, a cell with no page (the
+// cell corner (5000, 7400) inside the fixture's world square: on screen a near cell, a far cell, a cell with no page (the
 // sheet) and a near cell faded 140 / 255 over the sheet. fgCells is a shared target as on the view (GL on it vs GL on a plain
 // twin must be EXACT; the plain-twin run copies exactly one more image); the pools are copied a run until they are shared.
 // GL probes (each must move >= 1 sample, seed 1): the near pool rewritten, the far pool rewritten, the no-page cell given a
-// page (each part of the fixture is on screen and read).
+// page, the faded cell at full fade (each part of the fixture is on screen and read).
+// One seeded world with fargrounddraw (two programs, one world): where mode 1's sampler list had fgAtlas, fgDecal, fgGrid,
+// fgLtex, mode 2's has fgCells, fgPagesF, fgPagesN; throwaway fills of mode 1's three filled specs draw the same rng there,
+// so every later sampler and uniform equals the mode-1 gate's seed (fgp1 without it: seed 1 a flat grade, 137 distinct).
 // Bar (farloddraw's, never widened): covered >= 1000; one side only <= 0.05 %; depth within 1 D24 unit; colour rel <= 1e-2 on
 // >= 99.9 % of the samples covered on both sides; GL >= 1000 distinct colours over the ground. The draw is opaque (no blend:
 // no 4x blend-merge reference needed).
@@ -30,9 +33,11 @@ namespace fgd
 using namespace fv;
 using namespace fld;
 
-// a cell is 4096 world units (cell_farground.glsl); the world square (4350..5650, 7150..8600) straddles (5000, 7900)
+// a cell is 4096 world units (cell_farground.glsl); the world square (4350..5650, 7150..8600) straddles (5000, 7400), the
+// corner in front of the slab (the left half's occluder at view z -700 = world y 7700; fgp1 had it at 7900: the no-page
+// cell sat behind the slab and its probe moved 0)
 const int kCn = 3, kSideN = 256, kSideF = 128, kLayers = 3;
-const float kOx = 5000.0f - 4096.0f, kOy = 7900.0f - 4096.0f, kSpacing = 128.0f, kTiling = 400.0f;
+const float kOx = 5000.0f - 4096.0f, kOy = 7400.0f - 4096.0f, kSpacing = 128.0f, kTiling = 400.0f;
 
 int levelsOf( int side )
 {
@@ -65,6 +70,14 @@ std::vector<std::uint16_t> cellsPaged()
 {
 	std::vector<std::uint16_t> c = cellsData( false );
 	c[size_t( ( 1 * kCn + 0 ) * 4 )] = 1;
+	return c;
+}
+
+// the faded cell at full fade (the probe that it is on screen)
+std::vector<std::uint16_t> cellsUnfaded()
+{
+	std::vector<std::uint16_t> c = cellsData( false );
+	c[size_t( ( 1 * kCn + 1 ) * 4 + 2 )] = 255;
 	return c;
 }
 
@@ -662,11 +675,29 @@ int main( int argc, char ** argv )
 		return st;
 	};
 	take();
+	// mode 1's three filled far-ground samplers as fargrounddraw.cpp makes them (throwaways: only their rng draws matter)
+	std::vector<Smp> mode1;
+	for ( const auto & nt : { std::pair<const char *, GLenum>( "fgAtlas", 0x8B5E ), { "fgDecal", 0x8DC2 }, { "fgLtex", 0x8DC1 } } ) {
+		Smp m;
+		m.name = nt.first;
+		m.glType = nt.second;
+		if ( !smpOf( m, W, H ) )
+			return fatal( std::string( "mode 1's throwaway " ) + nt.first );
+		if ( m.name == "fgLtex" )
+			m.fmt = 0x8058, m.w = m.h = 64, m.d = 4, m.levels = 7;
+		else if ( m.name == "fgAtlas" )
+			m.fmt = 0x8058, m.w = m.h = 64, m.levels = 7;
+		mode1.push_back( m );
+	}
 	for ( int seed = 1; seed <= 2; seed++ ) {
 		std::mt19937 rng( 20261114u + std::uint32_t( seed ) * 7919u
 			+ std::uint32_t( getenv( "FLD_SEED" ) ? std::atoi( getenv( "FLD_SEED" ) ) : 0 ) );
 		for ( Smp & s : smp ) {
 			const int at = int( &s - smp.data() );
+			if ( at == iCells )	// mode 1's fgAtlas, fgDecal, (fgGrid skipped), fgLtex drew the rng here: the same draws
+				for ( Smp & m : mode1 )
+					if ( !fill( m, rng ) )
+						return fatal( "mode 1's throwaway " + m.name );
 			if ( at == iCells || at == iPagesN || at == iPagesF )	// made above, contents below
 				continue;
 			if ( !fill( s, rng ) )
@@ -675,7 +706,8 @@ int main( int argc, char ** argv )
 		std::mt19937 rngPg( 4242u + std::uint32_t( seed ) );	// a side rng: GL's sampler order seeds nothing here
 		std::uniform_real_distribution<float> uPh( 0.0f, 1.0f );
 		const float phN = uPh( rngPg ), phF = uPh( rngPg );
-		const std::vector<std::uint16_t> cells = cellsData( false ), cellsRed = cellsData( true ), cellsPg = cellsPaged();
+		const std::vector<std::uint16_t> cells = cellsData( false ), cellsRed = cellsData( true ), cellsPg = cellsPaged(),
+			cellsFull = cellsUnfaded();
 		const std::vector<std::vector<std::uint8_t>> pagesN = pagesData( kSideN, phN ), pagesNRed = pagesData( kSideN, phN + 0.37f ),
 			pagesF = pagesData( kSideF, phF ), pagesFRed = pagesData( kSideF, phF + 0.37f );
 		putCells( cells );
@@ -782,6 +814,7 @@ int main( int argc, char ** argv )
 			probe( "near pool rewritten", [&]() { putPages( iPagesN, pagesNRed ); }, [&]() { putPages( iPagesN, pagesN ); } );
 			probe( "far pool rewritten", [&]() { putPages( iPagesF, pagesFRed ); }, [&]() { putPages( iPagesF, pagesF ); } );
 			probe( "the no-page cell given a page", [&]() { putCells( cellsPg ); }, [&]() { putCells( cells ); } );
+			probe( "the faded cell at full fade", [&]() { putCells( cellsFull ); }, [&]() { putCells( cells ); } );
 		}
 
 		int copiesShared = -1, copiesPlain = -1;
