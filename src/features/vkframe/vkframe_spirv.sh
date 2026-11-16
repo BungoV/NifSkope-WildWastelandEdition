@@ -334,6 +334,22 @@ ls -la aodecal_view_ps.spv.h aodecal_view_vs.spv.h
 fxg volmask_view_ps ao/cell_givol_ps
 fxt volmask_view_vs ao/cell_givol_vs
 ls -la volmask_view_ps.spv.h volmask_view_vs.spv.h
+# lane VKAIR5: the air inject's stage 0 (cell_volair.prog, cellvolair.cpp vaPassInner, vkairinject.inc) on fxg / fxt's shifts. The
+# loader's default key adds WW_CELL_AIR_SKYVIEW: fxa = fxg's flags + it, fxar = fxr's flags (the all-on RT GI key) + it
+fxa() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T ps_6_0 -E main -fvk-b-shift 0 0 -fvk-t-shift 64 0 -fvk-s-shift 128 0 -fvk-u-shift 192 0 -fspv-preserve-bindings -D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 -D WW_CELL_AIR_SKYVIEW=1 -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxar() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T ps_6_0 -E main -fvk-b-shift 0 0 -fvk-t-shift 64 0 -fvk-s-shift 128 0 -fvk-u-shift 192 0 -fspv-preserve-bindings -D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 -D WW_CELL_RESTIR=1 -D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_AIR_SKYVIEW=1 -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxa airinject_view_ps air/cell_volair_ps
+fxar airinject_view_rt_ps air/cell_volair_ps
+fxt airinject_view_vs air/cell_volair_vs
+ls -la airinject_view_ps.spv.h airinject_view_rt_ps.spv.h airinject_view_vs.spv.h
 # lane VKFAR7: the TAA mask's reactive pass (taainputs.cpp pass 4, vktaareactive.inc): pixel stage on fx()'s shifts (b31 at 31,
 # BaseMap at 64 / 128), vertex stage on fxb()'s (its b31 at 32)
 fx taareactive_view_ps post/taa_reactive_ps

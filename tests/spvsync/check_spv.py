@@ -143,6 +143,13 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 VKFRAME_FXR_ARGS = VKFRAME_FXG_ARGS + ['-D', 'WW_CELL_RESTIR=1', '-D', 'WW_CELL_RTDDGI=1', '-D', 'WW_CELL_RTDDGI_CASCADES=1']
 VKFRAME_FXR = {'reflrelight_view_rt_ps': 'reflections/cell_reflrelight_ps'}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXR]
+# lane VKAIR5: the air inject's `fxa` / `fxar` lines, fxg's / fxr's flags + the air program's AIR_SKYVIEW (its default key)
+VKFRAME_FXA_ARGS = VKFRAME_FXG_ARGS + ['-D', 'WW_CELL_AIR_SKYVIEW=1']
+VKFRAME_FXA = {'airinject_view_ps': 'air/cell_volair_ps'}
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXA]
+VKFRAME_FXAR_ARGS = VKFRAME_FXR_ARGS + ['-D', 'WW_CELL_AIR_SKYVIEW=1']
+VKFRAME_FXAR = {'airinject_view_rt_ps': 'air/cell_volair_ps'}
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXAR]
 # lane VKFAR3 G3: their vertex stage, the script's `fxt <name> <dir/file>` lines (t at 200, s at 216: past the pixel
 # stage's declared images 64..126 and samplers 128..190; used or not, every declared binding is in the merged set)
 VKFRAME_FXT_ARGS = ['-fvk-b-shift', '256', '0', '-fvk-t-shift', '200', '0', '-fvk-s-shift', '216', '0', '-fvk-u-shift', '240', '0',
@@ -150,7 +157,8 @@ VKFRAME_FXT_ARGS = ['-fvk-b-shift', '256', '0', '-fvk-t-shift', '200', '0', '-fv
 VKFRAME_FXT = {'fargnd_view_vs': 'core/water_view_vs', 'reflrelight_view_vs': 'reflections/cell_reflrelight_vs',
 	'reflcap_view_vs': 'reflections/cell_reflcap_vs',	# lane VKFAR21
 	'aodecal_view_vs': 'ao/cell_aodecal_vs',	# lane VKAO3
-	'volmask_view_vs': 'ao/cell_givol_vs'}	# lane VKAO4
+	'volmask_view_vs': 'ao/cell_givol_vs',	# lane VKAO4
+	'airinject_view_vs': 'air/cell_volair_vs'}	# lane VKAIR5
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXT]
 # lane VKFAR2 P9: the lens-flare sprites, the script's `fxf <name> <dir/file> <profile>` lines (no shifts, no options)
 VKFRAME_FXF = {'lensflare_view_vs': ('post/lens_flare_view_vs', 'vs_6_0'), 'lensflare_view_ps': ('post/lens_flare', 'ps_6_0')}
@@ -346,6 +354,12 @@ def script_ok(tree):
 	rlines = dict(re.findall(r'^fxr ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
 	if rlines != VKFRAME_FXR:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxr lines (%s) are not this checker\'s RT GI pixel twins' % ' '.join(sorted(rlines)))
+	for fn, args, tab in (('fxa', VKFRAME_FXA_ARGS, VKFRAME_FXA), ('fxar', VKFRAME_FXAR_ARGS, VKFRAME_FXAR)):	# lane VKAIR5
+		if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T ps_6_0 -E main ' + ' '.join(args) + ' -Fo "$1.spv" ' not in vf:
+			bad.append('src/features/vkframe/vkframe_spirv.sh: its %s() compile line changed' % fn)
+		alines = dict(re.findall(r'^' + fn + r' ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
+		if alines != tab:
+			bad.append('src/features/vkframe/vkframe_spirv.sh: its %s lines (%s) are not this checker\'s air inject pixel twins' % (fn, ' '.join(sorted(alines))))
 	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main ' + ' '.join(VKFRAME_FXT_ARGS) + ' -Fo "$1.spv" ' not in vf:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxt() compile line changed')
 	tlines = dict(re.findall(r'^fxt ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
@@ -562,6 +576,12 @@ def main(argv):
 			if k in VKFRAME_FXR:
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXR[k] + '.hlsl')
 				hdefs = VKFRAME_FXR_ARGS
+			if k in VKFRAME_FXA:
+				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXA[k] + '.hlsl')
+				hdefs = VKFRAME_FXA_ARGS
+			if k in VKFRAME_FXAR:
+				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXAR[k] + '.hlsl')
+				hdefs = VKFRAME_FXAR_ARGS
 			if k in VKFRAME_FXT:
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXT[k] + '.hlsl')
 				hdefs = VKFRAME_FXT_ARGS
@@ -587,7 +607,7 @@ def main(argv):
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXD[k] + '.hlsl')
 				hdefs = VKFRAME_FXD_ARGS
 				m = re.match(r'(ds_6_0)', 'ds_6_0')
-			if k in VKFRAME_FXG or k in VKFRAME_FXR:
+			if k in VKFRAME_FXG or k in VKFRAME_FXR or k in VKFRAME_FXA or k in VKFRAME_FXAR:
 				m = re.match(r'(ps_6_0)', 'ps_6_0')
 			if k in VKFRAME_FXS:
 				m = re.match(r'(cs_6_0)', 'cs_6_0')

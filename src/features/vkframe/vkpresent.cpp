@@ -9640,3 +9640,4 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 #include "features/vkframe/vkreflcapture.inc"  // lane VKFAR22: the reflection probes' G-buffer capture into the shared cubes
 #include "features/vkframe/vkaodecal.inc"  // lane VKAO3: the baked AO decals (cellaodecalgl.cpp)
 #include "features/vkframe/vkvolmask.inc"  // lane VKAO4: the GI volume mask (ao.cpp giVolMaskPass)
+#include "features/vkframe/vkairinject.inc"  // lane VKAIR5: the air inject's stage 0 (cellvolair.cpp vaPassInner)
