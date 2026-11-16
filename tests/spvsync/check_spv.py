@@ -134,6 +134,7 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 # lane VKFAR3 G3: the far ground's pixel stages, the script's `fxg <name> <dir/file>` lines (fxk()'s shifts + the app's variant)
 VKFRAME_FXG_ARGS = VKFRAME_SKY_ARGS + ['-fspv-preserve-bindings', '-D', 'WW_CELL_FOGLEAK=1', '-D', 'WW_FRAME_UBO=1']
 VKFRAME_FXG = {'fargnd_view_ps': 'far-ground/fo4_cellcsmfgl_ps',
+	'fargndp_view_ps': 'far-ground/fo4_cellcsmfgp_ps',	# lane VKGROUND3: far ground mode 2 (live, cached pages)
 	'reflrelight_view_ps': 'reflections/cell_reflrelight_ps',	# lane VKFAR16: the probe relight
 	'reflcap_view_ps': 'reflections/cell_reflcap_ps',	# lane VKFAR21: the probe G-buffer capture
 	'aodecal_view_ps': 'ao/cell_aodecal_ps',	# lane VKAO3: the baked AO decals

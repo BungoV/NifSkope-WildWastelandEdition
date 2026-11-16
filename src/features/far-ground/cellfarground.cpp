@@ -154,14 +154,15 @@ void delTex( NifSkopeOpenGLContext::GLFunctions * fn, GLuint & t, qint64 & bytes
 	bytes = 0;
 }
 
-// lane VKFAR3: the shared inputs' keys, three a Gpu (a Gpu is copied into the graveyard: its address is no key)
-constexpr int kVkSlots = 256;
-char g_vkKeys[3 * kVkSlots];
+// lane VKFAR3: the shared inputs' keys, six a Gpu (a Gpu is copied into the graveyard: its address is no key). Lane
+// VKGROUND3: 3 -> 6, slots 3..5 (bits 8, 16, 32) for mode 2's cell table and page pools
+constexpr int kVkSlots = 256, kVkKeysPer = 6;
+char g_vkKeys[kVkKeysPer * kVkSlots];
 bool g_vkUsed[kVkSlots];
 
 std::uintptr_t vkKeyOf( const Gpu & g, int slot )
 {
-	return reinterpret_cast<std::uintptr_t>( g_vkKeys + 3 * g.vkSlot + slot );
+	return reinterpret_cast<std::uintptr_t>( g_vkKeys + kVkKeysPer * g.vkSlot + slot );
 }
 
 //! a shared input goes with its target (its GL name too); one a present shutdown already took is only forgotten
@@ -1537,10 +1538,82 @@ bool wantsFrames( Scene * scene )
 	return it != docs().constEnd() && it->gpu.ready == 3 && it->gpu.busy;
 }
 
+/* lane VKGROUND3: a ring-0 shape of mode 2 (Show > Far ground: Live, cached pages; fo4_cellcsmfgp) on the Vulkan view, one
+ * crossing a shape (red WW_VKVIEW_FARGROUNDLIVE_RED=1). Its inputs are the cell table and the two page pools: never copied
+ * a draw, so the draw waits on GL until they are on the present device (key slots 3..5) */
+static bool vkDrawLive( Scene * scene, NifSkopeOpenGLContext::Program * prog, int indexCount, long long idxOff, int baseVertex )
+{
+	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_FARGROUNDLIVE_RED" ) ) {
+		WwVkPresent::farGroundLiveSay( false, "red WW_VKVIEW_FARGROUNDLIVE_RED=1 or the view not on Vulkan" );
+		return false;
+	}
+	auto fn = scene->renderer->fn;
+	const char * no = nullptr;
+	unsigned int color = 0;
+	constexpr int kPagesShared = 8 | 16 | 32;	// slots 3, 4, 5: fgCells, fgPagesN, fgPagesF
+	if ( std::string_view( prog->name ) != "fo4_cellcsmfgp.prog" )
+		no = "no sun shadows (fo4_cellfgp.prog): the twin is fo4_cellcsmfgp.prog only";
+	else if ( prog->wwBindless )
+		no = "a bindless program (no Vulkan twin)";
+	else if ( !wwFogLeakShaderDefine() )
+		no = "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan twin";
+	else if ( !prog->wwShadowFrame )
+		no = "WW_FRAME_UBO off: GL's program is not the Vulkan twin";
+	else if ( prog->wwDefs != "WW_CELL_FOGLEAK+WW_FRAME_UBO" )	// RT GI / ReSTIR keys read inputs the twin has no slot for
+		no = "an RT GI / ReSTIR key in GL's program (cellDdgiAtlas, cellRestir, cellGiHalf): the twin is the base key only";
+	else if ( idxOff & 1 )
+		no = "an odd element offset";
+	else if ( const auto dit = docs().constFind( scene->nifModel );
+		dit == docs().constEnd() || ( dit->gpu.vkShared & kPagesShared ) != kPagesShared ) {
+		no = "the cell table or page pools are not on the present device (not shared yet)";	// never a copy a draw
+	} else {
+		GLint drawFb = 0;
+		fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFb );
+		color = wwCellHdrVkToneColor( GLuint( drawFb ) );
+		if ( !color )
+			no = "the draw target is not the shared tone frame";
+	}
+	if ( !no ) {
+		GLint cur = 0;
+		fn->glGetIntegerv( GL_CURRENT_PROGRAM, &cur );
+		if ( GLuint( cur ) != prog->id )
+			no = "another program at the shape's draw";
+	}
+	if ( no ) {
+		vkFlush();	// mode 1's queued tiles first (GL's order)
+		WwVkPresent::farGroundLiveOnGl( no );
+		WwVkPresent::farGroundLiveSay( true, nullptr );
+		return false;
+	}
+	static WwVkPresent::WaterRun r;
+	static char keys[192];	// the twins' keys (key + slot index)
+	r = WwVkPresent::WaterRun();
+	WwVkPresent::farGroundLiveStateOf( fn, prog->id, r );
+	wwCellHdrFrameSize( r.w, r.h );
+	r.color = color;
+	WwVkPresent::WaterCmd c;
+	c.count = std::uint32_t( indexCount );
+	c.instanceCount = 1;
+	c.firstIndex = std::uint32_t( idxOff / 2 );
+	c.baseVertex = baseVertex;
+	r.cmds.push_back( c );
+	r.key = reinterpret_cast<std::uintptr_t>( keys );
+	std::string why;
+	const bool ok = WwVkPresent::farGroundLiveRun( r, why );	// flushes mode 1's queue first
+	if ( !ok )
+		WwVkPresent::farGroundLiveOnGl( why.c_str() );
+	else
+		PassTime::countDraw( 1 );
+	WwVkPresent::farGroundLiveSay( true, nullptr );
+	return ok;
+}
+
 bool vkDraw( Scene * scene, NifSkopeOpenGLContext::Program * prog, int block, int indexCount, long long idxOff, int baseVertex )
 {
 	if ( !scene || !scene->renderer || !prog || !ring0( scene->nifModel, block ) )
 		return false;
+	if ( const std::string_view pn( prog->name ); pn == "fo4_cellcsmfgp.prog" || pn == "fo4_cellfgp.prog" )
+		return vkDrawLive( scene, prog, indexCount, idxOff, baseVertex );	// lane VKGROUND3: mode 2, its own route and red
 	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_FARGROUND_RED" ) ) {
 		WwVkPresent::farGroundSay( false, "red WW_VKVIEW_FARGROUND_RED=1 or the view not on Vulkan" );
 		return false;
@@ -1551,8 +1624,6 @@ bool vkDraw( Scene * scene, NifSkopeOpenGLContext::Program * prog, int block, in
 	unsigned int color = 0;
 	if ( name == "fo4_cellcsmfgc.prog" || name == "fo4_cellfgc.prog" )
 		no = "red oldpages (fo4_cellcsmfgc, FARDRAW1's decal-only pages: no Vulkan twin)";
-	else if ( name == "fo4_cellcsmfgp.prog" || name == "fo4_cellfgp.prog" )
-		no = "Live, cached pages (fo4_cellcsmfgp: no Vulkan twin yet)";
 	else if ( name != "fo4_cellcsmfgl.prog" )
 		no = "not the shader-decals twin (Baked sheet, or no sun shadows: fo4_cellcsmfgl.prog only)";
 	else if ( prog->wwBindless )

@@ -682,6 +682,7 @@ WaterDraw & farLodD()
 	return D;
 }
 WaterDraw & farGroundD();  // lane VKFAR3 (vkfarground.inc): fxWork's kind 9
+WaterDraw & farGroundPD();  // lane VKGROUND3 (vkfarground.inc): kind 12, far ground mode 2 (cached pages)
 
 VkFormat waterAttrFormat( const WwVkPresent::WaterAttrib & a )
 {
@@ -1119,7 +1120,7 @@ bool ringsRecord( std::string & why )
 {
 	Vk & v = vk();
 	Fx & F = fx();
-	WaterDraw & D = F.kind == 9 ? farGroundD() : farLodD();  // BATCH1114: the water has its own copy (kind 4 never comes here)
+	WaterDraw & D = F.kind == 9 ? farGroundD() : F.kind == 12 ? farGroundPD() : farLodD();  // BATCH1114: the water has its own copy (kind 4 never comes here)
 	if ( !F.fbAir || ( D.recs.empty() && !D.pipe ) ) {
 		why = "no framebuffer / pipeline for the water draw";
 		return false;
@@ -1164,7 +1165,7 @@ bool ringsRecord( std::string & why )
 // shutdown (after fxDrop waited the device): the exported copy is GL's name too
 void ringsDrop()
 {
-	for ( WaterDraw * D : { &farLodD(), &farGroundD() } ) {
+	for ( WaterDraw * D : { &farLodD(), &farGroundD(), &farGroundPD() } ) {
 		if ( !D->geo.buf && !D->host.buf )
 			continue;
 		vk().vkDeviceWaitIdle( vk().dev );
@@ -1180,7 +1181,7 @@ bool waterRecord( std::string & why )
 {
 	Vk & v = vk();
 	Fx & F = fx();
-	if ( F.kind == 5 || F.kind == 9 )  // lane VKFAR3: 9 the far ground, on the rings' copy
+	if ( F.kind == 5 || F.kind == 9 || F.kind == 12 )  // lane VKFAR3: 9 the far ground, on the rings' copy; VKGROUND3: 12 its mode 2
 		return farlod::ringsRecord( why );
 	WaterDraw & D = waterD();
 	if ( !D.recFb || !D.recPass || !D.pipe ) {

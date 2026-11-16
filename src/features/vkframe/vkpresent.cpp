@@ -6083,7 +6083,7 @@ bool fxWork( std::string & why )
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
 		}
-	} else if ( F.kind == 4 || F.kind == 5 || F.kind == 9 ) {  // lane VKWATER3: the shaded water draw; lane VKFAR2: 5 the far LOD rings; lane VKFAR3: 9 the far ground
+	} else if ( F.kind == 4 || F.kind == 5 || F.kind == 9 || F.kind == 12 ) {  // lane VKGROUND3: 12 far ground mode 2; lane VKWATER3: the shaded water draw; lane VKFAR2: 5 the far LOD rings; lane VKFAR3: 9 the far ground
 		if ( !waterRecord( why ) ) {
 			v.vkEndCommandBuffer( F.cmd );
 			return false;

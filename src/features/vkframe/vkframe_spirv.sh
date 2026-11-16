@@ -300,13 +300,14 @@ fxg() {
 	rm -f "$1.spv"
 }
 fxg fargnd_view_ps far-ground/fo4_cellcsmfgl_ps
+fxg fargndp_view_ps far-ground/fo4_cellcsmfgp_ps
 fxt() {
 	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main -fvk-b-shift 256 0 -fvk-t-shift 200 0 -fvk-s-shift 216 0 -fvk-u-shift 240 0 -fspv-preserve-bindings -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
 	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
 	rm -f "$1.spv"
 }
 fxt fargnd_view_vs core/water_view_vs
-ls -la fargnd_view_ps.spv.h fargnd_view_vs.spv.h
+ls -la fargnd_view_ps.spv.h fargndp_view_ps.spv.h fargnd_view_vs.spv.h
 # lane VKFAR16: the probe relight (cell_reflrelight.prog, cellreflprobe.cpp) on fxg / fxt's shifts (its vertex stage declares
 # nothing), and fxr: fxg's flags + the all-on route's RT GI key (WW_CELL_RESTIR + RTDDGI + RTDDGI_CASCADES), the `_rt_ps` twins
 fxr() {
