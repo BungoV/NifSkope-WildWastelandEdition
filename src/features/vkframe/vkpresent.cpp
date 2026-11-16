@@ -4521,6 +4521,17 @@ bool taaRun( const TaaRun & t, std::string & why )
 		return refuse( "the device lacks shaderStorageImageExtendedFormats (the vectors' RG32F store)" );
 	if ( t.wr < 0 || t.wr > 1 )
 		return refuse( "a history index out of 0..1" );
+	/* lane VKOBJ14: High and Ultra (the all-on route) draw here; the resolve reads the tier from the job and the RCAS its
+	 * stops from rcasJob. Low / Medium copy back without RCAS (GL). Red WW_VKVIEW_TAA_TIER_RED=1: the old High-only guard. */
+	{
+		const char * tr = std::getenv( "WW_VKVIEW_TAA_TIER_RED" );
+		const bool oldGuard = tr && tr[0] == '1';
+		if ( oldGuard ? t.job.ints[0] != 3 : ( t.job.ints[0] < 3 || t.job.ints[0] > 4 ) )
+			return refuse( oldGuard ? "the tier is not High (red WW_VKVIEW_TAA_TIER_RED=1: the old guard)"
+				: "the tier is not High or Ultra (" + std::to_string( t.job.ints[0] ) + ")" );
+		if ( !( t.rcasJob.c[0][0] > 0.0f ) )
+			return refuse( "no RCAS strength (High and Ultra sharpen)" );
+	}
 	// lane VKPOST2: the merged crossing takes the colour from the view (GL skipped its blit) behind the deferred tone pass
 	Tone & T = tone();
 	const bool merge = t.colorFromView;
