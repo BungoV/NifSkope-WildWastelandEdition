@@ -123,8 +123,9 @@ void bc1Block( const float * px, std::uint8_t * out )
 		out[4 + k] = std::uint8_t( bits >> ( 8 * k ) );
 }
 
-// one pool: a smooth field a layer (phase ph), its 2x2-box mip chain down to 4 px, each level's layers in BC1 blocks
-std::vector<std::vector<std::uint8_t>> pagesData( int side, float ph )
+// one pool: a smooth field a layer (phase ph, mean moved by dm), its 2x2-box mip chain down to 4 px, each level's layers in
+// BC1 blocks
+std::vector<std::vector<std::uint8_t>> pagesData( int side, float ph, float dm = 0.0f )
 {
 	std::vector<std::vector<std::uint8_t>> out;
 	std::vector<float> lv( size_t( side ) * size_t( side ) * kLayers * 3 );
@@ -134,9 +135,9 @@ std::vector<std::vector<std::uint8_t>> pagesData( int side, float ph )
 			for ( int i = 0; i < side; i++ ) {
 				const float u = ( float( i ) + 0.5f ) / float( side ), v = ( float( j ) + 0.5f ) / float( side );
 				float * p = &lv[( ( size_t( z ) * side + size_t( j ) ) * side + size_t( i ) ) * 3];
-				p[0] = 0.45f + 0.35f * std::sin( k * ( 1.3f * u + 0.7f * v + ph + 0.31f * float( z ) ) );
-				p[1] = 0.45f + 0.35f * std::sin( k * ( 0.6f * u - 1.1f * v + 2.0f * ph + 0.17f * float( z ) ) );
-				p[2] = 0.40f + 0.30f * std::cos( k * ( 0.9f * u + 1.4f * v + 3.0f * ph + 0.23f * float( z ) ) );
+				p[0] = 0.45f + dm + 0.35f * std::sin( k * ( 1.3f * u + 0.7f * v + ph + 0.31f * float( z ) ) );
+				p[1] = 0.45f + dm + 0.35f * std::sin( k * ( 0.6f * u - 1.1f * v + 2.0f * ph + 0.17f * float( z ) ) );
+				p[2] = 0.40f + dm + 0.30f * std::cos( k * ( 0.9f * u + 1.4f * v + 3.0f * ph + 0.23f * float( z ) ) );
 			}
 	for ( int s = side; s >= 4; s >>= 1 ) {
 		const int nb = s / 4;
@@ -709,7 +710,10 @@ int main( int argc, char ** argv )
 		const std::vector<std::uint16_t> cells = cellsData( false ), cellsRed = cellsData( true ), cellsPg = cellsPaged(),
 			cellsFull = cellsUnfaded();
 		const std::vector<std::vector<std::uint8_t>> pagesN = pagesData( kSideN, phN ), pagesNRed = pagesData( kSideN, phN + 0.37f ),
-			pagesF = pagesData( kSideF, phF ), pagesFRed = pagesData( kSideF, phF + 0.37f );
+			pagesF = pagesData( kSideF, phF ), pagesFRed = pagesData( kSideF, phF + 0.37f, -0.3f );
+		/* red 512's far pool also moves its mean: the far cells read the pool's coarse levels, where a phase shift alone
+		 * averages away (vkground4: with the air fixture fixed it moved 21 samples past 1e-2; its earlier FAIL was the
+		 * fixture's fog mismatch) */
 		putCells( cells );
 		putPages( iPagesN, pagesN );
 		putPages( iPagesF, pagesF );
@@ -736,6 +740,42 @@ int main( int argc, char ** argv )
 			const float v = 1.0f / 1500.0f;
 			if ( l >= 0 )
 				f.uniform1fv( l, 1, &v );
+		}
+		/* the cell grade neutral (saturation, brightness, contrast 1, no tint), as the game's default imagespace: seeded in
+		 * [0.05, 1) its contrast and saturation flattened the ground to 0.48..0.68 and the far pool (red 512) moved under
+		 * 1e-2 even with its mean moved by 0.3 */
+		{
+			const GLint l = f.getUniformLocation( pFg, "cellIsCine" );
+			const float v[3] = { 1.0f, 1.0f, 1.0f };
+			if ( l >= 0 )
+				f.uniform3fv( l, 1, v );
+		}
+		set4( "cellIsTint", 0.0f, 1.0f, 1.0f, 1.0f );
+		{	/* volPackDims.xyz = the packed air volume's size in texels, as cellvolair.cpp sets it (tw, th, texD). Seeded in
+			 * [0.05, 1) it made wwGridAt's clamp( uv * share, 0.5 / dims, share - 0.5 / dims ) run with lo > hi, which GLSL
+			 * and SPIR-V both leave undefined and NV's two compilers resolve differently: seed 1 (far grid on) parted 7966
+			 * samples, max rel 0.057. The near-grid slice count (.w) keeps its seeded value. */
+			const GLint l = f.getUniformLocation( pFg, "volPackDims" ), lp = f.getUniformLocation( pFg, "volPack" );
+			const Smp * vt = nullptr;
+			for ( const Smp & s : smp )
+				if ( s.name == "volTex" )
+					vt = &s;
+			if ( l >= 0 && vt ) {
+				float pd[4] = {}, pk[4] = {};
+				f.getUniformfv( pFg, l, pd );
+				if ( lp >= 0 )
+					f.getUniformfv( pFg, lp, pk );
+				pd[0] = float( vt->w );
+				pd[1] = float( vt->h );
+				pd[2] = float( vt->d );
+				f.uniform4fv( l, 1, pd );
+				const bool ok = pk[0] >= 1.0f / pd[0] && pk[1] >= 1.0f / pd[1] && pk[2] >= 1.0f / pd[0] && pk[3] >= 1.0f / pd[1];
+				std::printf( "FGPAGESDRAW seed %d volPackDims %g x %g x %g (volTex), volPack shares %s the half-texel clamp\n", seed,
+					double( pd[0] ), double( pd[1] ), double( pd[2] ), ok ? "inside" : "OUTSIDE" );
+				if ( !ok )
+					return fatal( "volPack under one texel of the air volume (wwGridAt's clamp undefined)" );
+			} else if ( l >= 0 )
+				return fatal( "volPackDims read but no volTex sampler" );
 		}
 		std::printf( "FGPAGESDRAW seed %d: %d loose uniforms seeded%s, fgMode 3, cached pages\n", seed, nu, scissor ? ", a scissor" : "" );
 
