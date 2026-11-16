@@ -75,7 +75,7 @@
 static int gColTwin = 0;  // colPrintf: 1 prints `BLVIEW colourcsm` for `BLVIEW colour`
 static const char * gColTag = "";  // the plain row: `BLVIEW colour plain`; the RT row: `BLVIEW colour rt`
 static int gColKind = 0;  // lane VKOBJ5: 1 ` skin`, 2 ` alpha`, 3 ` single`, 4 ` own` after it; lane VKWATER3: 5 ` ao`; VKOBJ19: 6 ` fade`
-static const char * kColKindName[8] = { "", " skin", " alpha", " single", " own", " ao", " fade", " ssgi" };  // VKOBJ21: 7 ` ssgi`
+static const char * kColKindName[9] = { "", " skin", " alpha", " single", " own", " ao", " fade", " ssgi", " stepb" };  // VKOBJ21: 7 ` ssgi`; VKOBJ22: 8 ` stepb`
 /* lane VKWATER3 (manager ruling 11-15, the AO note; stated before its first run, never widened): kind 5 `ao` runs the main arm
  * on the app's key with a GL R32F texture on cellAo (half the view, a ramp in y and a 7-texel saw in x, bilinear, clamped),
  * cellAoOn 1, cellAoRect the frame. GL probe: cellAoOn 0 moves GL's colour on >= 20 % of the covered pixels. Ruling item 3:
@@ -115,6 +115,18 @@ static const char * kColKindName[8] = { "", " skin", " alpha", " single", " own"
  * moved off its base; on the RT rows the RT reds 21 .. 24 too. Kinds 1 skin, 2 alpha and 4 own on the RT key (`colour rt skin` /
  * `rt alpha` / `rt own`, both twins): bars, probes and reds as kind 3 on that key (VKOBJ20), each kind's own reds (bone, flags,
  * offset / half) and the RT reds 21 .. 24. These rows run after every older row, which stay byte for byte. */
+/* lane VKOBJ22 (11-16; stated before its first run, never widened): kind 8 `stepb` is GPU cull step B on the all-on route
+ * (cellgpucull.cpp GpuDrivenB::draw hands a bl shape to vkBlDraw with the CPU cull's kept ranges, no fadeBand, so the RT twin).
+ * Each shape keeps ranges by its index c % 4: 0 whole, 1 (0, t/3) + (t/2, t - t/2), 2 (0, t/4) + an empty range + (t/2, t - t/2),
+ * 3 (t/5, t - t/5), t its triangles. GL draws every kept range as 8-triangle cluster commands (the GPU cull's form), wwDrawBase the
+ * shape's row; Vulkan crosses once a shape with cellgpucullvk.h rangeDraws' commands, the shape's one row (rowsAtBase), as
+ * vkBlDraw does. Rows: the RT key (spvrt), both twins. Bars as kind 3 on that key (depth EXACT or BOUND, colour EXACT or BOUND
+ * 4e-3 of max(1, |GL|), lit >= 0.9 of covered, one crossing a shape, 0 failed). GL probe: each shape whole (kind 3's form) covers
+ * pixels the ranges do not, on > 0 and >= 1 % of the whole draw's covered pixels. Red droprange (29: rangeDraws red 1, the last
+ * kept range of each multi-range shape dropped) must FAIL with Vulkan moved off its base; the RT reds 21 .. 24 too. The harness
+ * calls objBlShade: vkBlDraw's lifted refusal is the app's, checked by the syntax check and the census. Appended after every
+ * older row. */
+#include "../../src/features/near/cellgpucullvk.h"  // lane VKOBJ22: step B's ranges (kind 8)
 void colPrintf( const char * fmt, ... )
 {
 	std::string f2( fmt );
@@ -742,10 +754,49 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 	std::vector<std::uint32_t> single = sx.cmds;
 	for ( std::size_t c = 0; c + 4 < single.size(); c += 5 )
 		single[c + 4] = 0;
-	if ( kind == 3 ) {
+	if ( kind == 3 || kind == 8 ) {
 		f.genBuffers( 1, &singleInd );
 		f.bindBuffer( 0x8F3F, singleInd );
 		f.bufferData( 0x8F3F, std::ptrdiff_t( single.size() * 4 ), single.data(), 0x88E4 );
+		f.bindBuffer( 0x8F3F, 0 );
+	}
+	// lane VKOBJ22 kind 8: each shape's kept ranges; GL's 8-triangle cluster commands and rangeDraws' commands (red 29: rangeDraws red 1)
+	GLuint stepInd = 0;
+	std::vector<std::uint32_t> stepGl, stepVk[2];
+	std::vector<std::size_t> stepGlAt, stepVkAt[2];  // each shape's first command, one entry more than shapes
+	bool stepWhole = false;  // GL probe: each shape whole (kind 3's form)
+	if ( kind == 8 ) {
+		for ( std::size_t c = 0; c < single.size() / 5; c++ ) {
+			const std::uint32_t t = single[c * 5] / 3, fi = single[c * 5 + 2], bv = single[c * 5 + 3];
+			std::vector<std::uint32_t> rg;
+			if ( c % 4 == 1 )
+				rg = { 0, t / 3, t / 2, t - t / 2 };
+			else if ( c % 4 == 2 )
+				rg = { 0, t / 4, t / 4, 0, t / 2, t - t / 2 };
+			else if ( c % 4 == 3 )
+				rg = { t / 5, t - t / 5 };
+			const bool whole = rg.empty();
+			const std::vector<std::uint32_t> gr = whole ? std::vector<std::uint32_t>{ 0, t } : rg;
+			stepGlAt.push_back( stepGl.size() / 5 );
+			for ( std::size_t k = 0; k + 1 < gr.size(); k += 2 )
+				for ( std::uint32_t tt = gr[k]; tt < gr[k] + gr[k + 1]; tt += 8 )
+					stepGl.insert( stepGl.end(), { std::min( 8u, gr[k] + gr[k + 1] - tt ) * 3u, 1u, fi + tt * 3u, bv, 0u } );
+			for ( int red = 0; red < 2; red++ ) {
+				std::vector<int> counts;
+				std::vector<const void *> offs;
+				GpuDrivenBVk::rangeDraws( whole, rg.data(), rg.size(), t, t, counts, offs, red );
+				stepVkAt[red].push_back( stepVk[red].size() / 5 );
+				for ( std::size_t k = 0; k < counts.size(); k++ )
+					stepVk[red].insert( stepVk[red].end(),
+						{ std::uint32_t( counts[k] ), 1u, fi + std::uint32_t( std::uintptr_t( offs[k] ) / 2 ), bv, 0u } );
+			}
+		}
+		stepGlAt.push_back( stepGl.size() / 5 );
+		for ( int red = 0; red < 2; red++ )
+			stepVkAt[red].push_back( stepVk[red].size() / 5 );
+		f.genBuffers( 1, &stepInd );
+		f.bindBuffer( 0x8F3F, stepInd );
+		f.bufferData( 0x8F3F, std::ptrdiff_t( stepGl.size() * 4 ), stepGl.data(), 0x88E4 );
 		f.bindBuffer( 0x8F3F, 0 );
 	}
 	// lane VKOBJ19 kind 6: each single split into the kept piece (fade 1) and three band pieces (0.75, 0.5, 0.25)
@@ -866,6 +917,17 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			for ( std::size_t c = 0; c < single.size() / 5; c++ ) {
 				put( "wwDrawBase", { float( sx.base + sx.cmds[c * 5 + 4] ) } );
 				sf.multiDrawElementsIndirect( GL_TRIANGLES, GL_UNSIGNED_SHORT, reinterpret_cast<const void *>( c * 20 ), 1, 20 );
+				const GLenum e1 = glGetError();
+				e = e == GL_NO_ERROR ? e1 : e;
+			}
+			put( "wwDrawBase", { float( sx.base ) } );
+		} else if ( kind == 8 ) {  // lane VKOBJ22: a shape's cluster commands (the probe: the shape whole), wwDrawBase its row
+			f.bindBuffer( 0x8F3F, stepWhole ? singleInd : stepInd );
+			for ( std::size_t c = 0; c < single.size() / 5; c++ ) {
+				put( "wwDrawBase", { float( sx.base + sx.cmds[c * 5 + 4] ) } );
+				const std::size_t at = stepWhole ? c : stepGlAt[c], n = stepWhole ? 1 : stepGlAt[c + 1] - stepGlAt[c];
+				if ( n )
+					sf.multiDrawElementsIndirect( GL_TRIANGLES, GL_UNSIGNED_SHORT, reinterpret_cast<const void *>( at * 20 ), GLsizei( n ), 20 );
 				const GLenum e1 = glGetError();
 				e = e == GL_NO_ERROR ? e1 : e;
 			}
@@ -1120,6 +1182,24 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		colPrintf( "BLVIEW colour GL ssgi probe %s: cellSsgiOn 0 moves GL's colour on %zu of %zu covered pixels (bar >= 20 %%)\n",
 			kindReach ? "OK" : "FAIL", moved, cov );
 	}
+	if ( kind == 8 ) {  // lane VKOBJ22: the ranges reach GL (each shape whole covers pixels the kept ranges do not)
+		ColOut g2;
+		stepWhole = true;
+		glDraw( g2 );
+		stepWhole = false;
+		std::size_t covWhole = 0, dropped = 0;
+		for ( std::size_t i = 0; i < g2.depth.size(); i++ ) {
+			if ( !( g2.depth[i] < 1.0f ) )
+				continue;
+			covWhole++;
+			dropped += !( gl.depth[i] < 1.0f );
+		}
+		kindReach = dropped > 0 && double( dropped ) >= 0.01 * double( covWhole );
+		colPrintf( "BLVIEW colour cluster commands: GL %zu, Vulkan ranges %zu (red %zu), %zu shapes\n", stepGl.size() / 5, stepVk[0].size() / 5,
+			stepVk[1].size() / 5, single.size() / 5 );
+		colPrintf( "BLVIEW colour GL stepb probe %s: each shape whole covers %zu pixels the kept ranges do not, of %zu (bar > 0 and >= 1 %%)\n",
+			kindReach ? "OK" : "FAIL", dropped, covWhole );
+	}
 	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
 		colPrintf( "BLVIEW colour FAIL (GL error 0x%x reading GL's fo4_cellbl draw)\n", unsigned( e ) );
 		return false;
@@ -1162,6 +1242,23 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 				s.rows = ( red == 13 ? rowsPad.data() : rows.data() ) + row * kBlRowBytes;
 				s.nRows = red == 13 ? 2 * nRows - row : 1;
 				s.rowsAtBase = red != 13;
+				std::string w1;
+				if ( !objBlShade( glProc, s, w1 ) && ran ) {
+					ran = false;
+					w = w1;
+				}
+			}
+			put( "wwDrawBase", { float( sx.base ) } );
+		} else if ( kind == 8 ) {  // lane VKOBJ22: a crossing a shape, rangeDraws' commands, its one row (red 29 droprange: red 1's)
+			const int sr = red == 29 ? 1 : 0;
+			for ( std::size_t c = 0; c < single.size() / 5; c++ ) {
+				const std::size_t row = std::size_t( sx.base ) + sx.cmds[c * 5 + 4];
+				put( "wwDrawBase", { float( row ) } );
+				s.cmds = stepVk[sr].data() + stepVkAt[sr][c] * 5;
+				s.nCmds = stepVkAt[sr][c + 1] - stepVkAt[sr][c];
+				s.rows = rows.data() + row * kBlRowBytes;
+				s.nRows = 1;
+				s.rowsAtBase = true;
 				std::string w1;
 				if ( !objBlShade( glProc, s, w1 ) && ran ) {
 					ran = false;
@@ -1261,7 +1358,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		const DepthCmp dc = depthCmp( vk0.depth, gl.depth );
 		const ColCmp cc = colCmp( vk0 );
 		const bool litOk = cc.both >= 2000 && double( cc.lit ) >= 0.9 * double( cc.both );
-		const bool crossOk = rs.runs == ( kind == 3 ? int( single.size() / 5 ) : kind == 6 ? int( fadeMul.size() ) : 1 ) && rs.fails == 0;
+		const bool crossOk = rs.runs == ( kind == 3 || kind == 8 ? int( single.size() / 5 ) : kind == 6 ? int( fadeMul.size() ) : 1 ) && rs.fails == 0;
 		colPrintf( "BLVIEW colour state: %d samplers on their own units, %d values with no active location; set 0 units: %d shared, %d GL-only, "
 			"%d GL texel buffers; crossing %s (%d runs, %d failed)\n", units, inactive, rs.shared, rs.glOwn, rs.texelGl, crossOk ? "OK" : "FAIL",
 			rs.runs, rs.fails );
@@ -1299,8 +1396,8 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 	const char * kindRedName[5] = { " bone (bone i reads bone i + 1's transform)", " flags (the mirrored alphaFlags 0)",  // lane VKOBJ5
 		" base (rowsAtBase off: the mirrored wwDrawBase kept)", " offset (every attribute read from offset 0)",
 		" half (the halves read as 16-bit unorm)" };
-	const int redLo = kind == 0 ? 1 : kind == 4 ? 14 : kind == 5 ? 25 : kind == 6 ? 27 : kind == 7 ? 28 : 10 + kind;
-	const int redHi = kind == 0 ? ( twin ? 3 : 2 ) : kind == 4 ? 15 : kind == 5 ? 26 : kind == 6 ? 27 : kind == 7 ? 28 : 10 + kind;
+	const int redLo = kind == 0 ? 1 : kind == 4 ? 14 : kind == 5 ? 25 : kind == 6 ? 27 : kind == 7 ? 28 : kind == 8 ? 29 : 10 + kind;
+	const int redHi = kind == 0 ? ( twin ? 3 : 2 ) : kind == 4 ? 15 : kind == 5 ? 26 : kind == 6 ? 27 : kind == 7 ? 28 : kind == 8 ? 29 : 10 + kind;
 	for ( int r = redLo; r <= redHi; r++ ) {
 		ColOut o;
 		std::string rw;
@@ -1318,7 +1415,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			passes = ( dc.exact() || dc.bound() ) && ( cc.exact() || cc.bound() );
 		}
 		colPrintf( "BLVIEW RED colour%s %s (%zu values over the bound, %zu Vulkan colour values moved off the Vulkan base%s%s)\n",
-			r == 28 ? " ssgi (cellSsgi dropped to the stand-in)" : r == 27 ? " fade (the band crossings at a0, unscaled)" : r == 25 ? " standin (no copy twin: GL's own cellAo texture stood in)" : r == 26 ? " copy (cellAo copied from one texel on in x)"
+			r == 29 ? " droprange (the last kept range of each multi-range shape dropped)" : r == 28 ? " ssgi (cellSsgi dropped to the stand-in)" : r == 27 ? " fade (the band crossings at a0, unscaled)" : r == 25 ? " standin (no copy twin: GL's own cellAo texture stood in)" : r == 26 ? " copy (cellAo copied from one texel on in x)"
 			: r > 10 ? kindRedName[r - 11] : redName[r - 1],
 			passes ? "PASSED" : vch ? "FAIL" : "TESTS NOTHING", over, vch, rr ? "" : "; refused: ", rr ? "" : rw.c_str() );
 		ok = ok && !passes && vch > 0;
