@@ -785,6 +785,7 @@ void underDrop();  // lane VKWATER4 (vkunder.inc)
 void objDrop();  // lane VKOBJ1
 void blFree();  // lane VKOBJ2
 void fogDrop();  // lane VKFAR2 (vkfog.inc): the air's integrate
+void fgPaintDrop();  // lane VKGROUND7 (vkfgpaint.inc): the far ground paint's views and framebuffers
 void ddgiFreeAll();  // lane VKFAR3 (vkddgi.inc): the DDGI atlas imports and the fetch pipeline
 
 struct Worker
@@ -3848,6 +3849,7 @@ void shutdown()
 	lampDrop();  // lane VKLAMP1: the lamp cubes' layer views go before the shared cube array
 	objDrop();  // lane VKOBJ1: the prepass framebuffer goes before the shared depth it holds
 	fogDrop();  // lane VKFAR2: the integrate's set goes before the shared volumes it views
+	fgPaintDrop();  // lane VKGROUND7: the paint's framebuffers go before its shared scratch and blocks
 	objBlPipeFree();  // lane VKOBJ4: the bl twins' pipelines (their layouts name the table's)
 	ddgiFreeAll();  // lane VKFAR3: the DDGI atlas imports (bakert keeps its own buffer)
 	blFree();  // lane VKOBJ2: the bindless table's set and samplers (it holds the shared targets' views)
@@ -9641,3 +9643,4 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 #include "features/vkframe/vkaodecal.inc"  // lane VKAO3: the baked AO decals (cellaodecalgl.cpp)
 #include "features/vkframe/vkvolmask.inc"  // lane VKAO4: the GI volume mask (ao.cpp giVolMaskPass)
 #include "features/vkframe/vkairinject.inc"  // lane VKAIR5: the air inject's stage 0 (cellvolair.cpp vaPassInner)
+#include "features/vkframe/vkfgpaint.inc"  // lane VKGROUND7: the far ground's cached-page paint (cellfarground.cpp paintJobs)
