@@ -30,6 +30,10 @@
 //     triangle alone (glDrawArraysInstanced( TRIANGLES, 3 t, 3, 1 ), gl_VertexID keeps first), no cull, no depth test, depth
 //     clamp: every one of the 6 x 12 texel sets equals the table program's set (0 texels differ), and every triangle of S0..S4
 //     covers > 0 texels (the fewest printed per shape). S5 holds the eye (faces behind it project to nothing): equality only.
+//     Fixture fixed after the fix's first run (fix1), clause unchanged: under the main camera S2's face 2 triangle 0 lies
+//     off screen (0 texels for the table program too, before and after the fix), so the cover pass views each shape alone
+//     from its own orthographic camera, built by one rule: along the shape's local direction (1, 2, 3) (no face is edge-on
+//     to it), centred on the shape, its whole grown hull inside 0.9 of the frame. Only volClip depends on the camera.
 // Added red (a GL-side red; the Vulkan twin is not rebuilt for it): fc = the k - 1 spelling. Its GL pass is the reference for
 //   Vulkan's main frame (must FAIL), its probe (k - 1 against the tree's pass) must move >= 50 texels, and its hull coverage
 //   must differ from the table (> 0 texels, must FAIL). The texels the k - 1 spelling moves are the hole set judge counts in.
@@ -599,14 +603,48 @@ int main( int argc, char ** argv )
 	auto cover = [&]( GLuint pc ) {
 		std::vector<std::vector<char>> sets;
 		f.useProgram( pc );
-		float clip[4][4], row[3][4];
-		volMath( clip, row );
-		for ( int r = 0; r < 4; r++ )
-			f.uniform4fv( f.getUniformLocation( pc, ( "volClip[" + std::to_string( r ) + "]" ).c_str() ), 1, clip[r] );
 		const float grow = kBias + 1.0f;
 		f.uniform1fv( f.getUniformLocation( pc, "volGrow" ), 1, &grow );
 		f.uniform1i( f.getUniformLocation( pc, "volShapes" ), 1 );
 		for ( int s = 0; s < nShapes; s++ ) {
+			{	// the shape's own camera: cell_givol.glsl volRot (Z * Y * X), orthographic along its local (1, 2, 3)
+				const float * sh = shapes.data() + 12 * s;
+				const double kr = 3.14159265358979323846 / 180.0;
+				const double cx = std::cos( sh[8] * kr ), sx = std::sin( sh[8] * kr ), cy = std::cos( sh[9] * kr ),
+					sy = std::sin( sh[9] * kr ), cz = std::cos( sh[10] * kr ), sz = std::sin( sh[10] * kr );
+				const double X[3][3] = { { 1, 0, 0 }, { 0, cx, -sx }, { 0, sx, cx } }, Y[3][3] = { { cy, 0, sy }, { 0, 1, 0 }, { -sy, 0, cy } },
+					Z[3][3] = { { cz, -sz, 0 }, { sz, cz, 0 }, { 0, 0, 1 } };
+				double ZY[3][3] = {}, M[3][3] = {};
+				for ( int i = 0; i < 3; i++ )
+					for ( int j = 0; j < 3; j++ )
+						for ( int k = 0; k < 3; k++ )
+							ZY[i][j] += Z[i][k] * Y[k][j];
+				for ( int i = 0; i < 3; i++ )
+					for ( int j = 0; j < 3; j++ )
+						for ( int k = 0; k < 3; k++ )
+							M[i][j] += ZY[i][k] * X[k][j];
+				const double d[3] = { 1, 2, 3 }, ul[3] = { 2, -1, 0 };	// ul . d = 0
+				const double vl[3] = { d[1] * ul[2] - d[2] * ul[1], d[2] * ul[0] - d[0] * ul[2], d[0] * ul[1] - d[1] * ul[0] };
+				double hr = 0.0;
+				for ( int i = 0; i < 3; i++ )
+					hr += std::pow( 0.5 * ( sh[4 + i] + 2.0 * grow ), 2.0 );
+				const double scale = 0.9 / std::sqrt( hr );
+				float clip[4][4] = {};
+				for ( int r = 0; r < 2; r++ ) {
+					const double * l = r == 0 ? ul : vl;
+					const double n = std::sqrt( l[0] * l[0] + l[1] * l[1] + l[2] * l[2] );
+					double off = 0.0;
+					for ( int i = 0; i < 3; i++ ) {
+						const double w = ( M[i][0] * l[0] + M[i][1] * l[1] + M[i][2] * l[2] ) / n * scale;
+						clip[r][i] = float( w );
+						off -= w * sh[i];
+					}
+					clip[r][3] = float( off );
+				}
+				clip[3][3] = 1.0f;
+				for ( int r = 0; r < 4; r++ )
+					f.uniform4fv( f.getUniformLocation( pc, ( "volClip[" + std::to_string( r ) + "]" ).c_str() ), 1, clip[r] );
+			}
 			f.bindBuffer( kTexBuf, oneBuf );
 			f.bufferData( kTexBuf, std::ptrdiff_t( 12 * sizeof( float ) ), shapes.data() + 12 * s, fStatic );
 			f.bindBuffer( kTexBuf, 0 );
@@ -649,6 +687,7 @@ int main( int argc, char ** argv )
 		differAll = 0;
 		for ( int s = 0; s < nShapes; s++ ) {
 			int fewest = 1 << 30, fewestAt = 0, differ = 0;
+			std::string counts;
 			for ( int tri = 0; tri < 12; tri++ ) {
 				const std::vector<char> & a = sets[size_t( 12 * s + tri )], & b = tableSets[size_t( 12 * s + tri )];
 				int n = 0;
@@ -656,12 +695,14 @@ int main( int argc, char ** argv )
 					n += a[i];
 					differ += a[i] != b[i] ? 1 : 0;
 				}
+				counts += ( tri ? " " : "" ) + std::to_string( n );
 				if ( n < fewest )
 					fewest = n, fewestAt = tri;
 			}
 			const bool eye = s == nShapes - 1, counted = eye || fewest > 0;
-			std::printf( "VOLMASKDRAW hull %s S%d: 12 triangles, fewest texels %d (face %d triangle %d%s), %d texels differ from the table %s\n",
-				what, s, fewest, fewestAt / 2, fewestAt % 2, eye ? ", the eye's box: info" : "", differ, counted && differ == 0 ? "OK" : "FAIL" );
+			std::printf( "VOLMASKDRAW hull %s S%d: 12 triangles (%s), fewest texels %d (face %d triangle %d%s), %d texels differ from the table %s\n",
+				what, s, counts.c_str(), fewest, fewestAt / 2, fewestAt % 2, eye ? ", the eye's box: info" : "", differ,
+				counted && differ == 0 ? "OK" : "FAIL" );
 			ok = ok && counted && differ == 0;
 			differAll += differ;
 		}
