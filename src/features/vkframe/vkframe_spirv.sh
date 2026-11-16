@@ -218,4 +218,13 @@ fxo() {
 }
 fxo objvel_vs taa_objvel_vs vs_6_0 "$VS_SHIFT"
 fxo objvel_ps taa_objvel_ps ps_6_0 "$PS_SHIFT"
+# lane VKOBJ15: boltstrip.prog (res/shaders/hlsl/core), the lightning strips (controllers.cpp drawPreview). No loader
+# defines; every binding kept
+fxe() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main $4 -fspv-preserve-bindings -fvk-use-dx-position-w -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/core/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/core/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxe bolt_view_vs boltstrip_vs vs_6_0 "$VS_SHIFT"
+fxe bolt_view_ps boltstrip_ps ps_6_0 "$PS_SHIFT"
 ls -la csm_view_vs.spv.h obj_depth_vs.spv.h sky_view_ps.spv.h bloom_down.spv.h bloom_hold.spv.h bloom_up.spv.h bloom_src.spv.h bloom_comb.spv.h bloom_back.spv.h tonemap.spv.h measure_q.spv.h tone_view_vs.spv.h tone_view_ps.spv.h taa_view_mv_cs.spv.h taa_view_resolve_cs.spv.h taa_view_rcas_ps.spv.h

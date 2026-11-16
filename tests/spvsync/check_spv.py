@@ -140,6 +140,9 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 # lane VKOBJ10: the script's `fxo` lines, taa_objvel.prog's twins (res/shaders/hlsl/post), no loader defines
 VKFRAME_FXO = {'objvel_vs': ('taa_objvel_vs', 'vs_6_0', 'VS_SHIFT'), 'objvel_ps': ('taa_objvel_ps', 'ps_6_0', 'PS_SHIFT')}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXO]
+# lane VKOBJ15: the script's `fxe` lines, boltstrip.prog's twins (res/shaders/hlsl/core), no loader defines
+VKFRAME_FXE = {'bolt_view_vs': ('boltstrip_vs', 'vs_6_0', 'VS_SHIFT'), 'bolt_view_ps': ('boltstrip_ps', 'ps_6_0', 'PS_SHIFT')}
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXE]
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
 DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
 
@@ -284,6 +287,13 @@ def script_ok(tree):
 	              re.findall(r'^fxo ([a-z0-9_]+) ([a-z0-9_]+) ([vp]s_6_0) "\$([A-Z_]+)"$', vf, re.M))
 	if olines != VKFRAME_FXO:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxo lines (%s) are not this checker\'s objvel twins' % ' '.join(sorted(olines)))
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main $4 -fspv-preserve-bindings -fvk-use-dx-position-w ' \
+			'-Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/core/$2.hlsl" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxe() compile line changed')
+	elines = dict((k, (f, p, s)) for k, f, p, s in
+	              re.findall(r'^fxe ([a-z0-9_]+) ([a-z0-9_]+) ([vp]s_6_0) "\$([A-Z_]+)"$', vf, re.M))
+	if elines != VKFRAME_FXE:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxe lines (%s) are not this checker\'s boltstrip twins' % ' '.join(sorted(elines)))
 	return bad
 
 
@@ -425,7 +435,9 @@ def main(argv):
 				src = os.path.join(tree, 'res/shaders/hlsl/particles', VKFRAME_FXP[k][0] + '.hlsl')
 			if k in VKFRAME_FXO:
 				src = os.path.join(tree, 'res/shaders/hlsl/post', VKFRAME_FXO[k][0] + '.hlsl')
-			m = None if k in VKFRAME_FXH or k in VKFRAME_FXD or k in VKFRAME_FXC or k in VKFRAME_FXP or k in VKFRAME_FXO else \
+			if k in VKFRAME_FXE:
+				src = os.path.join(tree, 'res/shaders/hlsl/core', VKFRAME_FXE[k][0] + '.hlsl')
+			m = None if k in VKFRAME_FXH or k in VKFRAME_FXD or k in VKFRAME_FXC or k in VKFRAME_FXP or k in VKFRAME_FXO or k in VKFRAME_FXE else \
 				re.search(r'hlsl profile: ([cvp]s_6_[0-9])', open(src, encoding='utf-8', errors='replace').read())
 			if k in VKFRAME_FXV or k in VKFRAME_FXW:
 				m = re.match(r'(vs_6_0)', 'vs_6_0')
@@ -451,6 +463,10 @@ def main(argv):
 				hdefs = ['-HV', '2021'] + (VKFRAME_VS_SHIFT if VKFRAME_FXO[k][2] == 'VS_SHIFT' else VKFRAME_PS_SHIFT) \
 					+ ['-fspv-preserve-bindings', '-fvk-use-dx-position-w']
 				m = re.match(r'(.*)', VKFRAME_FXO[k][1])
+			if k in VKFRAME_FXE:
+				hdefs = ['-HV', '2021'] + (VKFRAME_VS_SHIFT if VKFRAME_FXE[k][2] == 'VS_SHIFT' else VKFRAME_PS_SHIFT) \
+					+ ['-fspv-preserve-bindings', '-fvk-use-dx-position-w']
+				m = re.match(r'(.*)', VKFRAME_FXE[k][1])
 			opt = [] if d == 'src/features/vkframe' else ['-O0']   # vkframe_spirv.sh builds optimised
 			r = subprocess.run([dxc, '-spirv', '-fspv-target-env=' + env, '-T', m.group(1) if m else 'ps_6_0' if k in VKFRAME_SKY or k in VKFRAME_FX or k in VKFRAME_FXK or k in VKFRAME_FXKW else 'cs_6_0', '-E', 'main']
 			                   + opt + hdefs + ['-Fo', spv, src], capture_output=True, text=True, timeout=300)
