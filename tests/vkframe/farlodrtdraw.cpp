@@ -32,8 +32,9 @@
 // check is replaced by the all-on arm.
 // All-on arm (seed 1 of the RT key): cellGiHalf / cellGiHalfKey are VKBUF2's shared images (vkrtbuf.h rtImgShare at W x H,
 // step 1: cellGiHalfScale 1, cellGiHalfRect (0, 0, W, H); owners registered, always fresh) and GL binds THOSE names;
-// cellGiHalfOn 1, cellPass 0, cellProbe 0. The key is the rings' own surface: a GL normals pass (wwDebugView 2: the program's
-// own shading normal) and its depth give each pixel's sample-0 position (view = world, P from the depth at the pixel centre)
+// cellGiHalfOn 1, cellPass 0, cellProbe 0. The key is the rings' own surface: a GL normals pass (cellProbe 1: under RTDDGI without
+// WW_CELL_VIEWS the program writes its own shading normal cellWorldDir( normal ) * 0.5 + 0.5; wwDebugView is compiled out)
+// and its depth give each pixel's sample-0 position (view = world, P from the depth at the pixel centre)
 // and normal, packed as cellGiKeyNormal reads it (octahedral, 2048 x 2048); w = -1 where the rings miss. cellGiHalf holds
 // seeded values from a side rng (every other arm's seeding unchanged). Both are copied into the shared images from plain
 // textures (glCopyImageSubData).
@@ -899,15 +900,15 @@ int main( int argc, char ** argv )
 					setF( k, "cellGiHalfRect", 4, 1, rect );
 					setF( k, "cellGiHalfScale", 1, 1, &one );
 				}
-				// the key: GL's own shading normal (wwDebugView 2) and depth at each pixel's sample 0
+				// the key: GL's own shading normal (cellProbe 1, header) and depth at each pixel's sample 0
 				setI( k, "cellGiHalfOn", 0 );
-				setI( k, "wwDebugView", 2 );
+				setI( k, "cellProbe", 1 );
 				setI( k, "landSplat", 0 );
 				before( fbRef );
 				drawState( fbRef, scissor, k );
 				glDraw();
 				stateEnd( k );
-				setI( k, "wwDebugView", 0 );
+				setI( k, "cellProbe", 0 );
 				setI( k, "landSplat", splatWas );
 				const std::vector<std::uint16_t> nC = readColor( refCol );
 				const std::vector<float> nD = readDepth( refDs, false );
