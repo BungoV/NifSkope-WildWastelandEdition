@@ -96,11 +96,11 @@ bool farLodRtRun( const WaterRun & r, int v, std::string & why )
 		why = "no far LOD RT twin " + std::to_string( v ) + " (1 RT, 2 DG)";
 		return false;
 	}
-	/* lane VKFAR27 / VKFAR30: while GL's program reads the half-rate screen GI (cellGiHalfOn 1, set per mesh by wwCellAoDraw
-	 * whenever it ran), the RT twin (1) reads cellGiHalf / cellGiHalfKey in place, VKBUF2's shared images found by name
-	 * (vkrtbuf.h rtImgOf): each bound GL name must be the shared one. twinRun binds the shared view (farSharedOf) and writes the
-	 * descriptor sets on every run, so a remake (rtImgGen moved) needs no cache here. A name that is not shared, or not the
-	 * bound one, stays on GL by name. The DG twin (2) reads them too, but its route is not gated yet: refused by name. */
+	/* lane VKFAR27 / VKFAR30 / VKFAR31: while GL's program reads the half-rate screen GI (cellGiHalfOn 1, set per mesh by
+	 * wwCellAoDraw whenever it ran), both twins (1 RT, 2 DG) read cellGiHalf / cellGiHalfKey in place, VKBUF2's shared images
+	 * found by name (vkrtbuf.h rtImgOf): each bound GL name must be the shared one. twinRun binds the shared view (farSharedOf)
+	 * and writes the descriptor sets on every run, so a remake (rtImgGen moved) needs no cache here. A name that is not
+	 * shared, or not the bound one, stays on GL by name. */
 	const FxField * fs = v == 2 ? kT_farlodDgPs : kT_farlodRtPs;
 	const int nf = v == 2 ? int( sizeof( kT_farlodDgPs ) / sizeof( kT_farlodDgPs[0] ) ) : int( sizeof( kT_farlodRtPs ) / sizeof( kT_farlodRtPs[0] ) );
 	for ( int i = 0; i < nf; i++ )
@@ -111,8 +111,6 @@ bool farLodRtRun( const WaterRun & r, int v, std::string & why )
 			if ( on == 0 )
 				continue;
 			std::string w;
-			if ( v == 2 )
-				w = "the DG twin's read of cellGiHalf / cellGiHalfKey is not routed yet (GL's half-rate screen GI)";
 			for ( const char * nm : { "cellGiHalf", "cellGiHalfKey" } ) {
 				if ( !w.empty() )
 					break;
