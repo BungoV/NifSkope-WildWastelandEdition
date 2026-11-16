@@ -17,6 +17,18 @@
 //   EXACT = no half differs; BOUND = flips <= 0.05 % of covered, halves past 1 ulp outside flips <= 0.1 % of the covered
 //   halves. Anything else FAILS.
 // Reds on the palette case (each must FAIL): red 1 no blend, red 2 the palette off, red 4 u and v swapped.
+// Reference (lane VKOBJ16 11-16, written before its first run): VKOBJ15's first run judged Vulkan against GL's 4x frame, where
+// NVIDIA GL writes the mean of a pixel's blended samples (plain 1051 / single 770 flips, all in pixels whose GL samples are
+// equal and Vulkan's are not); the coordinator's ruling keeps Vulkan's per-sample blend. Each case's reference is GL's own
+// program per sample: triangle by triangle in draw order, GL's boltstrip with blending off into a 4x RGBA32F capture on the
+// case's depth (the slab; the case's depth func, cull and front face, no depth writes; colour cleared to alpha -1 before each
+// triangle), then a W*S x H 1x RGBA16F pass starting from the frame before, GL's own blend (SRC_ALPHA, ONE): one texel a
+// sample, unwritten samples discarded. Checks (each must read 0 halves): R1 a constant full-screen blend at 1x vs 4x; R2 the
+// loop's last-written output (attachment 2, blend off) vs one GL 4x draw with blending off; R3 the reference vs GL's 4x frame
+// on pixels no triangle split (attachment 1, blend MAX: 1-3 samples written or 4 unequal; never taken from the diff). The bar
+// above judges Vulkan against this reference; Vulkan against GL's 4x frame is printed as info. Red avg (harness only):
+// Vulkan's 4 samples averaged per pixel must FAIL in plain and single (the cases where VKOBJ15's run saw GL's merge); palette
+// and cull print it as info.
 // Last line `BOLTVIEW GATE OK` or `BOLTVIEW GATE FAILED`.
 #define main fxview_main
 #include "fxview.cpp"
@@ -37,6 +49,9 @@ struct Va
 	void( WINAPI * enableVertexAttribArray )( GLuint ) = nullptr;
 	void( WINAPI * compressedTextureSubImage2D )( GLuint, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLsizei, const void * ) = nullptr;
 	void( WINAPI * textureParameteri )( GLuint, GLenum, GLint ) = nullptr;
+	void( WINAPI * clearBufferfv )( GLenum, GLint, const GLfloat * ) = nullptr;
+	void( WINAPI * blendEquationi )( GLuint, GLenum ) = nullptr;
+	void( WINAPI * disablei )( GLenum, GLuint ) = nullptr;
 };
 Va va;
 
@@ -51,6 +66,36 @@ StateGl sg;
 
 const char * kSlabFs = "#version 410 core\nuniform float zd; out vec4 o;\n"
 	"void main() { gl_FragDepth = zd; o = vec4( 0.6, 0.2, 0.1, 0.5 ); }\n";
+// the reference's 1x pass (precipview.cpp at 29fe4a05): one texel a sample; 0 the blended frame, 1 the pixel split by this
+// triangle (blend MAX), 2 the last written output (blend off, check R2)
+const char * kCapBlendFs = "#version 410 core\n"
+	"uniform sampler2DMS cap; uniform int S;\n"
+	"layout(location=0) out vec4 o; layout(location=1) out vec4 sp; layout(location=2) out vec4 last;\n"
+	"void main() { ivec2 q = ivec2( gl_FragCoord.xy ), p = ivec2( q.x / S, q.y ); vec4 v = texelFetch( cap, p, q.x % S );\n"
+	"  if ( v.a < 0.0 ) discard;\n"
+	"  vec4 v0 = texelFetch( cap, p, 0 ); int w = 0; bool same = true;\n"
+	"  for ( int k = 0; k < S; k++ ) { vec4 u = texelFetch( cap, p, k ); w += u.a < 0.0 ? 0 : 1; same = same && u == v0; }\n"
+	"  o = v; sp = vec4( w < S || !same ? 1.0 : 0.0 ); last = v; }\n";
+const char * kProbeFs = "#version 410 core\nout vec4 o; void main() { o = vec4( 0.25, 0.5, 0.75, 0.4 ); }\n";
+
+// float to half, round to nearest even (red avg's mean)
+std::uint16_t f2h( float x )
+{
+	std::uint32_t b;
+	std::memcpy( &b, &x, 4 );
+	const std::uint16_t s = std::uint16_t( ( b >> 16 ) & 0x8000 );
+	b &= 0x7FFFFFFFu;
+	if ( b >= 0x7F800000u )
+		return s | 0x7C00 | ( b > 0x7F800000u ? 0x200 : 0 );
+	if ( b >= 0x477FF000u )
+		return s | 0x7C00;
+	if ( b < 0x38800000u ) {
+		float v;
+		std::memcpy( &v, &b, 4 );
+		return s | std::uint16_t( std::nearbyint( v * 16777216.0f ) );
+	}
+	return s | std::uint16_t( ( b + 0xFFFu + ( ( b >> 13 ) & 1u ) - 0x38000000u ) >> 13 );
+}
 
 struct Verdict
 {
@@ -186,7 +231,8 @@ int main( int argc, char ** argv )
 	pump();
 	if ( !loadAll() || !load( va.genVertexArrays, "glGenVertexArrays" ) || !load( va.bindVertexArray, "glBindVertexArray" )
 		|| !load( va.vertexAttribPointer, "glVertexAttribPointer" ) || !load( va.enableVertexAttribArray, "glEnableVertexAttribArray" )
-		|| !load( va.compressedTextureSubImage2D, "glCompressedTextureSubImage2D" ) || !load( va.textureParameteri, "glTextureParameteri" ) )
+		|| !load( va.compressedTextureSubImage2D, "glCompressedTextureSubImage2D" ) || !load( va.textureParameteri, "glTextureParameteri" )
+		|| !load( va.clearBufferfv, "glClearBufferfv" ) || !load( va.blendEquationi, "glBlendEquationi" ) || !load( va.disablei, "glDisablei" ) )
 		return fatal( "GL entry points" );
 	std::printf( "BOLTVIEW GL on %s\n", reinterpret_cast<const char *>( glGetString( GL_RENDERER ) ) );
 	glPixelStorei( GL_PACK_ALIGNMENT, 1 );
@@ -200,7 +246,8 @@ int main( int argc, char ** argv )
 	vsrc.replace( ip, inc.size(), readFile( root + "/res/shaders/uniforms.glsl" ) );
 	const GLuint pUnpack = program( kTriVs, kUnpackFs, "unpack" ), pSlab = program( kTriVs, kSlabFs, "slab" );
 	const GLuint pBolt = program( vsrc, readFile( root + "/res/shaders/boltstrip.frag" ), "boltstrip" );
-	if ( !pUnpack || !pSlab || !pBolt )
+	const GLuint pCapBlend = program( kTriVs, kCapBlendFs, "1x blend" ), pProbe = program( kTriVs, kProbeFs, "blend probe" );
+	if ( !pUnpack || !pSlab || !pBolt || !pCapBlend || !pProbe )
 		return fatal( "GL programs" );
 	std::string why;
 	unsigned fc = 0, fds = 0;
@@ -213,7 +260,23 @@ int main( int argc, char ** argv )
 	const GLuint fbRef = fbo( fT2DMS, refCol, 0, refDs );
 	const GLuint unp = tex2d( WS, H, fRgba16f, GL_RGBA, GL_FLOAT, nullptr, false );
 	const GLuint fbUnp = fbo( GL_TEXTURE_2D, unp, 0, 0 );
-	if ( !fbFrame || !fbRef || !fbUnp )
+	// the per-sample reference's targets: the capture (4x RGBA32F on refDs: the slab's depth) and the 1x frame's three
+	const GLuint capCol = msTex( W, H, fRgba32f, S );
+	const GLuint fbCap = fbo( fT2DMS, capCol, 0, refDs );
+	GLuint bl[3] = {};
+	for ( GLuint & t : bl )
+		t = tex2d( WS, H, fRgba16f, GL_RGBA, GL_FLOAT, nullptr, false );
+	const GLuint fbBl0 = fbo( GL_TEXTURE_2D, bl[0], 0, 0 );  // R1's probe: the blended frame alone
+	GLuint fbBl = 0;
+	f.genFramebuffers( 1, &fbBl );
+	f.bindFramebuffer( fFb, fbBl );
+	for ( int k = 0; k < 3; k++ )
+		f.framebufferTexture2D( fFb, fCol0 + GLenum( k ), GL_TEXTURE_2D, bl[k], 0 );
+	const GLenum bl3[3] = { fCol0, fCol0 + 1, fCol0 + 2 };
+	f.drawBuffers( 3, bl3 );
+	if ( f.checkFramebufferStatus( fFb ) != fComplete )
+		fbBl = 0;
+	if ( !fbFrame || !fbRef || !fbUnp || !fbCap || !fbBl0 || !fbBl )
 		return fatal( "GL targets" );
 
 	// ---- the textures: two BC3 twins, the white, the palette (8 rows, linear, clamp)
@@ -429,6 +492,147 @@ int main( int argc, char ** argv )
 		if ( b.covered >= a.covered )
 			return fatal( "GL's cull case culls nothing" );
 	}
+	// ---- the per-sample reference (header): GL's program triangle by triangle with blending off, blended per sample at 1x
+	std::vector<std::uint16_t> refPS[4];
+	bool refOk = true;
+	{
+		auto readBl = [&]( int k ) {
+			std::vector<std::uint16_t> out( size_t( WS ) * H * 4 );
+			f.bindFramebuffer( fFb, fbBl );
+			glReadBuffer( fCol0 + GLenum( k ) );
+			glReadPixels( 0, 0, WS, H, GL_RGBA, fHalf, out.data() );
+			glReadBuffer( fCol0 );
+			return out;
+		};
+		auto loadBg = [&]() {  // the frame before the strips into the blended frame and the last-written one
+			for ( int k : { 0, 2 } ) {
+				glBindTexture( GL_TEXTURE_2D, bl[k] );
+				glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, WS, H, GL_RGBA, fHalf, bg.data() );
+			}
+			glBindTexture( GL_TEXTURE_2D, 0 );
+		};
+		auto halvesDiff = [&]( const std::vector<std::uint16_t> & x, const std::vector<std::uint16_t> & y ) {
+			size_t n = x.size() == y.size() ? 0 : x.size() + 1;
+			for ( size_t i = 0; i < std::min( x.size(), y.size() ); i++ )
+				n += x[i] != y[i];
+			return n;
+		};
+		auto probe = [&]() {
+			glEnable( GL_BLEND );
+			glBlendFunc( GL_SRC_ALPHA, GL_ONE );
+			f.useProgram( pProbe );
+			glDrawArrays( GL_TRIANGLES, 0, 3 );
+			drawState0();
+		};
+		// R1: one constant blended over the frame before, at 1x and at 4x (GL's own blend func)
+		loadBg();
+		f.bindFramebuffer( fFb, fbBl0 );
+		glViewport( 0, 0, WS, H );
+		drawState0();
+		probe();
+		std::vector<std::uint16_t> p1( bg.size() );
+		glReadPixels( 0, 0, WS, H, GL_RGBA, fHalf, p1.data() );
+		before( fbRef );
+		f.bindFramebuffer( fFb, fbRef );
+		glViewport( 0, 0, W, H );
+		drawState0();
+		probe();
+		glDepthFunc( GL_LESS );
+		const size_t r1 = halvesDiff( p1, readSamples( refCol ) );
+		std::printf( "BOLTVIEW reference R1: a constant blend 1x vs 4x, %zu halves differ (want 0)\n", r1 );
+		refOk = r1 == 0;
+		const int tris = nv / 3;
+		static const float zero4[4] = { 0.0f, 0.0f, 0.0f, 0.0f }, none[4] = { 0.0f, 0.0f, 0.0f, -1.0f };
+		for ( int c = 0; c < 4; c++ ) {
+			// R2's GL side: every triangle in one 4x draw, blending off (the last written output a sample)
+			before( fbRef );
+			bindCase( cases[c], fbRef );
+			glDisable( GL_BLEND );
+			va.bindVertexArray( vao );
+			glDrawArrays( GL_TRIANGLES, 0, nv );
+			va.bindVertexArray( 0 );
+			drawState0();
+			glDepthFunc( GL_LESS );
+			const std::vector<std::uint16_t> off4 = readSamples( refCol );
+			// the loop (refDs holds the slab from before(): the capture's depth test reads it, writes none)
+			before( fbRef );
+			loadBg();
+			f.bindFramebuffer( fFb, fbBl );
+			va.clearBufferfv( GL_COLOR, 1, zero4 );
+			f.useProgram( pCapBlend );
+			u1i( pCapBlend, "cap", 16 );
+			u1i( pCapBlend, "S", S );
+			bindUnit( 16, fT2DMS, capCol );
+			for ( int i = 0; i < tris; i++ ) {
+				bindCase( cases[c], fbCap );
+				glDisable( GL_BLEND );
+				va.clearBufferfv( GL_COLOR, 0, none );
+				va.bindVertexArray( vao );
+				glDrawArrays( GL_TRIANGLES, 3 * i, 3 );
+				va.bindVertexArray( 0 );
+				f.bindFramebuffer( fFb, fbBl );
+				glViewport( 0, 0, WS, H );
+				drawState0();
+				glEnable( GL_BLEND );
+				glBlendFunc( GL_SRC_ALPHA, GL_ONE );
+				va.blendEquationi( 1, 0x8008 );  // GL_MAX: the split flag
+				va.disablei( GL_BLEND, 2 );
+				f.useProgram( pCapBlend );
+				glDrawArrays( GL_TRIANGLES, 0, 3 );
+			}
+			va.blendEquationi( 1, 0x8006 );  // GL_FUNC_ADD
+			drawState0();
+			glDepthFunc( GL_LESS );
+			bindUnit( 16, fT2DMS, 0 );
+			refPS[c] = readBl( 0 );
+			const std::vector<std::uint16_t> split = readBl( 1 ), last = readBl( 2 );
+			const size_t r2 = halvesDiff( last, off4 );
+			// R3 on the never-split pixels; the merge record on the split ones (a pixel's 4 samples: (p * 4 + s) * 4 + c)
+			size_t r3 = 0, nSplit = 0, merged = 0, mergedMean = 0, splitSame = 0;
+			const std::vector<std::uint16_t> & gl4 = ref[c];
+			const std::vector<std::uint16_t> & rp = refPS[c];
+			const bool sizes = gl4.size() == rp.size() && split.size() == rp.size();
+			for ( size_t p = 0; p < size_t( W ) * H && sizes; p++ ) {
+				const size_t s0 = p * 4;
+				bool sp = false;
+				for ( size_t s = 0; s < 4; s++ )
+					sp = sp || split[( s0 + s ) * 4] != 0;
+				if ( !sp ) {
+					for ( size_t i = s0 * 4; i < ( s0 + 4 ) * 4; i++ )
+						r3 += rp[i] != gl4[i];
+					continue;
+				}
+				nSplit++;
+				bool glFlat = true, refFlat = true, same = true;
+				for ( size_t s = 1; s < 4; s++ )
+					for ( size_t k = 0; k < 4; k++ ) {
+						glFlat = glFlat && gl4[( s0 + s ) * 4 + k] == gl4[s0 * 4 + k];
+						refFlat = refFlat && rp[( s0 + s ) * 4 + k] == rp[s0 * 4 + k];
+					}
+				for ( size_t i = s0 * 4; i < ( s0 + 4 ) * 4; i++ )
+					same = same && rp[i] == gl4[i];
+				splitSame += same;
+				if ( glFlat && !refFlat ) {
+					merged++;
+					bool mean = true;
+					for ( size_t k = 0; k < 4; k++ ) {
+						float m = 0.0f;
+						for ( size_t s = 0; s < 4; s++ )
+							m += h2f( rp[( s0 + s ) * 4 + k] );
+						mean = mean && std::abs( ordered( f2h( m * 0.25f ) ) - ordered( gl4[s0 * 4 + k] ) ) <= 1;
+					}
+					mergedMean += mean;
+				}
+			}
+			const bool okC = r2 == 0 && r3 == 0 && sizes && glGetError() == GL_NO_ERROR;
+			std::printf( "BOLTVIEW %s reference: %d triangles one by one; R2 blend off 1x vs GL 4x %zu halves differ, R3 vs GL's 4x frame on %zu "
+				"never-split pixels %zu (each want 0): %s\n", cases[c].name, tris, r2, size_t( W ) * H - nSplit, r3, okC ? "OK" : "FAILED" );
+			std::printf( "BOLTVIEW %s GL merged pixels (info, NVIDIA's 4x blend): of %zu split pixels GL holds one value on %zu where the reference "
+				"is split (%zu of them the reference's mean within 1 ulp), %zu equal per sample, %zu other\n", cases[c].name, nSplit, merged,
+				mergedMean, splitSame, nSplit - merged - splitSame );
+			refOk = refOk && okC;
+		}
+	}
 	static char twinKeys[2];
 	auto runVk = [&]( int ci, int red, std::vector<std::uint16_t> & a ) -> bool {
 		const Case & c = cases[ci];
@@ -470,7 +674,7 @@ int main( int argc, char ** argv )
 		a = readSamples( fc );
 		return glGetError() == GL_NO_ERROR;
 	};
-	bool ok = true;
+	bool ok = refOk;
 	for ( int c = 0; c < 4; c++ ) {
 		std::vector<std::uint16_t> a;
 		if ( !runVk( c, 0, a ) ) {
@@ -478,10 +682,31 @@ int main( int argc, char ** argv )
 			ok = false;
 			continue;
 		}
-		const Verdict v = judge( bg, a, ref[c] );
+		const Verdict v = judge( bg, a, refPS[c] );
 		std::printf( "BOLTVIEW %s %s (%zu samples covered, %zu halves differ, %zu edge flips, %zu halves past 1 ulp outside them, "
 			"max %d ulp outside them)\n", cases[c].name, v.word(), v.covered, v.diff, v.flips, v.past1, v.maxu );
 		ok = ok && v.ok();
+		{
+			const Verdict g = judge( bg, a, ref[c] );
+			std::printf( "BOLTVIEW %s against GL's 4x frame (info): %s (%zu flips, %zu past 1 ulp)\n", cases[c].name, g.word(), g.flips, g.past1 );
+		}
+		{  // red avg (harness only): Vulkan's 4 samples averaged per pixel
+			std::vector<std::uint16_t> am( a.size() );
+			for ( size_t p = 0; p < a.size() / 16; p++ )
+				for ( size_t k = 0; k < 4; k++ ) {
+					float m = 0.0f;
+					for ( size_t s = 0; s < 4; s++ )
+						m += h2f( a[( p * 4 + s ) * 4 + k] );
+					for ( size_t s = 0; s < 4; s++ )
+						am[( p * 4 + s ) * 4 + k] = f2h( m * 0.25f );
+				}
+			const Verdict r = judge( bg, am, refPS[c] );
+			const bool must = c == 1 || c == 2;
+			std::printf( "BOLTVIEW %s red avg (Vulkan's samples averaged): %s (%zu covered, %zu flips, %zu past 1 ulp)%s\n", cases[c].name, r.word(),
+				r.covered, r.flips, r.past1, must ? ( r.ok() ? " PASSED: the gate cannot see it" : "" ) : " (info)" );
+			if ( must && r.ok() )
+				ok = false;
+		}
 	}
 	{
 		const WwVkPresent::FxStat st = WwVkPresent::takeBoltStat();
@@ -499,7 +724,7 @@ int main( int argc, char ** argv )
 			std::printf( "BOLTVIEW red %s: the run failed (counts as a FAIL)\n", r.name );
 			continue;
 		}
-		const Verdict v = judge( bg, a, ref[0] );
+		const Verdict v = judge( bg, a, refPS[0] );
 		std::printf( "BOLTVIEW red %s: %s (%zu covered, %zu halves differ, %zu flips, %zu past 1 ulp)\n", r.name, v.word(), v.covered,
 			v.diff, v.flips, v.past1 );
 		if ( v.ok() ) {
