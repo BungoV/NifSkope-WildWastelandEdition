@@ -75,6 +75,23 @@
 // Coverage limit: airFarVis (the cascades, the terrain shadow-height map, the clouds) reads blocks this gate binds zero (ussOn,
 // volCsm), so the far grid's own sun visibility is not reached here; the informative volFarMode line shows how much moves.
 // Without the far route (no WW_VK_AIRFAR) the far arms print "no route" and the gate FAILS (the red-first run).
+// Lane VKAIR21 (2026-11-16), the near grid's stage 1 with temporal off (census row |5, cellvolair.cpp vaPassInner's last else:
+// s.temporal off, the MRT refused, or red 262144): appended after the far arms (every line above stays byte-equal). GL draws it
+// as the app does: stage1()'s near set with volTemporal 0 and volHistOk 0, nothing on volHist, one attachment, layer k of the
+// inject (21 x 12 x 64), k in [0, 64). Vulkan: airTemporalRun with `far` and `plain` set (base 0, 0..64) into the SHARED inject,
+// the route's third instance. Arms "plain def" (key 0) and "plain all-on" (key 1, the atlas and both RT GI buffers bound).
+// Bar (set before the first run, never widened): GL writes every texel of the 64 layers, all finite, at least half lit; Vulkan
+// vs GL |vk - gl| <= 1e-4 max(1, |gl|) on every value; stat (takeAirPlainStat) 1 run, 64 draws, 0 image copies, and the
+// reader's and the far grid's stats 0 runs (the plain instance is its own); read twice EXACT; all-on: rtBufOf lookups 1 and 1 a
+// run; a rerun after the reds EXACT against the first run.
+// GL probes (LIVE >= 50): volLayer 0 on every draw, airTerr rewritten, volLampNow rewritten, the noise rewritten.
+// Reds, each must FAIL: route 1 volLayer stuck at 0; gate 2 the route dropped (the run skipped: the inject keeps the sentinel);
+// gate 4 a wrong input bound (the history on volLampNow: FAIL, or REFUSE named "volLampNow"); gate 8 volLampNow rewritten after
+// GL's draw; gate 16 airTerr rewritten after GL's draw; gate 128 the noise rewritten after GL's draw; gate 32 the other key:
+// REFUSE "key"; gate 64 the inject bound on volHist: REFUSE "feedback"; all-on 16384 and 65536 as the far arms.
+// airtemporalview.sh greps cellvolair.cpp for airPlainOnGl (the app's last else has a route).
+// Coverage limit: stage 2 in that else (the integrate when oneSum is off and fogRun did not take it) stays GL, not gated here.
+// Without the plain route (no WW_VK_AIRPLAIN) the plain arms print "no route" and the gate FAILS (the red-first run).
 // Last line `AIRTEMPORALVIEW GATE OK` or `AIRTEMPORALVIEW GATE FAILED`.
 #define FLD_NO_MAIN
 #include "farloddraw.cpp"
@@ -1326,6 +1343,231 @@ int main( int argc, char ** argv )
 #else
 			( void )vkInjF;
 			std::printf( "AIRTEMPORALVIEW %s: no route (WW_VK_AIRFAR not defined)\n", an );
+			fails++;
+#endif
+		}
+		gAtlasOn = 0;
+		boundAtlas = boundDdgi = boundRestir = 0;
+	}
+	// ---- lane VKAIR21: the near grid's stage 1 with temporal off (cellvolair.cpp vaPassInner's last else, census row |5)
+	{
+		auto plainStage = [&]( int key ) {
+			stage1( progs[key], 0, 6, 0 );
+			setU( progs[key], "volHistOk", { 0 } );	// the app: temporal && g.histOk
+		};
+		// GL's stage 1 as the app's last else draws it: one attachment, layer k of the inject, k in [0, 64), nothing on volHist
+		auto glRunP = [&]( int key, std::string & err, bool stuck ) {
+			sentinel( glInj );
+			plainStage( key );
+			bindInputs( units[key], 0 );
+			f.bindFramebuffer( fFb, fb );
+			const GLenum b0[1] = { 0x8CE0 };
+			f.drawBuffers( 1, b0 );
+			drawState0();
+			glViewport( 0, 0, kAtCols, kAtRows );
+			at.bindVertexArray( vao );
+			for ( int k = 0; k < kAtSlices; k++ ) {
+				at.framebufferTextureLayer( fFb, 0x8CE0, glInj, 0, k );
+				if ( k == 0 && f.checkFramebufferStatus( fFb ) != 0x8CD5 )
+					err = "GL's plain framebuffer is not complete";
+				setU( progs[key], "volLayer", { stuck ? 0.0 : double( k ) } );
+				glDrawElements( GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, nullptr );
+			}
+			at.framebufferTextureLayer( fFb, 0x8CE0, 0, 0, 0 );
+			f.bindFramebuffer( fFb, 0 );
+			unbindInputs( units[key] );
+			glFinish();
+			if ( const GLenum e = glGetError() )
+				err = "GL error " + std::to_string( e ) + " in GL's plain stage 1";
+			return readVol( glInj, kAtSlices );
+		};
+		ensureInputs( in, 6, true, true );
+		for ( int key = 0; key < 2; key++ ) {
+			const bool allOn = key == 1;
+			const std::string arm = allOn ? "plain all-on" : "plain def";
+			const char * an = arm.c_str();
+			gAtlasOn = allOn ? 1 : 0;
+			boundAtlas = allOn ? atlasTex : 0;
+			boundDdgi = allOn ? rtTex[0] : 0;
+			boundRestir = allOn ? rtTex[1] : 0;
+			std::string err;
+			const std::vector<float> g = glRunP( key, err, false );
+			if ( !err.empty() )
+				return fatal( arm + ": " + err );
+			{
+				const FarV self = judgeFar( g, g, kAtCols, kAtRows, 0, kAtSlices );
+				const bool ok = self.ok() && self.lit * 2 >= self.run;
+				std::printf( "AIRTEMPORALVIEW %s GL written: run %d texels, unwritten %d, non-finite %d, lit %d (want >= half) %s\n", an, self.run,
+					self.unwritten, self.nonFinite, self.lit, ok ? "OK" : "FAIL" );
+				fails += !ok;
+			}
+			auto probe = [&]( const char * what, const std::vector<float> & other ) {
+				const FarV p = judgeFar( g, other, kAtCols, kAtRows, 0, kAtSlices );
+				const bool live = p.moved >= kAtLive;
+				std::printf( "AIRTEMPORALVIEW %s probe %s: moved %d of %d %s\n", an, what, p.moved, p.run, live ? "LIVE" : "TESTS NOTHING" );
+				probesDead += !live;
+			};
+			probe( "volLayer 0 on every draw", glRunP( key, err, true ) );
+			fillTerr( in.terr, 2 );
+			probe( "airTerr rewritten", glRunP( key, err, false ) );
+			fillTerr( in.terr, 1 );
+			fillLamp( in.lampNow, 13 );
+			probe( "volLampNow rewritten", glRunP( key, err, false ) );
+			fillLamp( in.lampNow, 0 );
+			fillNoise( in.noise, 2 );
+			probe( "the noise rewritten", glRunP( key, err, false ) );
+			fillNoise( in.noise, 1 );
+			if ( !err.empty() )
+				return fatal( arm + " (probes): " + err );
+#ifdef WW_VK_AIRPLAIN
+			auto vkRunP = [&]( int red, std::string & w, WwVkPresent::AirTemporalStat & st, std::vector<float> * res, int * others ) {
+				sentinel( vkInj );
+				plainStage( key );
+				bindInputs( units[key], ( red & 64 ) ? vkInj : 0 );
+				if ( red & 4 )
+					bindUnit( units[key].lampNow, kAt3d, in.histA );	// a wrong input: the history on volLampNow
+				( void )WwVkPresent::takeAirPlainStat();
+				( void )WwVkPresent::takeAirTemporalStat();
+				( void )WwVkPresent::takeAirFarStat();
+				WwVkPresent::AirTemporalRun r;
+				r.prog = progs[key];
+				r.rt = key == 1;
+				r.wwDefs = WwVkPresent::airTemporalKey( ( key == 1 ) != ( ( red & 32 ) != 0 ) );
+				r.cols = kAtCols;
+				r.rows = kAtRows;
+				r.slices = kAtSlices;
+				r.strata = 0;
+				r.injectKey = keyOf( kInject );
+				r.histOutKey = 0;
+				r.far = true;
+				r.plain = true;
+				r.base = 0;
+				r.k0 = 0;
+				r.k1 = kAtSlices;
+				r.red = red & 1;
+				const bool ok = ( red & 2 ) ? true : WwVkPresent::airTemporalRun( r, gw, w );	// red 2: the route dropped
+				st = WwVkPresent::takeAirPlainStat();
+				if ( others )
+					*others = WwVkPresent::takeAirTemporalStat().runs + WwVkPresent::takeAirFarStat().runs;
+				unbindInputs( units[key] );
+				if ( ok && res )
+					*res = readVol( vkInj, kAtSlices );
+				return ok;
+			};
+			std::string w;
+			WwVkPresent::AirTemporalStat st;
+			std::vector<float> v0;
+			int others = -1;
+			if ( !vkRunP( 0, w, st, &v0, &others ) ) {
+				std::printf( "AIRTEMPORALVIEW %s: Vulkan refused: %s\n", an, w.c_str() );
+				fails++;
+				continue;
+			}
+			{
+				const std::vector<float> again = readVol( vkInj, kAtSlices );
+				const FarV twice = judgeFar( v0, again, kAtCols, kAtRows, 0, kAtSlices );
+				const bool same = twice.ok() && twice.diff == 0;
+				std::printf( "AIRTEMPORALVIEW %s read twice: %s (differ %d, unwritten %d)\n", an, same ? "EXACT" : "FAIL", twice.diff, twice.unwritten );
+				fails += !same;
+			}
+			{
+				const FarV v = judgeFar( g, v0, kAtCols, kAtRows, 0, kAtSlices );
+				std::printf( "AIRTEMPORALVIEW %s Vulkan vs GL: %s (run %d, unwritten %d, non-finite %d, differ %d, past 1e-4 rel %d, max rel %.3g)\n", an,
+					v.word(), v.run, v.unwritten, v.nonFinite, v.diff, v.bad, v.maxRel );
+				fails += !v.ok();
+				const bool cp = st.runs == 1 && st.draws == kAtSlices && st.copies == 0 && others == 0;
+				std::printf( "AIRTEMPORALVIEW %s stat: runs %d draws %d copies %d buffer copies %d, reader + far runs %d (want 1 run, %d draws, 0 copies, "
+							 "0 other runs) %s\n",
+					an, st.runs, st.draws, st.copies, st.bufCopies, others, kAtSlices, cp ? "OK" : "FAIL" );
+				fails += !cp;
+			}
+			if ( allOn ) {
+				const WwVkPresent::RtBufStat s0 = WwVkPresent::rtBufStat();
+				std::string lw;
+				WwVkPresent::AirTemporalStat ls;
+				const bool ran = vkRunP( 0, lw, ls, nullptr, nullptr );
+				const WwVkPresent::RtBufStat s1 = WwVkPresent::rtBufStat();
+				const unsigned long long da = s1.lookups[0] - s0.lookups[0], dr = s1.lookups[1] - s0.lookups[1];
+				const bool ok = ran && da == 1 && dr == 1;
+				std::printf( "AIRTEMPORALVIEW %s rtBufOf lookups a run: cellDdgiAtlas %llu cellRestir %llu (want 1 and 1) %s%s%s\n", an, da, dr,
+					ok ? "OK" : "FAIL", ran ? "" : " refused: ", ran ? "" : lw.c_str() );
+				fails += !ok;
+			}
+			std::vector<int> redList { 1, 2, 4, 8, 16, 128, 32, 64 };
+			if ( allOn )
+				redList.insert( redList.end(), { 16384, 65536 } );
+			for ( int red : redList ) {
+				redsRun++;
+				if ( red == 8 )
+					fillLamp( in.lampNow, 13 );
+				if ( red == 16 )
+					fillTerr( in.terr, 2 );
+				if ( red == 128 )
+					fillNoise( in.noise, 2 );
+				if ( red == 16384 )
+					_putenv( "WW_VKVIEW_RTBUF_RED=1" );
+				const GLuint keepRestir = boundRestir;
+				GLuint plainRs = 0, plainRsBuf = 0;
+				if ( red == 65536 ) {
+					const std::vector<float> d = rtData( 1, 0 );
+					f.genBuffers( 1, &plainRsBuf );
+					f.bindBuffer( 0x8C2A, plainRsBuf );
+					f.bufferData( 0x8C2A, std::ptrdiff_t( d.size() * 4 ), d.data(), fStatic );
+					f.bindBuffer( 0x8C2A, 0 );
+					glGenTextures( 1, &plainRs );
+					glBindTexture( 0x8C2A, plainRs );
+					ex.texBuffer( 0x8C2A, GLenum( fRg32f ), plainRsBuf );
+					glBindTexture( 0x8C2A, 0 );
+					boundRestir = plainRs;
+				}
+				std::string rw;
+				WwVkPresent::AirTemporalStat rs;
+				std::vector<float> rv;
+				const bool ran = vkRunP( red <= 4 || red == 32 || red == 64 ? red : 0, rw, rs, &rv, nullptr );
+				if ( red == 8 )
+					fillLamp( in.lampNow, 0 );
+				if ( red == 16 )
+					fillTerr( in.terr, 1 );
+				if ( red == 128 )
+					fillNoise( in.noise, 1 );
+				if ( red == 16384 )
+					_putenv( "WW_VKVIEW_RTBUF_RED=0" );
+				boundRestir = keepRestir;
+				if ( plainRs )
+					glDeleteTextures( 1, &plainRs );	// its buffer lives on (no glDeleteBuffers loaded)
+				bool fired = false;
+				FarV jv;
+				if ( red == 32 )
+					fired = !ran && rw.find( "key" ) != std::string::npos;
+				else if ( red == 64 )
+					fired = !ran && rw.find( "feedback" ) != std::string::npos;
+				else if ( red == 16384 )
+					fired = !ran && rw.find( "WW_VKVIEW_RTBUF_RED" ) != std::string::npos;
+				else if ( red == 65536 )
+					fired = !ran && rw.find( "cellRestir" ) != std::string::npos;
+				else if ( red == 4 && !ran )
+					fired = rw.find( "volLampNow" ) != std::string::npos;
+				else if ( ran ) {
+					jv = judgeFar( g, rv, kAtCols, kAtRows, 0, kAtSlices );
+					fired = !jv.ok();
+				}
+				std::printf( "AIRTEMPORALVIEW %s red %d: %s (unwritten %d, past 1e-4 rel %d, moved %d)%s%s\n", an, red, fired ? "FAIL (fired)" : "PASS (dead)",
+					jv.unwritten, jv.bad, jv.moved, ran ? "" : " refused: ", ran ? "" : rw.c_str() );
+				redsFired += fired;
+			}
+			{
+				std::string aw;
+				WwVkPresent::AirTemporalStat as;
+				std::vector<float> rv;
+				const bool ran = vkRunP( 0, aw, as, &rv, nullptr );
+				const FarV v = ran ? judgeFar( v0, rv, kAtCols, kAtRows, 0, kAtSlices ) : FarV();
+				const bool ok = ran && v.ok() && v.diff == 0 && as.copies == 0;
+				std::printf( "AIRTEMPORALVIEW %s rerun after the reds: %s (differ %d, copies %d want 0)%s%s\n", an, ok ? "EXACT" : "FAIL", v.diff, as.copies,
+					ran ? "" : " refused: ", ran ? "" : aw.c_str() );
+				fails += !ok;
+			}
+#else
+			std::printf( "AIRTEMPORALVIEW %s: no route (WW_VK_AIRPLAIN not defined)\n", an );
 			fails++;
 #endif
 		}

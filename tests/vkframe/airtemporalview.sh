@@ -23,4 +23,8 @@ echo "AIRTEMPORALVIEW app: rtBufOf( c.name ) calls in vkairlamp.inc + vkairtempo
 n4=$(grep -c 'WwVkPresent::airFarOnGl(' "$ROOT/src/features/air/cellvolair.cpp")
 echo "AIRTEMPORALVIEW app: airFarOnGl calls in cellvolair.cpp $n4 (want >= 1)"
 [ "$n4" -ge 1 ] || { echo "AIRTEMPORALVIEW GATE FAILED (the far loop has no Vulkan route)"; exit 1; }
+# lane VKAIR21: the near loop's last else (stage 1, temporal off) takes the plain route and says when it falls back to GL
+n5=$(grep -c 'WwVkPresent::airPlainOnGl(' "$ROOT/src/features/air/cellvolair.cpp")
+echo "AIRTEMPORALVIEW app: airPlainOnGl calls in cellvolair.cpp $n5 (want >= 1)"
+[ "$n5" -ge 1 ] || { echo "AIRTEMPORALVIEW GATE FAILED (the near loop's temporal-off stage 1 has no Vulkan route)"; exit 1; }
 tail -1 "$OUT/airtemporalview.txt" | grep -q "AIRTEMPORALVIEW GATE OK"
