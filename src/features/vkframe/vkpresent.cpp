@@ -75,6 +75,9 @@
 #include "features/vkframe/cloud_march_a_view_ps.spv.h"
 #include "features/vkframe/cloud_resolve_view_ps.spv.h"
 #include "features/vkframe/cloud_resolve_a_view_ps.spv.h"
+// lane VKCLOUD2: the march with the fly-through box (cloud_fly / cloud_fly_a)
+#include "features/vkframe/cloud_fly_view_ps.spv.h"
+#include "features/vkframe/cloud_fly_a_view_ps.spv.h"
 // lane VKFAR1: the far bulb dots as instanced quads (cell_fardots)
 #include "features/vkframe/fardots_view_vs.spv.h"
 #include "features/vkframe/fardots_view_ps.spv.h"
@@ -5604,8 +5607,8 @@ SkyStat takeSkyStat()
 // one crossing a pass on the present worker. Inputs GL owns go over as shared twins (a level each, glCopyImageSubData).
 namespace
 {
-enum FxProgId { kFxVolsky, kFxMarch, kFxMarchA, kFxResolve, kFxResolveA, kFxProgs };
-constexpr int kFxMaxTex = 8;
+enum FxProgId { kFxVolsky, kFxMarch, kFxMarchA, kFxResolve, kFxResolveA, kFxFly, kFxFlyA, kFxProgs };
+constexpr int kFxMaxTex = WwVkPresent::kFlyTex;
 constexpr VkDeviceSize kFxLooseAt = 512;  // b31 past b0 (336), on any minUniformBufferOffsetAlignment up to 256
 
 struct FxProg
@@ -5718,6 +5721,14 @@ bool fxStatic( std::string & why )
 	F.prog[kFxResolveA].bytes = sizeof( vkframe_cloud_resolve_a_view_ps_spv );
 	F.prog[kFxResolveA].ntex = 4;
 	F.prog[kFxResolveA].looseBytes = WwVkPresent::kT_resolve_aBytes;
+	F.prog[kFxFly].code = vkframe_cloud_fly_view_ps_spv;
+	F.prog[kFxFly].bytes = sizeof( vkframe_cloud_fly_view_ps_spv );
+	F.prog[kFxFly].ntex = WwVkPresent::kFlyTex;
+	F.prog[kFxFly].looseBytes = WwVkPresent::kT_flyBytes;
+	F.prog[kFxFlyA].code = vkframe_cloud_fly_a_view_ps_spv;
+	F.prog[kFxFlyA].bytes = sizeof( vkframe_cloud_fly_a_view_ps_spv );
+	F.prog[kFxFlyA].ntex = WwVkPresent::kFlyTex;
+	F.prog[kFxFlyA].looseBytes = WwVkPresent::kT_fly_aBytes;
 	if ( !fxModule( vkframe_tone_view_vs_spv, sizeof( vkframe_tone_view_vs_spv ), F.vs ) ) {
 		why = "the air / clouds' vertex module failed";
 		return false;
@@ -6020,7 +6031,7 @@ bool fxPasses( int samples, std::string & why )
 			why = "vkCreateRenderPass (the clouds) failed";
 			return false;
 		}
-		for ( int k = kFxMarch; k <= kFxResolveA; k++ )
+		for ( int k = kFxMarch; k < kFxProgs; k++ )
 			if ( !fxPipe( F.prog[k], F.cloudPass, 1, 2, false, false, F.prog[k].pipe[0], why ) )
 				return false;
 		built = true;
@@ -6492,7 +6503,7 @@ bool cloudRun( const CloudRun & t, std::string & why )
 	bool broken = false;
 	if ( !fxBegin( 1, broken, w ) )
 		return broken ? breakOff( w ) : refuse( w );
-	const int mp = t.accum ? kFxMarchA : kFxMarch, rp = t.accum ? kFxResolveA : kFxResolve;
+	const int mp = t.fly ? ( t.accum ? kFxFlyA : kFxFly ) : t.accum ? kFxMarchA : kFxMarch, rp = t.accum ? kFxResolveA : kFxResolve;
 	FxProg & M = F.prog[mp];
 	FxProg & R = F.prog[rp];
 	FxNames names;
@@ -6507,9 +6518,14 @@ bool cloudRun( const CloudRun & t, std::string & why )
 				return refuse( "the march's input t" + std::to_string( k ) + ": " + w );
 			smp[k] = t.tex[k].sampler;
 		}
+		const int sh = t.fly ? 0 : 1;  // cvShape's slot (the fly: shape detail map ..., the march: map shape detail ...)
 		if ( t.red & 2 ) {  // red: the shape and the detail swapped
-			std::swap( views[1], views[2] );
-			std::swap( smp[1], smp[2] );
+			std::swap( views[sh], views[sh + 1] );
+			std::swap( smp[sh], smp[sh + 1] );
+		}
+		if ( t.fly && ( t.red & 8 ) ) {  // red (lane VKCLOUD2): the box's distance field and the shape noise swapped
+			std::swap( views[0], views[WwVkPresent::kFlyTex - 1] );
+			std::swap( smp[0], smp[WwVkPresent::kFlyTex - 1] );
 		}
 		const VkImageView att[2] = { mc->view, md->view };
 		if ( !fxFb( F.fbM, F.cloudPass, att, 2, mc->w, mc->h ) )

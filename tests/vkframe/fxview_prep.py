@@ -104,11 +104,23 @@ else:
     cj = {j['name']: j for j in FJ.cloud_jobs()}
     if not cj:
         sys.exit('no cloud inputs')
-    for suffix, defs in (('', []), ('_a', ['WW_CLOUD_ACCUM'])):
+    # lane VKCLOUD2: cloud_f / cloud_fa = the march with the fly-through box (cloud_fly / cloud_fly_a), same inputs + the
+    # box: cloudflymath.h place() for the camera (0, 0, 0.2 km) and the Low band (1.5 km), preset Low (64 x 64 x 16 cells
+    # of 0.128 km, step 0.032, 64 steps), a distance field from random occupancy (the Chebyshev cells to the nearest one)
+    for suffix, defs, fly in (('', [], 0), ('_a', ['WW_CLOUD_ACCUM'], 0), ('_f', [], 1), ('_fa', ['WW_CLOUD_ACCUM'], 1)):
+        src = {'': '', '_a': '_a', '_f': '', '_fa': '_a'}[suffix]
         d = os.path.join(OUT, 'cloud' + suffix)
         os.makedirs(d, exist_ok=True)
-        s4, prev, res = cj['cloud%s_march_s4' % suffix], cj['cloud%s_march_prev' % suffix], cj['cloud%s_resolve' % suffix]
-        write_prog(d, 'march.frag.glsl', 'clouds/cloud_march.frag', defs)
+        s4, prev, res = cj['cloud%s_march_s4' % src], cj['cloud%s_march_prev' % src], cj['cloud%s_resolve' % src]
+        s4, prev = dict(s4), dict(prev)
+        s4['uniforms'], prev['uniforms'] = dict(s4['uniforms']), dict(prev['uniforms'])
+        if fly:
+            nxy, nz, cell = 64, 16, 0.128
+            box = {'cfOrgKm': [-32 * cell, -32 * cell, float(np.floor(1.5 / cell)) * cell], 'cfDim': [float(nxy), float(nxy), float(nz)],
+                   'cfCellKm': cell, 'cfStepKm': 0.032, 'cfMaxSteps': 64, 'cfSafe': 1.0, 'cfOn': 1.0, 'cfSkip': 1.0}
+            for U in (s4['uniforms'], prev['uniforms']):
+                U.update(box)
+        write_prog(d, 'march.frag.glsl', {'_f': 'clouds/cloud_fly.frag', '_fa': 'clouds/cloud_fly_a.frag'}.get(suffix, 'clouds/cloud_march.frag'), [] if fly else defs)
         write_prog(d, 'resolve.frag.glsl', 'clouds/cloud_resolve.frag', defs)
         write_uni(os.path.join(d, 's4.uni'), s4['uniforms'])
         write_uni(os.path.join(d, 'prev.uni'), prev['uniforms'])
@@ -121,8 +133,22 @@ else:
         T['cvMap'] = Tex('2d', 'rgba32f', m, 'linear', 'clamp')
         T['cvShape'] = Tex('3d', 'r8', T['cvShape'].data, 'linear', 'repeat', mips=1)  # cloudvol.cpp: mipmapped, trilinear
         T['cvDetail'] = Tex('3d', 'r8', T['cvDetail'].data, 'linear', 'repeat', mips=1)
-        order = ['cvMap', 'cvShape', 'cvDetail'] + (['cvBlue'] if suffix else []) + ['cvSunView', 'cvMoonView', 'cvScene', 'cvTrans']
+        order = ['cvMap', 'cvShape', 'cvDetail'] + (['cvBlue'] if src else []) + ['cvSunView', 'cvMoonView', 'cvScene', 'cvTrans']
+        if fly:  # cloud_fly_ps's t0.. (reflected): shape detail map trans sun moon scene [blue] sdf
+            occ = np.random.RandomState(29).rand(nz, nxy, nxy) < 0.04
+            far = np.where(occ, 0, 255).astype(np.int32)
+            for _ in range(40):  # Chebyshev distance by 3 x 3 x 3 min-dilation (clamped edges)
+                p = np.pad(far, 1, mode='edge')
+                m = far.copy()
+                for dz in (0, 1, 2):
+                    for dy in (0, 1, 2):
+                        for dx in (0, 1, 2):
+                            m = np.minimum(m, p[dz:dz + nz, dy:dy + nxy, dx:dx + nxy] + 1)
+                far = m
+            T['cfSdf'] = Tex('3d', 'r8', np.minimum(far, 255).astype(np.uint8), 'nearest', 'clamp')
+            order = ['cvShape', 'cvDetail', 'cvMap', 'cvTrans', 'cvSunView', 'cvMoonView', 'cvScene'] + (['cvBlue'] if src else []) + ['cfSdf']
+            print('cloud job cloud%s: the box field %d cells, %d occupied, %d free past cfSafe' % (suffix, far.size, int(occ.sum()), int((far - 1 >= 1).sum())))
         write_tex(d, T, order)
         (hw, hh), (mw, mh) = prev['size'], s4['size']
-        open(os.path.join(d, 'job.txt'), 'w', newline='\n').write('%d %d %d %d %d\n' % (hw, hh, mw, mh, 1 if suffix else 0))
+        open(os.path.join(d, 'job.txt'), 'w', newline='\n').write('%d %d %d %d %d %d\n' % (hw, hh, mw, mh, 1 if src else 0, fly))
         print('cloud job cloud%s: history %dx%d, march %dx%d' % (suffix, hw, hh, mw, mh))

@@ -634,6 +634,58 @@ inline constexpr FxField kT_march_a[] = {
 	{ "atHazeAlbedo", 1136, 3, 1, 0, 0 }, { "atHazeSpec", 1152, 3, 1, 0, 0 }, { "atMsOld", 1164, 1, 1, 0, 0 },
 };
 inline constexpr int kT_march_aBytes = 1168;
+// lane VKCLOUD2: the march with the fly-through box (cloud_fly_ps / cloud_fly_a_ps: + cf*, the box skip)
+// kT_fly: 64 fields, 1236 bytes (spirv-cross --reflect of the shipped SPIR-V; tools: notes/vkair1/tools/reflect_table.py)
+inline constexpr FxField kT_fly[] = {
+	{ "atRay", 0, 3, 1, 0, 0 }, { "atMieS", 12, 1, 1, 0, 0 }, { "atMieE", 16, 1, 1, 0, 0 }, { "atHaze", 20, 3, 1, 0, 0 },
+	{ "atOzone", 32, 3, 1, 0, 0 }, { "atG", 44, 1, 1, 0, 0 }, { "atHazeAlbedo", 48, 3, 1, 0, 0 },
+	{ "atHazeSpec", 64, 3, 1, 0, 0 }, { "atMsOld", 76, 1, 1, 0, 0 }, { "cvBands.baseKm", 80, 3, 1, 0, 0 },
+	{ "cvBands.topKm", 96, 3, 1, 0, 0 }, { "cvBands.density", 112, 3, 1, 0, 0 }, { "cvBands.coverage", 128, 3, 1, 0, 0 },
+	{ "cvBands.sheet", 140, 1, 1, 0, 0 }, { "cvBands.mapRect", 144, 4, 1, 0, 0 }, { "cvBands.windKm", 160, 3, 1, 0, 0 },
+	{ "cvCal", 176, 1, 34, 0, 0 }, { "cvViewSize", 720, 2, 1, 0, 0 }, { "cvCamR", 728, 1, 1, 0, 0 },
+	{ "cvSunW", 736, 3, 1, 0, 0 }, { "cvMoonW", 752, 3, 1, 0, 0 }, { "cvSunK", 764, 1, 1, 0, 0 },
+	{ "cvMoonK", 768, 1, 1, 0, 0 }, { "cvKeyW", 772, 3, 1, 0, 0 }, { "cvKeyK", 784, 1, 1, 0, 0 },
+	{ "cvCam", 800, 3, 1, 0, 3 }, { "cvProj", 848, 4, 1, 0, 0 }, { "cvCamKm", 864, 3, 1, 0, 0 },
+	{ "cvHistSize", 880, 2, 1, 0, 0 }, { "cvStride", 888, 1, 1, 0, 0 }, { "cvPhase", 896, 2, 1, 0, 0 },
+	{ "cvSteps", 904, 1, 1, 1, 0 }, { "cvTaps", 908, 1, 1, 1, 0 }, { "cvOctaves", 912, 1, 1, 1, 0 },
+	{ "cvLightKm", 916, 1, 1, 0, 0 }, { "cvPhasePrm", 928, 4, 1, 0, 0 }, { "cvAmb", 944, 3, 1, 0, 0 },
+	{ "cvAmbOn", 956, 1, 1, 0, 0 }, { "cvApOn", 960, 1, 1, 0, 0 }, { "cvDeckAp", 976, 4, 1, 0, 0 },
+	{ "cvFrame", 992, 1, 1, 0, 0 }, { "cvMaxKm", 996, 1, 1, 0, 0 }, { "cvSlab", 1000, 1, 1, 0, 0 },
+	{ "cvProbe", 1004, 1, 1, 1, 0 }, { "cvProbeRect", 1008, 4, 1, 0, 0 }, { "cvProbeBand", 1024, 1, 1, 1, 0 },
+	{ "cvMsOn", 1028, 1, 1, 0, 0 }, { "cvMsG", 1032, 1, 1, 0, 0 }, { "cvTint", 1040, 3, 3, 0, 0 },
+	{ "cvWaterK", 1088, 3, 1, 0, 0 }, { "cvSceneZ", 1104, 4, 1, 0, 0 }, { "cvTopOn", 1120, 1, 1, 0, 0 },
+	{ "cvAmbDark", 1124, 1, 1, 0, 0 }, { "cvIce", 1136, 3, 1, 0, 0 }, { "cvShaft", 1152, 4, 1, 0, 0 },
+	{ "cvAlbedoD", 1168, 3, 1, 0, 0 }, { "cfOrgKm", 1184, 3, 1, 0, 0 }, { "cfDim", 1200, 3, 1, 0, 0 },
+	{ "cfCellKm", 1212, 1, 1, 0, 0 }, { "cfStepKm", 1216, 1, 1, 0, 0 }, { "cfMaxSteps", 1220, 1, 1, 1, 0 },
+	{ "cfSafe", 1224, 1, 1, 0, 0 }, { "cfOn", 1228, 1, 1, 0, 0 }, { "cfSkip", 1232, 1, 1, 0, 0 },
+};
+inline constexpr int kT_flyBytes = 1248;
+// kT_fly_a: 65 fields, 1236 bytes (spirv-cross --reflect of the shipped SPIR-V; tools: notes/vkair1/tools/reflect_table.py)
+inline constexpr FxField kT_fly_a[] = {
+	{ "atRay", 0, 3, 1, 0, 0 }, { "atMieS", 12, 1, 1, 0, 0 }, { "atMieE", 16, 1, 1, 0, 0 }, { "atHaze", 20, 3, 1, 0, 0 },
+	{ "atOzone", 32, 3, 1, 0, 0 }, { "atG", 44, 1, 1, 0, 0 }, { "atHazeAlbedo", 48, 3, 1, 0, 0 },
+	{ "atHazeSpec", 64, 3, 1, 0, 0 }, { "atMsOld", 76, 1, 1, 0, 0 }, { "cvBands.baseKm", 80, 3, 1, 0, 0 },
+	{ "cvBands.topKm", 96, 3, 1, 0, 0 }, { "cvBands.density", 112, 3, 1, 0, 0 }, { "cvBands.coverage", 128, 3, 1, 0, 0 },
+	{ "cvBands.sheet", 140, 1, 1, 0, 0 }, { "cvBands.mapRect", 144, 4, 1, 0, 0 }, { "cvBands.windKm", 160, 3, 1, 0, 0 },
+	{ "cvCal", 176, 1, 34, 0, 0 }, { "cvViewSize", 720, 2, 1, 0, 0 }, { "cvCamR", 728, 1, 1, 0, 0 },
+	{ "cvSunW", 736, 3, 1, 0, 0 }, { "cvMoonW", 752, 3, 1, 0, 0 }, { "cvSunK", 764, 1, 1, 0, 0 },
+	{ "cvMoonK", 768, 1, 1, 0, 0 }, { "cvKeyW", 772, 3, 1, 0, 0 }, { "cvKeyK", 784, 1, 1, 0, 0 },
+	{ "cvCam", 800, 3, 1, 0, 3 }, { "cvProj", 848, 4, 1, 0, 0 }, { "cvCamKm", 864, 3, 1, 0, 0 },
+	{ "cvHistSize", 880, 2, 1, 0, 0 }, { "cvStride", 888, 1, 1, 0, 0 }, { "cvPhase", 896, 2, 1, 0, 0 },
+	{ "cvSteps", 904, 1, 1, 1, 0 }, { "cvTaps", 908, 1, 1, 1, 0 }, { "cvOctaves", 912, 1, 1, 1, 0 },
+	{ "cvLightKm", 916, 1, 1, 0, 0 }, { "cvPhasePrm", 928, 4, 1, 0, 0 }, { "cvAmb", 944, 3, 1, 0, 0 },
+	{ "cvAmbOn", 956, 1, 1, 0, 0 }, { "cvApOn", 960, 1, 1, 0, 0 }, { "cvDeckAp", 976, 4, 1, 0, 0 },
+	{ "cvFrame", 992, 1, 1, 0, 0 }, { "cvMaxKm", 996, 1, 1, 0, 0 }, { "cvSlab", 1000, 1, 1, 0, 0 },
+	{ "cvProbe", 1004, 1, 1, 1, 0 }, { "cvProbeRect", 1008, 4, 1, 0, 0 }, { "cvProbeBand", 1024, 1, 1, 1, 0 },
+	{ "cvMsOn", 1028, 1, 1, 0, 0 }, { "cvMsG", 1032, 1, 1, 0, 0 }, { "cvTint", 1040, 3, 3, 0, 0 },
+	{ "cvWaterK", 1088, 3, 1, 0, 0 }, { "cvSceneZ", 1104, 4, 1, 0, 0 }, { "cvTopOn", 1120, 1, 1, 0, 0 },
+	{ "cvAmbDark", 1124, 1, 1, 0, 0 }, { "cvIce", 1136, 3, 1, 0, 0 }, { "cvShaft", 1152, 4, 1, 0, 0 },
+	{ "cvBlueSlice", 1168, 1, 1, 1, 0 }, { "cvAlbedoD", 1172, 3, 1, 0, 0 }, { "cfOrgKm", 1184, 3, 1, 0, 0 },
+	{ "cfDim", 1200, 3, 1, 0, 0 }, { "cfCellKm", 1212, 1, 1, 0, 0 }, { "cfStepKm", 1216, 1, 1, 0, 0 },
+	{ "cfMaxSteps", 1220, 1, 1, 1, 0 }, { "cfSafe", 1224, 1, 1, 0, 0 }, { "cfOn", 1228, 1, 1, 0, 0 },
+	{ "cfSkip", 1232, 1, 1, 0, 0 },
+};
+inline constexpr int kT_fly_aBytes = 1248;
 // kT_resolve: 12 fields, 192 bytes (spirv-cross --reflect of the shipped SPIR-V; tools: notes/vkair1/tools/reflect_table.py)
 inline constexpr FxField kT_resolve[] = {
 	{ "cvMoveClamp", 0, 1, 1, 0, 0 }, { "cvHistSize", 4, 2, 1, 0, 0 }, { "cvStride", 12, 1, 1, 0, 0 },
@@ -696,16 +748,21 @@ struct FxStat
 	int fenceMisses = 0;            //!< lane VKWATER4: waterRun's wait on the last crossing's fence that did not return VK_SUCCESS
 };
 FxStat takeVolSkyStat();
+//! lane VKCLOUD2: the fly march's t0.. (cloud_fly_ps / cloud_fly_a_ps reflected; t7 cvBlue only in _a, cfSdf Load'd)
+inline constexpr int kFlyTex = 9;
 struct CloudRun
 {
 	bool accum = false;             //!< the _a twins (Cloud Accumulation)
+	bool fly = false;               //!< lane VKCLOUD2: the march with the fly-through box (tex in kFlyTex order)
 	int mw = 0, mh = 0, hw = 0, hh = 0, cur = 0;
 	std::uintptr_t marchKey = 0, histKey[2] = {};  //!< shared targets: key = RGBA16F colour, key + 1 = RG32F depth
-	FxTex tex[8];                   //!< the march's t0.. (march: map shape detail sun moon scene trans; _a: + blue at t3)
-	std::uint8_t march[kT_march_aBytes] = {};
+	FxTex tex[kFlyTex];             //!< the march's t0.. (march: map shape detail sun moon scene trans; _a: + blue at t3;
+	                                //!< fly: shape detail map trans sun moon scene blue sdf)
+	std::uint8_t march[kT_flyBytes > kT_march_aBytes ? kT_flyBytes : kT_march_aBytes] = {};
 	std::uint8_t resolve[kT_resolve_aBytes] = {};
 	int red = 0;                    //!< gates only: 1 the resolve's march / history inputs swapped, 2 the march's t1 / t2
-	                                //!< swapped, 4 no march (the caller filled the march targets)
+	                                //!< swapped, 4 no march (the caller filled the march targets), 8 the fly's cfSdf and
+	                                //!< cvShape swapped (lane VKCLOUD2)
 };
 //! GL current: the march (into the shared march targets) and the resolve (into hist[cur]) on Vulkan, one crossing
 bool cloudRun( const CloudRun & t, std::string & why );

@@ -85,6 +85,8 @@ VKFRAME_FX = {'volsky_view_ps': 'air/volsky_view_ps', 'cloud_march_view_ps': 'cl
 	'precip_look_view_ps': 'weather/precip_look_view_ps',	# lane VKFAR2: L8 slice 3, the look over that copy
 	'taareactive_view_ps': 'post/taa_reactive_ps'}	# lane VKFAR7: the TAA mask's reactive pass
 VKFRAME_FX['lamp_view_ps'] = 'lights/lamp_view_ps'	# lane VKLAMP1: the lamps' plain shadow cube faces
+VKFRAME_FX['cloud_fly_view_ps'] = 'clouds/cloud_fly_ps'	# lane VKCLOUD2: the march with the fly-through box
+VKFRAME_FX['cloud_fly_a_view_ps'] = 'clouds/cloud_fly_a_ps'	# lane VKCLOUD2
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FX]
 # lane VKFAR1: the far dots' vertex stage, the script's `fxv <name> <dir/file>` lines (fx()'s shifts, vs_6_0)
 VKFRAME_FXV = {'fardots_view_vs': 'far-lod/cell_fardots_view_vs',

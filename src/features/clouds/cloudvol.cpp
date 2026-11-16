@@ -698,6 +698,31 @@ CvVk & cvVk()
 	return v;
 }
 
+//! lane VKCLOUD2: the fly march's samplers as cloud_fly_ps / cloud_fly_a_ps's t0.. (reflected; t7 cvBlue only in _a)
+void cvVkCatchFly( NifSkopeOpenGLContext::GLFunctions * fn, GLuint prog, bool accum )
+{
+	CvVk & v = cvVk();
+	static const char * const kName[WwVkPresent::kFlyTex] = {
+		"cvShape", "cvDetail", "cvMap", "cvTrans", "cvSunView", "cvMoonView", "cvScene", "cvBlue", "cfSdf" };
+	static const int kType[WwVkPresent::kFlyTex] = { 1, 1, 0, 0, 0, 0, 0, 0, 1 };
+	static char twin[2][WwVkPresent::kFlyTex];
+	const int a = accum ? 1 : 0;
+	v.t.fly = true;
+	for ( int k = 0; k < WwVkPresent::kFlyTex && v.ok; k++ ) {
+		WwVkPresent::FxTex & x = v.t.tex[k];
+		x = WwVkPresent::FxTex();
+		if ( k == 7 && !accum )
+			continue;	// the plain fly has no cvBlue: the slot reads the zero 2D texture
+		v.ok = WwVkPresent::fxTexOf( fn, prog, kName[k], kType[k], x, v.why );
+		x.twin = reinterpret_cast<std::uintptr_t>( &twin[a][k] );
+		x.still = k <= 1 || k == 7;	// the noise volumes and the blue noise sheet: made once; the box's field moves
+	}
+	if ( accum )
+		WwVkPresent::fxPack( fn, prog, WwVkPresent::kT_fly_a, int( std::size( WwVkPresent::kT_fly_a ) ), v.t.march );
+	else
+		WwVkPresent::fxPack( fn, prog, WwVkPresent::kT_fly, int( std::size( WwVkPresent::kT_fly ) ), v.t.march );
+}
+
 //! the march program's samplers as its HLSL t0.. (cloud_march_ps / cloud_march_a_ps: + cvBlue at t3)
 void cvVkCatchMarch( NifSkopeOpenGLContext::GLFunctions * fn, GLuint prog, bool accum )
 {
@@ -823,7 +848,9 @@ bool marchPass(Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f,
 	p->uni4f( "cvSceneZ", FloatVector4( g.sceneZ[0], g.sceneZ[1], g.sceneZ[2], sceneTex ? 1.0f : 0.0f ) );
 	if ( fly )
 		wwCloudFlyUniforms( r, p, 7 );
-	if ( cvVk().capture )
+	if ( cvVk().capture && fly )
+		cvVkCatchFly( fn, p->id, acc );	// lane VKCLOUD2: the march with the fly-through box
+	else if ( cvVk().capture )
 		cvVkCatchMarch( fn, p->id, acc );	// lane VKAIR1: the present device draws it (cvOnVulkan)
 	else
 		quad( r );
@@ -891,12 +918,15 @@ bool resolvePass( Renderer * r, CvGpu & g, const CvRedo & d )
 
 /* lane VKAIR1 (row L6): the march and the resolve on the present device into the shared march / history targets, one
  * crossing (the programs set up as GL's, their state read back). false: GL draws both (the reason counted in the
- * "vk clouds:" line, one a 5 s window). Fly-through and Cloud Variety stay GL's (their programs have no Vulkan twin). */
+ * "vk clouds:" line, one a 5 s window). Cloud Variety stays GL's (cloud_march_v has no Vulkan twin); the fly-through box's march runs here since lane
+ * VKCLOUD2 (cloud_fly / cloud_fly_a twins; red WW_VKVIEW_CLOUDFLY_RED=1: GL's). */
 bool cvOnVulkan( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f, const WwCloudMap & m, GLuint sceneTex )
 {
 	static std::string said;
 	static auto at = std::chrono::steady_clock::now() - std::chrono::seconds( 10 );
 	static WwVkPresent::FxStat sum;
+	static int flyRuns = 0, flyGl = 0;	// lane VKCLOUD2: the frames the fly-through box was drawn, by route
+	static std::string flyWhy;
 	auto say = [&]() {
 		const WwVkPresent::FxStat st = WwVkPresent::takeCloudStat();
 		sum.runs += st.runs;
@@ -929,18 +959,28 @@ bool cvOnVulkan( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & 
 			std::fprintf( stderr, "%s\n", s.c_str() );
 			said = s;
 		}
+		if ( flyRuns + flyGl > 0 ) {
+			std::string fl = "vk cloudfly: the fly-through box on Vulkan " + std::to_string( flyRuns ) + " frames, on GL "
+				+ std::to_string( flyGl );
+			if ( flyGl > 0 )
+				fl += " (last: " + flyWhy + ")";
+			std::fprintf( stderr, "%s\n", fl.c_str() );
+		}
+		flyRuns = flyGl = 0;
 		at = now;
 		sum = WwVkPresent::FxStat();
 	};
 	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_CLOUD_RED" ) )
 		return false;	// GL's (red or the view not on Vulkan): ensure() said where the targets live
 	bool drew = false;
+	const bool flyOn = wwCloudFlyActive( r );	// lane VKCLOUD2: the march with the box runs on Vulkan too
+	std::string glWhy;
 	if ( !g.march.shared || !g.hist[0].shared || !g.hist[1].shared ) {
-		WwVkPresent::cloudOnGl( "the march / history targets are GL's own" );
-	} else if ( wwCloudFlyActive( r ) ) {
-		WwVkPresent::cloudOnGl( "the fly-through box (no Vulkan twin of cloud_fly)" );
+		WwVkPresent::cloudOnGl( ( glWhy = "the march / history targets are GL's own" ).c_str() );
+	} else if ( flyOn && wwEnvInt( "WW_VKVIEW_CLOUDFLY_RED" ) == 1 ) {
+		WwVkPresent::cloudOnGl( ( glWhy = "the fly-through box (red WW_VKVIEW_CLOUDFLY_RED=1)" ).c_str() );
 	} else if ( d.b.variety ) {
-		WwVkPresent::cloudOnGl( "Cloud Variety (no Vulkan twin of cloud_march_v)" );
+		WwVkPresent::cloudOnGl( ( glWhy = "Cloud Variety (no Vulkan twin of cloud_march_v)" ).c_str() );
 	} else {
 		CvVk & v = cvVk();
 		v.t = WwVkPresent::CloudRun();
@@ -950,9 +990,9 @@ bool cvOnVulkan( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & 
 		const bool set = marchPass( r, g, d, f, m, sceneTex ) && resolvePass( r, g, d );
 		v.capture = false;
 		if ( !set ) {
-			WwVkPresent::cloudOnGl( "a cloud program did not link" );
+			WwVkPresent::cloudOnGl( ( glWhy = "a cloud program did not link" ).c_str() );
 		} else if ( !v.ok ) {
-			WwVkPresent::cloudOnGl( v.why.c_str() );
+			WwVkPresent::cloudOnGl( ( glWhy = v.why ).c_str() );
 		} else {
 			v.t.accum = d.accum;
 			v.t.mw = d.mw;
@@ -963,9 +1003,13 @@ bool cvOnVulkan( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & 
 			v.t.marchKey = g.march.key;
 			v.t.histKey[0] = g.hist[0].key;
 			v.t.histKey[1] = g.hist[1].key;
-			std::string why;
-			drew = WwVkPresent::cloudRun( v.t, why );
+			drew = WwVkPresent::cloudRun( v.t, glWhy );
 		}
+	}
+	if ( flyOn ) {
+		( drew ? flyRuns : flyGl )++;
+		if ( !drew )
+			flyWhy = glWhy;
 	}
 	say();
 	return drew;

@@ -918,16 +918,20 @@ int main( int argc, char ** argv )
 		WwVkPresent::toneFrameDrop();
 	} else {
 		// ---------------------------------------------------------------- L6: the clouds' march + resolve
-		static char keys[2][6], twins[2][8];
+		// lane VKCLOUD2: cloud_f / cloud_fa = the march with the fly-through box (cloud_fly / cloud_fly_a, the kFlyTex slots)
+		static char keys[4][6], twins[4][WwVkPresent::kFlyTex];
+		static const char * const kJob[4] = { "cloud", "cloud_a", "cloud_f", "cloud_fa" };
 		bool started = false;
-		for ( int a = 0; a < 2; a++ ) {
-			const std::string jd = dir + ( a ? "/cloud_a" : "/cloud" );
-			const char * var = a ? "cloud_a" : "cloud";
+		for ( int a = 0; a < 4; a++ ) {
+			const std::string jd = dir + "/" + kJob[a];
+			const char * var = kJob[a];
 			std::vector<int> jv;
 			if ( !readJob( jd + "/job.txt", jv, 5 ) )
 				return fatal( std::string( "job.txt of " ) + var );
 			const int hw = jv[0], hh = jv[1], mw = jv[2], mh = jv[3];
-			const bool accum = jv[4] != 0;
+			const bool accum = jv[4] != 0, fly = jv.size() > 5 && jv[5] != 0;
+			if ( fly != ( a >= 2 ) )
+				return fatal( std::string( "job.txt's fly flag of " ) + var );
 			if ( !started ) {
 				unsigned fc = 0, fds = 0;
 				if ( !WwVkPresent::viewBegin( hw, hh, S, glProc, why ) )
@@ -948,13 +952,23 @@ int main( int argc, char ** argv )
 			}
 			const UniMap s4 = readUni( jd + "/s4.uni" ), prev = readUni( jd + "/prev.uni" ), res = readUni( jd + "/resolve.uni" );
 			std::vector<TexIn> tex = readTex( jd );
-			const std::vector<std::string> names = accum
+			std::vector<std::string> names = accum
 				? std::vector<std::string> { "cvMap", "cvShape", "cvDetail", "cvBlue", "cvSunView", "cvMoonView", "cvScene", "cvTrans" }
 				: std::vector<std::string> { "cvMap", "cvShape", "cvDetail", "cvSunView", "cvMoonView", "cvScene", "cvTrans" };
+			if ( fly ) {
+				names = { "cvShape", "cvDetail", "cvMap", "cvTrans", "cvSunView", "cvMoonView", "cvScene" };
+				if ( accum )
+					names.push_back( "cvBlue" );
+				names.push_back( "cfSdf" );
+			}
+			auto is3 = [&]( size_t k ) { return names[k] == "cvShape" || names[k] == "cvDetail" || names[k] == "cfSdf"; };
+			// the CloudRun slot of input k: the plain fly has no cvBlue, so its cfSdf sits at kFlyTex - 1
+			auto slotOf = [&]( size_t k ) { return fly && !accum && k >= 7 ? k + 1 : k; };
+			const int sh = fly ? 0 : 1;  // cvShape's input (and slot); cvDetail is the next
 			if ( tex.size() != names.size() )
 				return fatal( "tex.txt" );
 			for ( size_t k = 0; k < tex.size(); k++ ) {
-				if ( tex[k].name != names[k] || tex[k].type != ( k == 1 || k == 2 ? 1 : 0 ) )
+				if ( tex[k].name != names[k] || tex[k].type != ( is3( k ) ? 1 : 0 ) )
 					return fatal( "tex.txt order at " + tex[k].name );
 				if ( !upload( jd, tex[k], 0 ) )
 					return fatal( "upload " + tex[k].name );
@@ -1051,6 +1065,7 @@ int main( int argc, char ** argv )
 				f.bindFramebuffer( fFb, 0 );
 				WwVkPresent::CloudRun t;
 				t.accum = accum;
+				t.fly = fly;
 				t.mw = mw;
 				t.mh = mh;
 				t.hw = hw;
@@ -1061,14 +1076,29 @@ int main( int argc, char ** argv )
 				t.histKey[1] = kH1;
 				bindMarch( s4 );
 				for ( size_t k = 0; k < names.size(); k++ ) {
-					if ( !WwVkPresent::fxTexOf( &ga, pM, names[k].c_str(), k == 1 || k == 2 ? 1 : 0, t.tex[k], why ) ) {
+					WwVkPresent::FxTex & x = t.tex[slotOf( k )];
+					if ( !WwVkPresent::fxTexOf( &ga, pM, names[k].c_str(), is3( k ) ? 1 : 0, x, why ) ) {
 						std::printf( "%s %s: fxTexOf refused: %s\n", gTag, var, why.c_str() );
 						return false;
 					}
-					t.tex[k].twin = reinterpret_cast<std::uintptr_t>( &twins[a][k] );
-					t.tex[k].still = k == 1 || k == 2 || ( accum && k == 3 );
+					x.twin = reinterpret_cast<std::uintptr_t>( &twins[a][slotOf( k )] );
+					x.still = names[k] == "cvShape" || names[k] == "cvDetail" || names[k] == "cvBlue";
 				}
-				if ( accum )
+				if ( fly ) {
+					const WwVkPresent::FxField * tb = accum ? WwVkPresent::kT_fly_a : WwVkPresent::kT_fly;
+					const int nf = accum ? int( std::size( WwVkPresent::kT_fly_a ) ) : int( std::size( WwVkPresent::kT_fly ) );
+					WwVkPresent::fxPack( &ga, pM, tb, nf, t.march );
+					if ( red & 16 ) {  // red (gate only): b31's cfStepKm reads cfCellKm (one box field a slot late)
+						int cell = -1, step = -1;
+						for ( int i = 0; i < nf; i++ ) {
+							cell = std::string( tb[i].name ) == "cfCellKm" ? tb[i].offset : cell;
+							step = std::string( tb[i].name ) == "cfStepKm" ? tb[i].offset : step;
+						}
+						if ( cell < 0 || step < 0 )
+							return false;
+						std::memcpy( t.march + step, t.march + cell, 4 );
+					}
+				} else if ( accum )
 					WwVkPresent::fxPack( &ga, pM, WwVkPresent::kT_march_a, int( std::size( WwVkPresent::kT_march_a ) ), t.march );
 				else
 					WwVkPresent::fxPack( &ga, pM, WwVkPresent::kT_march, int( std::size( WwVkPresent::kT_march ) ), t.march );
@@ -1077,7 +1107,7 @@ int main( int argc, char ** argv )
 					WwVkPresent::fxPack( &ga, pR, WwVkPresent::kT_resolve_a, int( std::size( WwVkPresent::kT_resolve_a ) ), t.resolve );
 				else
 					WwVkPresent::fxPack( &ga, pR, WwVkPresent::kT_resolve, int( std::size( WwVkPresent::kT_resolve ) ), t.resolve );
-				t.red = red | ( marchFromGl ? 4 : 0 );
+				t.red = ( red & ~16 ) | ( marchFromGl ? 4 : 0 );
 				if ( !WwVkPresent::cloudRun( t, why ) ) {
 					std::printf( "%s %s: cloudRun refused: %s\n", gTag, var, why.c_str() );
 					return false;
@@ -1113,8 +1143,8 @@ int main( int argc, char ** argv )
 				ok = rel( "hist[0] depth", gHD, readRg32f( sHD[0], hw, hh ), false ) && ok;
 			}
 			// the noise twins hold every level of GL's mips (a twin of one level reads 0 past level 0: the march moved ~10 %)
-			for ( int k = 1; k <= 2; k++ ) {
-				const int n = k == 1 ? 128 : 32, levels = k == 1 ? 8 : 6;
+			for ( int k = sh; k <= sh + 1; k++ ) {
+				const int n = k == sh ? 128 : 32, levels = k == sh ? 8 : 6;
 				GLuint tw = 0;
 				if ( !WwVkPresent::sharedTarget( reinterpret_cast<std::uintptr_t>( &twins[a][k] ), 1, n, n, n, fR8, tw, why, levels ) )
 					return fatal( "the noise twin: " + why );
@@ -1151,6 +1181,18 @@ int main( int argc, char ** argv )
 					redFails ? "FAIL" : "BOUND", var, ran ? "ran" : "did not run", c.past, c.n, h.past );
 				ok = ok && redFails;
 			}
+			// lane VKCLOUD2: the fly's reds (the box's field in the shape noise's slot; b31's cfStepKm a field late)
+			for ( int fr : { 8, 16 } ) {
+				if ( !fly )
+					break;
+				const bool ran = runVk( fr, false );
+				const Rel c = compareRel( gMC, ran ? readRgba16f( sMC, mw, mh ) : std::vector<float>() );
+				const Rel h = compareRel( gHC, ran ? readRgba16f( sHC[0], hw, hh ) : std::vector<float>() );
+				const bool redFails = !ran || !c.ok() || !h.ok();
+				std::printf( "%s RED %s %s %s (%s; march %zu of %zu past rel 1e-3, hist %zu; must FAIL)\n", gTag, redFails ? "FAIL" : "BOUND", var,
+					fr == 8 ? "cfSdf / cvShape swapped" : "cfStepKm := cfCellKm", ran ? "ran" : "did not run", c.past, c.n, h.past );
+				ok = ok && redFails;
+			}
 			{
 				const bool ran = runVk( 1, true );
 				const Rel c = compareRel( gHC, ran ? readRgba16f( sHC[0], hw, hh ) : std::vector<float>() );
@@ -1158,6 +1200,19 @@ int main( int argc, char ** argv )
 				std::printf( "%s RED %s %s resolve's march / history swapped (%zu of %zu values differ; must FAIL)\n", gTag,
 					redFails ? "FAIL" : "EXACT", var, c.differ, c.n );
 				ok = ok && redFails;
+			}
+			// lane VKCLOUD2: the fixture reaches the box: GL's fly march with cfOn 0 (the plain march, cloud_march.frag) differs
+			if ( fly ) {
+				UniMap off = s4;
+				off["cfOn"] = std::vector<double> { 0.0 };
+				bindMarch( off );
+				draw( fbM, mw, mh, pM );
+				f.bindFramebuffer( fFb, 0 );
+				const Rel b = compareRel( gMC, readRgba16f( mC, mw, mh ) );
+				const bool reach = b.n > 0 && b.differ > 0;
+				std::printf( "%s %s the box reached: %s (GL's fly vs GL's plain march: %zu of %zu values differ, %zu past rel 1e-3; must differ)\n",
+					gTag, var, reach ? "YES" : "NO", b.differ, b.n, b.past );
+				ok = ok && reach;
 			}
 			for ( std::uintptr_t k : { kM, kM + 1, kH0, kH0 + 1, kH1, kH1 + 1 } )
 				WwVkPresent::sharedTargetDrop( k );
