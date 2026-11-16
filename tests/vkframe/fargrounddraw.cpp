@@ -641,6 +641,31 @@ int main( int argc, char ** argv )
 			if ( l >= 0 )
 				f.uniform1fv( l, 1, &v );
 		}
+		{	/* lane VKGROUND5 (VKGROUND4's fgpagesdraw fix): volPackDims.xyz = the packed air volume's size in texels, as
+			 * cellvolair.cpp sets it. Seeded in [0.05, 1) it made wwGridAt's clamp( uv * share, 0.5 / dims, share - 0.5 / dims )
+			 * run with lo > hi (undefined in GLSL and SPIR-V; NV's two compilers differ) on seed 1, whose far air grid is on */
+			const GLint l = f.getUniformLocation( pFg, "volPackDims" ), lp = f.getUniformLocation( pFg, "volPack" );
+			const Smp * vt = nullptr;
+			for ( const Smp & s : smp )
+				if ( s.name == "volTex" )
+					vt = &s;
+			if ( l >= 0 && vt ) {
+				float pd[4] = {}, pk[4] = {};
+				f.getUniformfv( pFg, l, pd );
+				if ( lp >= 0 )
+					f.getUniformfv( pFg, lp, pk );
+				pd[0] = float( vt->w );
+				pd[1] = float( vt->h );
+				pd[2] = float( vt->d );
+				f.uniform4fv( l, 1, pd );
+				const bool ok = pk[0] >= 1.0f / pd[0] && pk[1] >= 1.0f / pd[1] && pk[2] >= 1.0f / pd[0] && pk[3] >= 1.0f / pd[1];
+				std::printf( "FARGROUNDDRAW seed %d volPackDims %g x %g x %g (volTex), volPack shares %s the half-texel clamp\n", seed,
+					double( pd[0] ), double( pd[1] ), double( pd[2] ), ok ? "inside" : "OUTSIDE" );
+				if ( !ok )
+					return fatal( "volPack under one texel of the air volume (wwGridAt's clamp undefined)" );
+			} else if ( l >= 0 )
+				return fatal( "volPackDims read but no volTex sampler" );
+		}
 		std::printf( "FARGROUNDDRAW seed %d: %d loose uniforms seeded%s, fgMode 1, decals on\n", seed, nu, scissor ? ", a scissor" : "" );
 
 		auto glDraw = [&]() {
