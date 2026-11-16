@@ -17,6 +17,7 @@
 #include "features/vkframe/vkwater_tables.h"
 #include "features/vkframe/vkfarlod_tables.h"
 #include "features/vkframe/vkfarground_tables.h"  // lane VKFAR3
+#include "features/vkframe/vkfarlodrt_tables.h"  // lane VKFAR26: the rings' RT / DG twins (b31)
 
 namespace WwVkPresent
 {
@@ -420,7 +421,9 @@ struct WaterCmd
 };
 //! the largest pixel-stage loose block of the shaded twins (water, the far LOD rings, lane VKFAR3: the far ground)
 constexpr int kTwinPsMax2 = kT_farlodPsBytes > kWaterPsLooseMax ? kT_farlodPsBytes : kWaterPsLooseMax;
-constexpr int kTwinPsMax = kT_fargndPsBytes > kTwinPsMax2 ? kT_fargndPsBytes : kTwinPsMax2;
+constexpr int kTwinPsMax3 = kT_fargndPsBytes > kTwinPsMax2 ? kT_fargndPsBytes : kTwinPsMax2;
+constexpr int kTwinPsMax4 = kT_farlodDgPsBytes > kTwinPsMax3 ? kT_farlodDgPsBytes : kTwinPsMax3;  // lane VKFAR26: the rings' RT twins
+constexpr int kTwinPsMax = kT_farlodRtPsBytes > kTwinPsMax4 ? kT_farlodRtPsBytes : kTwinPsMax4;
 
 /* everything the shaded draw reads: the census, GL's vertex array, element range, blocks, loose uniforms, raster state.
  * Indices GL_UNSIGNED_SHORT triangles, or 3-vertex patches for a tessellated variant (bsshape's drawElements). */
@@ -585,6 +588,15 @@ template <class Fn> void farGroundStateOf( Fn * fn, unsigned prog, WaterRun & r 
 	twinStateOf( fn, prog, r, kT_fargndPs, int( sizeof( kT_fargndPs ) / sizeof( kT_fargndPs[0] ) ), kT_fargndPsBytes );
 }
 
+//! lane VKFAR26: the far LOD rings' RT GI side (fo4_cellcsm under the RT keys): v 1 the all-on key, 2 the DG key
+template <class Fn> void farLodRtStateOf( Fn * fn, unsigned prog, WaterRun & r, int v )
+{
+	if ( v == 2 )
+		twinStateOf( fn, prog, r, kT_farlodDgPs, int( sizeof( kT_farlodDgPs ) / sizeof( kT_farlodDgPs[0] ) ), kT_farlodDgPsBytes );
+	else
+		twinStateOf( fn, prog, r, kT_farlodRtPs, int( sizeof( kT_farlodRtPs ) / sizeof( kT_farlodRtPs[0] ) ), kT_farlodRtPsBytes );
+}
+
 //! lane VKWATER1: the device's side of the verdict (vkwater.inc)
 WaterCaps waterCaps();
 /*! lane VKWATER2: one census input's twin on the present device, GL current: sharedTarget (colour, integer, depth 2D /
@@ -634,6 +646,11 @@ FxStat takeFarGroundDrawStat();
 //! one far-ground draw stayed on GL (why: the route's reason or farGroundRun's)
 void farGroundOnGl( const char * why );
 WaterStat takeFarGroundGlStat();
+/*! lane VKFAR26: the far LOD rings under an RT GI key (fargnd_view_vs + fo4_cellcsm's RT twin: v 1 the all-on key RESTIR +
+ * RTDDGI + CASCADES, v 2 the DG key RTDDGI + CASCADES; r from farLodRtStateOf) into the tone frame, one crossing. false: why */
+bool farLodRtRun( const WaterRun & r, int v, std::string & why );
+std::string farLodRtDrawRefusal( int v );
+FxStat takeFarLodRtDrawStat( int v );
 /*! lane VKFAR4 (batching): the frame's ring-0 tiles in one crossing a batch (twinRunN: per-draw host slices and sets).
  * farGroundQueue checks and readies r (false: why, GL draws it) and holds a copy; farGroundFlush draws the queue (before
  * any other draw into the frame, before the bindless arena moves, at the end of the shapes). A failed flush loses its

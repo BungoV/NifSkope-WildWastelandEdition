@@ -682,6 +682,8 @@ WaterDraw & farLodD()
 	return D;
 }
 WaterDraw & farGroundD();  // lane VKFAR3 (vkfarground.inc): fxWork's kind 9
+WaterDraw & farLodRtD();  // lane VKFAR26 (vkfarlodrt.inc): fxWork's kind 21, the rings' RT (all-on) twin
+WaterDraw & farLodDgD();  // lane VKFAR26: fxWork's kind 22, the rings' DG twin (Ray-traced GI, no RT preset)
 
 VkFormat waterAttrFormat( const WwVkPresent::WaterAttrib & a )
 {
@@ -1119,7 +1121,7 @@ bool ringsRecord( std::string & why )
 {
 	Vk & v = vk();
 	Fx & F = fx();
-	WaterDraw & D = F.kind == 9 ? farGroundD() : farLodD();  // BATCH1114: the water has its own copy (kind 4 never comes here)
+	WaterDraw & D = F.kind == 9 ? farGroundD() : F.kind == 21 ? farLodRtD() : F.kind == 22 ? farLodDgD() : farLodD();  // BATCH1114: the water has its own copy (kind 4 never comes here); VKFAR26: 21 / 22 the rings' RT / DG twins
 	if ( !F.fbAir || ( D.recs.empty() && !D.pipe ) ) {
 		why = "no framebuffer / pipeline for the water draw";
 		return false;
@@ -1164,7 +1166,7 @@ bool ringsRecord( std::string & why )
 // shutdown (after fxDrop waited the device): the exported copy is GL's name too
 void ringsDrop()
 {
-	for ( WaterDraw * D : { &farLodD(), &farGroundD() } ) {
+	for ( WaterDraw * D : { &farLodD(), &farGroundD(), &farLodRtD(), &farLodDgD() } ) {
 		if ( !D->geo.buf && !D->host.buf )
 			continue;
 		vk().vkDeviceWaitIdle( vk().dev );
@@ -1180,7 +1182,7 @@ bool waterRecord( std::string & why )
 {
 	Vk & v = vk();
 	Fx & F = fx();
-	if ( F.kind == 5 || F.kind == 9 )  // lane VKFAR3: 9 the far ground, on the rings' copy
+	if ( F.kind == 5 || F.kind == 9 || F.kind == 21 || F.kind == 22 )  // lane VKFAR3: 9 the far ground, on the rings' copy; VKFAR26: 21 / 22 the rings' RT / DG twins
 		return farlod::ringsRecord( why );
 	WaterDraw & D = waterD();
 	if ( !D.recFb || !D.recPass || !D.pipe ) {
@@ -1830,6 +1832,24 @@ using farlod::waterSampler;
 using farlod::waterPipe;
 using farlod::kTwinBatchMax;  // lane VKFAR4: twinRunN's batch cap
 
+/* lane VKFAR26: one texel-buffer input of a rings / far-ground twin (farStream, cellLights, cellRestir, cellDdgiAtlas...): GL's
+ * data store copied into the keyed far-card twin every run, or a 16-byte zero one where GL binds none. The one place a shared
+ * GL -> Vulkan texel-buffer lookup (lane VKBUF1) replaces the copy. red 32: the copy 64 bytes late. false: why */
+bool twinTexelIn( std::uintptr_t key, const char * nm, const WaterSlot * s, int red, unsigned & tb, std::string & why )
+{
+	const bool bound = s && s->tex && s->dataBuf && s->bufBytes > 0;
+	unsigned tt = 0;
+	tb = 0;
+	const unsigned zeroFmt = std::strcmp( nm, "cellCluster" ) == 0 ? 0x8D82u : 0x8814u;  // Buffer<int4>: RGBA32I
+	if ( !farTexelBuffer( key, bound ? s->glFmt : zeroFmt, bound ? std::size_t( s->bufBytes ) : 16u, tb, tt, why ) )
+		return false;
+	if ( bound ) {  // red 32: the data store copied 64 bytes late (the objects' sky / AO stream shifted)
+		const std::intptr_t skip = ( red & 32 ) && s->bufBytes > 64 ? 64 : 0;
+		gl().copyNamedBufferSubData( s->dataBuf, tb, skip, 0, std::intptr_t( s->bufBytes ) - skip );
+	}
+	return true;
+}
+
 std::string twinDrawRefusal()
 {
 	Vk & v = vk();
@@ -2034,16 +2054,10 @@ static bool twinRun( WaterDraw & D, const TwinSpec & P, const WaterRun & r, std:
 			if ( !nm )
 				return breakOff( "the twins read an image at b" + std::to_string( b.binding ) + " no census name maps" );
 			const std::uintptr_t key = r.key + b.binding;
-			if ( b.kind == 2 ) {  // a texel buffer (farStream): GL's data store into the twin, or a zero one
-				const bool bound = s && s->tex && s->dataBuf && s->bufBytes > 0;
-				unsigned tb = 0, tt = 0;
-				const unsigned zeroFmt = std::strcmp( nm, "cellCluster" ) == 0 ? 0x8D82u : 0x8814u;  // Buffer<int4>: RGBA32I
-				if ( !farTexelBuffer( key, bound ? s->glFmt : zeroFmt, bound ? std::size_t( s->bufBytes ) : 16u, tb, tt, w ) )
+			if ( b.kind == 2 ) {  // a texel buffer (farStream, cellRestir...): GL's data store into the twin, or a zero one (VKFAR26)
+				unsigned tb = 0;
+				if ( !twinTexelIn( key, nm, s, r.red, tb, w ) )
 					return refuse( std::string( nm ) + ": " + w );
-				if ( bound ) {  // red 32: the data store copied 64 bytes late (the objects' sky / AO stream shifted)
-					const std::intptr_t skip = ( r.red & 32 ) && s->bufBytes > 64 ? 64 : 0;
-					g.copyNamedBufferSubData( s->dataBuf, tb, skip, 0, std::intptr_t( s->bufBytes ) - skip );
-				}
 				bufNames.push_back( tb );
 				tv[i] = farCards().bufs[key].view;
 				x.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
@@ -2485,16 +2499,10 @@ static bool twinRunN( WaterDraw & D, const TwinSpec & P, const WaterRun * const 
 		if ( !nm )
 			return breakOff( "the twins read an image at b" + std::to_string( b.binding ) + " no census name maps" );
 		const std::uintptr_t key = r0.key + b.binding;
-		if ( b.kind == 2 ) {  // a texel buffer (farStream): GL's data store into the twin, or a zero one
-			const bool bound = s && s->tex && s->dataBuf && s->bufBytes > 0;
-			unsigned tb = 0, tt = 0;
-			const unsigned zeroFmt = std::strcmp( nm, "cellCluster" ) == 0 ? 0x8D82u : 0x8814u;  // Buffer<int4>: RGBA32I
-			if ( !farTexelBuffer( key, bound ? s->glFmt : zeroFmt, bound ? std::size_t( s->bufBytes ) : 16u, tb, tt, w ) )
+		if ( b.kind == 2 ) {  // a texel buffer (farStream, cellRestir...): GL's data store into the twin, or a zero one (VKFAR26)
+			unsigned tb = 0;
+			if ( !twinTexelIn( key, nm, s, r0.red, tb, w ) )
 				return refuse( std::string( nm ) + ": " + w );
-			if ( bound ) {  // red 32: the data store copied 64 bytes late (the objects' sky / AO stream shifted)
-				const std::intptr_t skip = ( r0.red & 32 ) && s->bufBytes > 64 ? 64 : 0;
-				g.copyNamedBufferSubData( s->dataBuf, tb, skip, 0, std::intptr_t( s->bufBytes ) - skip );
-			}
 			bufNames.push_back( tb );
 			tv[i] = farCards().bufs[key].view;
 			ty[i] = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
@@ -2760,6 +2768,13 @@ void farLodSay( bool wanted, const char * glWhy )
 		"each, max %3, %4 copies, %5 fails%6); on GL %7 draws" )
 		.arg( ds.runs ).arg( ds.runs ? ds.cpuMs / ds.runs : 0.0, 0, 'f', 3 ).arg( ds.maxMs, 0, 'f', 3 ).arg( ds.copies ).arg( ds.fails )
 		.arg( ds.failWhy.empty() ? QString() : QStringLiteral( ": " ) + QString::fromStdString( ds.failWhy ) ).arg( st.gl );
+	for ( int v = 1; v <= 2; v++ ) {  // lane VKFAR26: the RT GI twins' runs (1 the all-on key, 2 the DG key)
+		const FxStat rs = takeFarLodRtDrawStat( v );
+		if ( rs.runs || rs.fails )
+			line += QStringLiteral( "; %1 twin: %2 draws run (%3 copies, %4 fails%5)" ).arg( v == 1 ? QStringLiteral( "RT" ) : QStringLiteral( "DG" ) )
+				.arg( rs.runs ).arg( rs.copies ).arg( rs.fails )
+				.arg( rs.failWhy.empty() ? QString() : QStringLiteral( ": " ) + QString::fromStdString( rs.failWhy ) );
+	}
 	if ( !st.glWhy.empty() )
 		line += QStringLiteral( " (blocked: %1)" ).arg( QString::fromStdString( st.glWhy ) );
 	said = line;
