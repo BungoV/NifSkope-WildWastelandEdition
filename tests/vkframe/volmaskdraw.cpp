@@ -20,9 +20,19 @@
 // depth clamp draw it), room 0 (the lowest: every other shape inside it still shows), drawn LAST (the count red drops it).
 // S2 floats above the ground by less than the bias: only the grown hull reaches the ground under it.
 // (Fixture moved after the first run, bar unchanged: run 1 had S2 room 0 under S5 room 1, so value 1 could never show.)
-// Known GL defect, kept by the twin (a ruling, not this lane's): cell_givol.vert indexes FC[k - 1] for k = 4, 5, so k = 5
-// reads FC[4] of a 4-entry array (undefined) and the second triangle of every hull face is not (0, 2, 3). An info-only GL
-// probe with k - 2 prints the texels that defect moves (the hole set); judge prints how many differing texels lie in it.
+// The FC[4] ruling (VKAIR2, 2026-11-16; bar written before the fix's first run): cell_givol.vert / cell_givol_vs.hlsl indexed
+// FC[k - 1] for k = 4, 5, so k = 5 read FC[4] of a 4-entry array (undefined) and the second triangle of every hull face was not
+// (0, 2, 3). Ruling: the quad splits (0, 1, 2) + (0, 2, 3), the index is `k < 3 ? k : k == 3 ? 0 : k - 2`. The gate reads the
+// tree's spelling (k - 1 or k - 2, anything else refuses) and builds the other one and an independent spelling of the ruling
+// (a 6-entry corner table 0, 1, 2, 0, 2, 3) from the same text, so this bar reads the tree before and after the fix.
+// Added bar:
+//   hull coverage: the tree's vertex stage with a constant-1 pixel stage, each shape alone (a one-shape buffer), each face's
+//     triangle alone (glDrawArraysInstanced( TRIANGLES, 3 t, 3, 1 ), gl_VertexID keeps first), no cull, no depth test, depth
+//     clamp: every one of the 6 x 12 texel sets equals the table program's set (0 texels differ), and every triangle of S0..S4
+//     covers > 0 texels (the fewest printed per shape). S5 holds the eye (faces behind it project to nothing): equality only.
+// Added red (a GL-side red; the Vulkan twin is not rebuilt for it): fc = the k - 1 spelling. Its GL pass is the reference for
+//   Vulkan's main frame (must FAIL), its probe (k - 1 against the tree's pass) must move >= 50 texels, and its hull coverage
+//   must differ from the table (> 0 texels, must FAIL). The texels the k - 1 spelling moves are the hole set judge counts in.
 // Bar:
 //   coverage: GL volMask != 0 on >= 3000 texels, == 0 on >= 500 non-background texels (the outdoors), >= 5 distinct values
 //     (an empty or one-shape fixture FAILS).
@@ -351,7 +361,9 @@ int moved( const std::vector<float> & a, const std::vector<float> & b )
 	return n;
 }
 
-std::vector<char> holes;	// texels the FC[4] defect moves (GL k - 1 vs GL k - 2), info
+std::vector<char> holes;	// texels the FC[4] defect moves (GL's k - 1 spelling against the tree's pass), info
+
+const char * kCoverFs = "#version 410 core\nout float o;\nvoid main()\n{\n\to = 1.0;\n}\n";	// the hull coverage's pixel stage
 
 // the bar on one Vulkan pass against GL's; prints one line, returns true when it holds
 bool judge( const char * what, const std::vector<float> & gl, const std::vector<float> & vk )
@@ -540,29 +552,127 @@ int main( int argc, char ** argv )
 			outdoors, bg, distinct, h.c_str(), covOk ? "OK" : "FAIL" );
 		okAll = okAll && covOk;
 	}
-	{	// info: the FC[4] defect, GL's program with the hull's second triangle (0, 2, 3) indexed k - 2
-		const std::string idx = "k == 3 ? 0 : k - 1]";
-		std::string vs2 = vs;
-		const size_t at = vs2.find( idx );
-		const GLuint fixed = at == std::string::npos ? 0 : program( vs2.replace( at, idx.size(), "k == 3 ? 0 : k - 2]" ), fs, "cell_givol k-2" );
-		if ( !fixed )
-			return fatal( "the k - 2 probe program (its index text not found or not linked)" );
-		const std::vector<float> full = [&] {
-			glMask( fixed, maskFb, gbuf, shapeTex, volVao, Knobs {} );
-			glFinish();
-			return readR( glVol );
-		}();
-		holes.assign( gl.size(), 0 );
-		int n = 0;
-		for ( size_t i = 0; i < gl.size(); i++ ) {
-			holes[i] = gl[i] != full[i] ? 1 : 0;
-			n += holes[i];
-		}
-		int distinct = 0;
-		const std::string h = histOf( full, distinct );
-		std::printf( "VOLMASKDRAW info FC[4] defect: GL with k - 2 moves %d texels against GL's own (k - 2: %d distinct values,%s)\n", n,
-			distinct, h.c_str() );
+	// the FC[4] ruling: the tree's spelling, the defect (k - 1) and the table spelling of the ruling, all from the tree's text
+	const std::string idxDefect = "k == 3 ? 0 : k - 1]", idxRule = "k == 3 ? 0 : k - 2]";
+	const bool shipsDefect = vs.find( idxDefect ) != std::string::npos;
+	if ( shipsDefect == ( vs.find( idxRule ) != std::string::npos ) )
+		return fatal( "cell_givol.vert's corner index: neither or both of the two spellings found" );
+	std::string vsDefect = vs;
+	if ( !shipsDefect )
+		vsDefect.replace( vsDefect.find( idxRule ), idxRule.size(), idxDefect );
+	std::string vsTable = vs;
+	{
+		const size_t m = vsTable.find( "void main()" ), q = vsTable.find( "vec2 q = FC[" );
+		const size_t e = q == std::string::npos ? q : vsTable.find( "];", q );
+		if ( m == std::string::npos || e == std::string::npos || q < m )
+			return fatal( "cell_givol.vert's main or corner line not found" );
+		vsTable.replace( q, e + 2 - q, "vec2 q = FC[wwTri[k]];" );
+		vsTable.insert( m, "const int wwTri[6] = int[6]( 0, 1, 2, 0, 2, 3 );\n\n" );
 	}
+	const GLuint progDefect = shipsDefect ? prog : program( vsDefect, fs, "cell_givol k-1" );
+	const GLuint covShip = program( vs, kCoverFs, "cover tree" ), covDefect = program( vsDefect, kCoverFs, "cover k-1" ),
+		covTable = program( vsTable, kCoverFs, "cover table" );
+	if ( !progDefect || !covShip || !covDefect || !covTable )
+		return fatal( "the FC[4] probe programs" );
+	std::printf( "VOLMASKDRAW tree's corner index: %s\n", shipsDefect ? "k - 1 (the defect)" : "k - 2 (the ruling)" );
+	const std::vector<float> glDefect = [&] {
+		glMask( progDefect, maskFb, gbuf, shapeTex, volVao, Knobs {} );
+		glFinish();
+		return readR( glVol );
+	}();
+	holes.assign( gl.size(), 0 );
+	for ( size_t i = 0; i < gl.size(); i++ )
+		holes[i] = gl[i] != glDefect[i] ? 1 : 0;
+	{
+		const int n = moved( gl, glDefect );
+		int distinct = 0;
+		const std::string h = histOf( glDefect, distinct );
+		std::printf( "VOLMASKDRAW GL probe red fc: the k - 1 spelling moves %d texels against the tree's pass (k - 1: %d distinct values,%s) %s\n",
+			n, distinct, h.c_str(), n >= 50 ? "LIVE" : "TESTS NOTHING" );
+		okAll = okAll && n >= 50;
+	}
+	// hull coverage: each shape alone, each face's triangle alone, a constant-1 pixel stage, no cull / depth test, depth clamp
+	GLuint oneBuf = 0, oneTex = 0;
+	f.genBuffers( 1, &oneBuf );
+	glGenTextures( 1, &oneTex );
+	const int nShapes = int( shapes.size() / 12 );
+	auto cover = [&]( GLuint pc ) {
+		std::vector<std::vector<char>> sets;
+		f.useProgram( pc );
+		float clip[4][4], row[3][4];
+		volMath( clip, row );
+		for ( int r = 0; r < 4; r++ )
+			f.uniform4fv( f.getUniformLocation( pc, ( "volClip[" + std::to_string( r ) + "]" ).c_str() ), 1, clip[r] );
+		const float grow = kBias + 1.0f;
+		f.uniform1fv( f.getUniformLocation( pc, "volGrow" ), 1, &grow );
+		f.uniform1i( f.getUniformLocation( pc, "volShapes" ), 1 );
+		for ( int s = 0; s < nShapes; s++ ) {
+			f.bindBuffer( kTexBuf, oneBuf );
+			f.bufferData( kTexBuf, std::ptrdiff_t( 12 * sizeof( float ) ), shapes.data() + 12 * s, fStatic );
+			f.bindBuffer( kTexBuf, 0 );
+			f.activeTexture( fTex0 + 1 );
+			glBindTexture( kTexBuf, oneTex );
+			xd.texBuffer( kTexBuf, fRgba32f, oneBuf );
+			f.activeTexture( fTex0 );
+			for ( int tri = 0; tri < 12; tri++ ) {
+				f.bindFramebuffer( fFb, maskFb );
+				const GLenum one = fCol0;
+				f.drawBuffers( 1, &one );
+				glViewport( 0, 0, W, H );
+				const GLfloat zero[4] = { 0, 0, 0, 0 };
+				xd.clearBufferfv( GL_COLOR, 0, zero );
+				glDisable( GL_DEPTH_TEST );
+				glDisable( GL_CULL_FACE );
+				glDisable( GL_BLEND );
+				glEnable( kDepthClamp );
+				xd.bindVertexArray( volVao );
+				xd.drawArraysInstanced( GL_TRIANGLES, 3 * tri, 3, 1 );
+				xd.bindVertexArray( 0 );
+				glDisable( kDepthClamp );
+				f.bindFramebuffer( fFb, 0 );
+				glFinish();
+				const std::vector<float> v = readR( glVol );
+				std::vector<char> c( v.size() );
+				for ( size_t i = 0; i < v.size(); i++ )
+					c[i] = v[i] != 0.0f ? 1 : 0;
+				sets.push_back( c );
+			}
+		}
+		f.activeTexture( fTex0 + 1 );
+		glBindTexture( kTexBuf, 0 );
+		f.activeTexture( fTex0 );
+		return sets;
+	};
+	const std::vector<std::vector<char>> tableSets = cover( covTable );
+	auto hullJudge = [&]( const char * what, const std::vector<std::vector<char>> & sets, int & differAll ) {
+		bool ok = true;
+		differAll = 0;
+		for ( int s = 0; s < nShapes; s++ ) {
+			int fewest = 1 << 30, fewestAt = 0, differ = 0;
+			for ( int tri = 0; tri < 12; tri++ ) {
+				const std::vector<char> & a = sets[size_t( 12 * s + tri )], & b = tableSets[size_t( 12 * s + tri )];
+				int n = 0;
+				for ( size_t i = 0; i < a.size(); i++ ) {
+					n += a[i];
+					differ += a[i] != b[i] ? 1 : 0;
+				}
+				if ( n < fewest )
+					fewest = n, fewestAt = tri;
+			}
+			const bool eye = s == nShapes - 1, counted = eye || fewest > 0;
+			std::printf( "VOLMASKDRAW hull %s S%d: 12 triangles, fewest texels %d (face %d triangle %d%s), %d texels differ from the table %s\n",
+				what, s, fewest, fewestAt / 2, fewestAt % 2, eye ? ", the eye's box: info" : "", differ, counted && differ == 0 ? "OK" : "FAIL" );
+			ok = ok && counted && differ == 0;
+			differAll += differ;
+		}
+		return ok;
+	};
+	int differShip = 0, differRed = 0;
+	const bool hullOk = hullJudge( "tree", cover( covShip ), differShip );
+	const bool hullRedHeld = hullJudge( "red fc", cover( covDefect ), differRed ) || differRed == 0;
+	std::printf( "VOLMASKDRAW hull coverage %s (%d texels differ); red fc hull %s (%d texels differ)\n", hullOk ? "OK" : "FAIL", differShip,
+		hullRedHeld ? "PASSED (a red must FAIL)" : "FAILED as it must", differRed );
+	okAll = okAll && hullOk && !hullRedHeld;
 	const char * redName[6] = { "blend", "depth", "count", "clamp", "cull", "grow" };
 	for ( int r = 0; r < 6; r++ ) {	// the reds' GL probes
 		Knobs k;
@@ -596,6 +706,11 @@ int main( int argc, char ** argv )
 		const bool held = !vr.empty() && judge( redName[r], gl, vr );
 		std::printf( "VOLMASKDRAW red %d %s %s\n", 1 << r, redName[r], held ? "PASSED (a red must FAIL)" : "FAILED as it must" );
 		okAll = okAll && !held && !vr.empty();
+	}
+	{	// red fc: GL's k - 1 pass as the reference for Vulkan's main frame
+		const bool held = !vk.empty() && judge( "red fc (GL k - 1 the reference)", glDefect, vk );
+		std::printf( "VOLMASKDRAW red fc %s\n", held ? "PASSED (a red must FAIL)" : "FAILED as it must" );
+		okAll = okAll && !held && !vk.empty();
 	}
 	const WwVkPresent::VolMaskStat st = WwVkPresent::takeVolMaskStat();
 	std::printf( "VOLMASKDRAW stat: runs %d draws %d twin copies %d fails %d pipelines %d\n", st.runs, st.draws, st.twinCopies, st.fails,
