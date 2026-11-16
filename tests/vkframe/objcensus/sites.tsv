@@ -143,7 +143,7 @@ src/gl/bsshape.cpp|BSShape::drawSelection|glDrawElements|1	other		editor: select
 src/gl/bsshape.cpp|BSShape::drawSelection|glDrawElements|2	other		editor: selection
 src/gl/bsshape.cpp|BSShape::drawSelection|glDrawElements|3	other		editor: selection
 src/gl/celllights.cpp|wwCellFarDotsDraw|drawShape|1	other		far light dots (vkfardots, the VKFAR lanes')
-src/gl/controllers.cpp|ProcLightningController::drawPreview|glDrawArrays|1	glonly		lightning bolt strips (boltstrip.prog)
+src/gl/controllers.cpp|ProcLightningController::drawPreview|glDrawArrays|1	twin	boltOnVulkan	lightning bolt strips (boltstrip.prog): boltRun into the tone frame (VKOBJ15/16, gate boltview)
 src/gl/glcontext.cpp|wwWarmPrograms|glDrawArrays|1	other		program warm-up: one point, nothing kept
 src/gl/glcontext.hpp|<file>|glDrawElements|1	other		wrapper body: NifSkopeOpenGLContext::drawShape (its callers are the sites)
 src/gl/glcontext.hpp|<file>|glDrawElements|2	other		wrapper body: NifSkopeOpenGLContext::drawShape (its callers are the sites)
