@@ -462,6 +462,13 @@ bool volMaskRun( const VolMaskRun & r, std::string & why )
 	if ( !gb )
 		return refuse( "the g-buffer twin is gone" );
 	const VkDeviceSize shapeBytes = VkDeviceSize( r.shapes.size() * sizeof( float ) );
+	// csmBuf frees and remakes a buffer that grows: a new VkBuffer may reuse the old handle, so drop its view first
+	// (the fence above was waited: nothing reads it)
+	if ( S.shpView && ( !S.shp.buf || S.shp.cap < shapeBytes ) ) {
+		S.destroyView( v.dev, S.shpView, nullptr );
+		S.shpView = VK_NULL_HANDLE;
+		S.shpViewOf = VK_NULL_HANDLE;
+	}
 	if ( !vmFb( tg, dsT, w ) || !csmBuf( S.ubo, kVmSlice, false, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, w )
 		|| !csmBuf( S.shp, shapeBytes, false, VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT, w ) || !vmShapeView( w ) )
 		return breakOff( w );
