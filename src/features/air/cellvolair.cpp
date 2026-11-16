@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "features/air/cellvolair.h"
 #include "features/air/cellvolairkeys.h"
+#include "features/air/cellvolairshare.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "wwsyncwait.h"	// lane EMPTY240 R4-2: the env strata's read-back by name
 #include "features/weather/wxoverride.h"	// lane MODULES1 item 12: live air overrides
@@ -554,6 +555,8 @@ struct VaGpu
 	float terrXf[4] = { 0, 0, 0, 0 }, terrRef = 0.0f;
 	float terrFineXf[4] = { 0, -1, 0, -1 };	// lane FOGTERRAIN3: layer 1's rows (uv -1: no fine level)
 	VaVkKeys vkKeys;	// lane VKAIR7: the shared targets' keys (a QHash move keeps them; tests/vkframe/airkeys.sh)
+	// lane VKAIR11: stage 1's inputs made on the present device (cellvolairshare.h; tests/vkframe/airshare.sh)
+	VaShareState histSh[2], lvNowSh[2], lvHistSh[2], stbnSh, noiseSh, terrSh;
 };
 
 /* THE CLUSTERED LIGHTS (coordinator 10-14). The inject evaluates the placed lights once per froxel, at the middle of
@@ -2321,7 +2324,28 @@ static void vaPassInner( Scene * scene, bool run )
 	const int strata = envSpreadRed ? 4 : 6;
 	apNote += kSlices == grid.slices ? QStringLiteral( " slices=%1(preset)" ).arg( kSlices )
 		: QStringLiteral( " slices=%1(key, preset %2)" ).arg( kSlices ).arg( grid.slices );	// AIRPERF1 A2
-	if ( temporal && ( !g.hist[0] || g.histCols != cols || g.histRows != rows || g.histSlices != kSlices
+	/* lane VKAIR11: while the |3 reader runs on Vulkan (vaStage1Reader; red WW_VKVIEW_AIRTEMPORAL_RED) stage 1's inputs are
+	 * shared targets of the present device, made and filled by the helper (cellvolairshare.h); otherwise GL's own, the
+	 * calls as before (a shared one dropped first, its sizes forgotten so the old check makes it again) */
+	const bool s1Share = vaStage1Reader() && WwVkPresent::shareWanted( "WW_VKVIEW_AIRTEMPORAL_RED" );
+	if ( s1Share && temporal ) {
+		const VaShareSpec hs { 1, GL_RGBA32F, GL_RGBA, GL_FLOAT, cols, rows, strata * kSlices, true, false };
+		int made = 0;
+		for ( int i = 0; i < 2; i++ )
+			made |= vaShareEnsure( fn, g.vkKeys.at( VaVkKeys::Hist0 + i ), hs, true, g.hist[i], g.histSh[i] );
+		if ( made ) {
+			g.histCols = cols;
+			g.histRows = rows;
+			g.histSlices = kSlices;
+			g.histStrata = strata;
+			g.histOk = false;
+		}
+	}
+	if ( !s1Share )
+		for ( int i = 0; i < 2; i++ )
+			if ( vaShareRelease( g.vkKeys.at( VaVkKeys::Hist0 + i ), g.hist[i], g.histSh[i] ) )
+				g.histCols = 0;
+	if ( !s1Share && temporal && ( !g.hist[0] || g.histCols != cols || g.histRows != rows || g.histSlices != kSlices
 		|| g.histStrata != strata ) ) {
 		for ( GLuint & h : g.hist )
 			vaAlloc3D( fn, h, cols, rows, strata * kSlices, true, false );
@@ -2346,7 +2370,25 @@ static void vaPassInner( Scene * scene, bool run )
 		| ( lampRedS.contains( "nochord" ) ? 32 : 0 )
 		| ( lampRedS.contains( "walkempty" ) ? 64 : 0 );	// AIRPERF1 A3: the stage on froxels with an empty lamp list too
 	apNote += QStringLiteral( " lampempty=%1" ).arg( lampPixel ? "n/a(pixel)" : ( lampRed & 80 ) ? "walk(red)" : "skip" );
-	if ( temporal && !lampPixel && !g.stbnTried ) {
+	if ( !s1Share && vaShareRelease( g.vkKeys.at( VaVkKeys::Stbn ), g.stbn, g.stbnSh ) )
+		g.stbnTried = false;	// lane VKAIR11: a shared mask dropped, GL's own made again
+	if ( s1Share && temporal && !lampPixel && ( !g.stbnTried || g.stbn ) ) {
+		g.stbnTried = true;
+		const VaShareSpec ss { 2, GL_R8, GL_RED, GL_UNSIGNED_BYTE, 128, 128, 64, false, true };
+		if ( vaShareEnsure( fn, g.vkKeys.at( VaVkKeys::Stbn ), ss, true, g.stbn, g.stbnSh ) ) {
+			QFile mf( QStringLiteral( ":/air/stbn_scalar_128x128x64.r8" ) );
+			const QByteArray mask = mf.open( QIODevice::ReadOnly ) ? mf.readAll() : QByteArray();
+			if ( mask.size() == 128 * 128 * 64 ) {
+				fn->glBindTexture( GL_TEXTURE_2D_ARRAY, g.stbn );
+				fn->glTexSubImage3D( GL_TEXTURE_2D_ARRAY, 0, 0, 0, 0, 128, 128, 64, GL_RED, GL_UNSIGNED_BYTE, mask.constData() );
+				fn->glBindTexture( GL_TEXTURE_2D_ARRAY, 0 );
+			} else if ( !vaShareRelease( g.vkKeys.at( VaVkKeys::Stbn ), g.stbn, g.stbnSh ) ) {
+				fn->glDeleteTextures( 1, &g.stbn );
+				g.stbn = 0;
+			}
+		}
+	}
+	if ( !s1Share && temporal && !lampPixel && !g.stbnTried ) {
 		g.stbnTried = true;
 		QFile mf( QStringLiteral( ":/air/stbn_scalar_128x128x64.r8" ) );
 		const QByteArray mask = mf.open( QIODevice::ReadOnly ) ? mf.readAll() : QByteArray();
@@ -2363,7 +2405,26 @@ static void vaPassInner( Scene * scene, bool run )
 		}
 	}
 	const bool lampVol = temporal && !lampPixel && g.stbn != 0;
-	if ( lampVol && ( !g.lvHist[0] || g.lvCols != cols || g.lvRows != rows ) ) {
+	if ( s1Share && lampVol ) {
+		const VaShareSpec hs { 1, GL_RGBA16F, GL_RGBA, GL_FLOAT, cols, rows, kSlices, false, false };
+		const VaShareSpec ns { 1, GL_RGBA32F, GL_RGBA, GL_FLOAT, cols, rows, kSlices, false, false };
+		int made = 0;
+		for ( int i = 0; i < 2; i++ ) {
+			made |= vaShareEnsure( fn, g.vkKeys.at( VaVkKeys::LvHist0 + i ), hs, true, g.lvHist[i], g.lvHistSh[i] );
+			made |= vaShareEnsure( fn, g.vkKeys.at( VaVkKeys::LvNow0 + i ), ns, true, g.lvNow[i], g.lvNowSh[i] );
+		}
+		if ( made ) {
+			g.lvCols = cols;
+			g.lvRows = rows;
+			g.lvOk = false;
+		}
+	}
+	if ( !s1Share )
+		for ( int i = 0; i < 2; i++ )
+			if ( vaShareRelease( g.vkKeys.at( VaVkKeys::LvHist0 + i ), g.lvHist[i], g.lvHistSh[i] )
+				| vaShareRelease( g.vkKeys.at( VaVkKeys::LvNow0 + i ), g.lvNow[i], g.lvNowSh[i] ) )
+				g.lvCols = 0;
+	if ( !s1Share && lampVol && ( !g.lvHist[0] || g.lvCols != cols || g.lvRows != rows ) ) {
 		for ( int i = 0; i < 2; i++ ) {
 			vaAlloc3D( fn, g.lvHist[i], cols, rows, kSlices, false, true );
 			vaAlloc3D( fn, g.lvNow[i], cols, rows, kSlices, false, false );	// 32-bit: the hash's 24 bits exact
@@ -2546,7 +2607,8 @@ static void vaPassInner( Scene * scene, bool run )
 		if ( want && exterior && G.s > 0.0f )
 			wwFogTerrainRequest();	// lane FOGTERRAIN2: the grid's own job runs while asked (shadowset.cpp fogTerrainFrame)
 		if ( g.terr && tg.nx == 0 && g.terrGen != tg.gen ) {	// the job retired or the set emptied: free the 4 MB
-			fn->glDeleteTextures( 1, &g.terr );
+			if ( !vaShareRelease( g.vkKeys.at( VaVkKeys::Terr ), g.terr, g.terrSh ) )	// VKAIR11: a shared one is the present device's
+				fn->glDeleteTextures( 1, &g.terr );
 			g.terr = 0;
 			g.terrGen = tg.gen;
 		}
@@ -2555,6 +2617,12 @@ static void vaPassInner( Scene * scene, bool run )
 		g.terrOn = on;
 		if ( on ) {
 			fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AirTerrain ) );
+			if ( s1Share ) {	// lane VKAIR11: the present device's; made again -> filled again
+				const VaShareSpec ts { 2, GL_R32F, GL_RED, GL_FLOAT, tg.nx, tg.ny, 2, true, false };
+				if ( vaShareEnsure( fn, g.vkKeys.at( VaVkKeys::Terr ), ts, true, g.terr, g.terrSh ) )
+					g.terrGen = 0;
+			} else if ( vaShareRelease( g.vkKeys.at( VaVkKeys::Terr ), g.terr, g.terrSh ) )
+				g.terrGen = 0;
 			if ( !g.terr )
 				fn->glGenTextures( 1, &g.terr );
 			// lane FOGTERRAIN3: a 2-layer array, layer 0 the coarse level, layer 1 the fine one (a copy of layer 0 and
@@ -2562,7 +2630,8 @@ static void vaPassInner( Scene * scene, bool run )
 			const bool fine = tg.fnx == tg.nx && tg.F.size() == tg.H.size();
 			fn->glBindTexture( GL_TEXTURE_2D_ARRAY, g.terr );
 			if ( g.terrGen != tg.gen ) {
-				fn->glTexImage3D( GL_TEXTURE_2D_ARRAY, 0, GL_R32F, tg.nx, tg.ny, 2, 0, GL_RED, GL_FLOAT, nullptr );
+				if ( !g.terrSh.shared )	// shared storage is immutable: filled below
+					fn->glTexImage3D( GL_TEXTURE_2D_ARRAY, 0, GL_R32F, tg.nx, tg.ny, 2, 0, GL_RED, GL_FLOAT, nullptr );
 				fn->glTexSubImage3D( GL_TEXTURE_2D_ARRAY, 0, 0, 0, 0, tg.nx, tg.ny, 1, GL_RED, GL_FLOAT, tg.H.data() );
 				fn->glTexSubImage3D( GL_TEXTURE_2D_ARRAY, 0, 0, 0, 1, tg.nx, tg.ny, 1, GL_RED, GL_FLOAT,
 					fine ? tg.F.data() : tg.H.data() );
@@ -2757,13 +2826,23 @@ static void vaPassInner( Scene * scene, bool run )
 						qPrintable( why.trimmed() ), dr.texN, double( dr.mean ), double( dr.span ) );
 				}
 			}
+			if ( s1Share ) {	// lane VKAIR11: the present device's; made again -> uploaded again
+				fn->glActiveTexture( GLenum( GL_TEXTURE0 + kNoiseUnit ) );
+				const VaShareSpec ns { 1, GL_R8, GL_RED, GL_UNSIGNED_BYTE, dr.texN, dr.texN, dr.texN, true, true };
+				if ( vaShareEnsure( fn, g.vkKeys.at( VaVkKeys::Noise ), ns, true, g.noise, g.noiseSh ) )
+					upload = true;
+			} else if ( vaShareRelease( g.vkKeys.at( VaVkKeys::Noise ), g.noise, g.noiseSh ) )
+				upload = true;
 			if ( upload ) {
 				if ( !g.noise )
 					fn->glGenTextures( 1, &g.noise );
 				fn->glActiveTexture( GLenum( GL_TEXTURE0 + kNoiseUnit ) );
 				fn->glBindTexture( GL_TEXTURE_3D, g.noise );
 				fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
-				fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_R8, dr.texN, dr.texN, dr.texN, 0, GL_RED, GL_UNSIGNED_BYTE, dr.tex.data() );
+				if ( g.noiseSh.shared )
+					fn->glTexSubImage3D( GL_TEXTURE_3D, 0, 0, 0, 0, dr.texN, dr.texN, dr.texN, GL_RED, GL_UNSIGNED_BYTE, dr.tex.data() );
+				else
+					fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_R8, dr.texN, dr.texN, dr.texN, 0, GL_RED, GL_UNSIGNED_BYTE, dr.tex.data() );
 				fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
 				fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
 				fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
