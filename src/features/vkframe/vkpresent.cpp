@@ -13,6 +13,7 @@
 #include "features/vkframe/vkpresent.h"
 #include "features/vkframe/vkobjtex.h"  // lane VKOBJ3: shutdown() lets the cache's BC twins go
 #include "features/vkframe/vkobjpipe.h"  // lane VKOBJ4: shutdown() frees the bl twins' pipelines
+#include "features/vkframe/csmpoolcap.h"  // lane CRASH1116: the cascades' mesh pool sizes
 
 #define VK_NO_PROTOTYPES
 #define VK_USE_PLATFORM_WIN32_KHR
@@ -8469,9 +8470,7 @@ bool csmBuf( CsmBuf & b, VkDeviceSize need, bool exported, VkBufferUsageFlags us
 	if ( b.buf && b.cap >= need && ( !exported || b.glCtx == g.ctx ) )
 		return true;
 	csmBufFree( b, exported && b.glCtx == g.ctx );
-	VkDeviceSize cap = 65536;
-	while ( cap < need )
-		cap *= 2;
+	const VkDeviceSize cap = WwCsmPool::bufCap( need );
 	VkExternalMemoryBufferCreateInfo ext { VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO };
 	ext.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
 	VkBufferCreateInfo bci { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
@@ -8642,7 +8641,9 @@ bool csmPool( const WwVkPresent::CsmRun & t, int red, std::string & why )
 			missI += me.indices;
 		}
 	}
-	if ( !S.mpos.buf || !S.midx.buf || !S.muv.buf || !S.mwind.buf || S.posUsed + missV > S.mpos.cap / 12 || S.idxUsed + missI > S.midx.cap / 2 ) {
+	// lane CRASH1116: the vertices must fit the uvs and the wind too (11-16 flight: positions held 2796202, uvs 2097152)
+	if ( !S.mpos.buf || !S.midx.buf || !S.muv.buf || !S.mwind.buf
+		|| S.posUsed + missV > WwCsmPool::vertCap( S.mpos.cap, S.muv.cap, S.mwind.cap ) || S.idxUsed + missI > S.midx.cap / 2 ) {
 		S.st.repacks++;
 		if ( red != 2 ) {
 			S.pool.clear();
