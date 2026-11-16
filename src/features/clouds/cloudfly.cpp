@@ -27,6 +27,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <vector>
 
 // lane CLOUD4: fly-through clouds (cloudfly.h). The box: res/shaders/features/clouds/cloud_flybake.frag (occupancy), cloud_flysdf.frag
 // (the distance field, three separable passes), cloud_fly.frag (the march with the box).
@@ -154,6 +155,7 @@ void flyBakeSay()
 	static auto at = std::chrono::steady_clock::now();
 	const WwVkPresent::FxStat st = WwVkPresent::takeFlyBakeStat();
 	sum.runs += st.runs;
+	sum.crossings += st.crossings;
 	sum.gl += st.gl;
 	sum.fails += st.fails;
 	sum.cpuMs += st.cpuMs;
@@ -170,9 +172,11 @@ void flyBakeSay()
 		return;
 	if ( sum.runs + sum.gl + sum.fails > 0 ) {
 		char line[512];
-		std::snprintf( line, sizeof( line ), "vk cloudflybake: on Vulkan %d runs (one render pass a slice; %d pipelines built in %.1f ms; "
-			"%d input copies; drawing thread %.3f ms, max %.3f)", sum.runs, sum.pipelines, sum.buildMs, sum.copies,
-			sum.runs > 0 ? sum.cpuMs / sum.runs : 0.0, sum.maxMs );
+		// lane VKCLOUD9: crossings and runs (passes) apart, copies per crossing and per run
+		std::snprintf( line, sizeof( line ), "vk cloudflybake: on Vulkan %d runs in %d crossings (one render pass a slice; %d pipelines "
+			"built in %.1f ms; %d input copies, %.2f a crossing, %.2f a run; drawing thread %.3f ms a crossing, max %.3f)", sum.runs,
+			sum.crossings, sum.pipelines, sum.buildMs, sum.copies, sum.crossings > 0 ? double( sum.copies ) / sum.crossings : 0.0,
+			sum.runs > 0 ? double( sum.copies ) / sum.runs : 0.0, sum.crossings > 0 ? sum.cpuMs / sum.crossings : 0.0, sum.maxMs );
 		std::string s = line;
 		if ( sum.gl > 0 )
 			s += ", on GL " + std::to_string( sum.gl ) + " (last: " + sum.glWhy + ")";
@@ -291,7 +295,21 @@ bool ensureVolumes( NifSkopeOpenGLContext::GLFunctions * fn, FlGpu & g, const F:
 
 /* one pass over layers [from, to) of the build: 0 = the occupancy of the density (bound at the build's clock), 1..3 =
  * the distance field along x, y, z (occupancy -> ping-pong -> occupancy -> the building field) */
-bool runPass( Scene * scene, FlGpu & g, const F::Preset & p, int pass, int from, int to )
+/* lane VKCLOUD9: the full build's passes queued (runPass with a queue) and drawn in ONE crossing; a refusal there sends the
+ * whole build to GL (runPass with glOnly) */
+bool flyQueueRun( std::vector<WwVkPresent::FlyBakeRun> & q, std::string & why )
+{
+	if ( q.empty() )
+		return true;
+	const bool ok = WwVkPresent::flyBakeRunN( q.data(), int( q.size() ), why );
+	q.clear();
+	if ( ok )
+		why.clear();
+	return ok;
+}
+
+bool runPass( Scene * scene, FlGpu & g, const F::Preset & p, int pass, int from, int to,
+	std::vector<WwVkPresent::FlyBakeRun> * queue = nullptr, const char * glOnly = nullptr, std::string * queueWhy = nullptr )
 {
 	Renderer * r = scene->renderer;
 	auto fn = r->fn;
@@ -331,7 +349,10 @@ bool runPass( Scene * scene, FlGpu & g, const F::Preset & p, int pass, int from,
 	WwVkPresent::FlyBakeRun t;
 	std::string glWhy;
 	bool wantVk = g.shared;
-	if ( wantVk && pass == 0 && variety ) {
+	if ( wantVk && glOnly ) {
+		wantVk = false;
+		glWhy = std::string( "the build's one crossing was refused: " ) + glOnly;
+	} else if ( wantVk && pass == 0 && variety ) {
 		wantVk = false;
 		glWhy = "Cloud Variety (no Vulkan twin of cloud_flybake_v)";
 	} else if ( wantVk ) {
@@ -374,11 +395,19 @@ bool runPass( Scene * scene, FlGpu & g, const F::Preset & p, int pass, int from,
 	auto vkRun = [&]( int a, int b ) {
 		t.from = a;
 		t.to = b;
+		if ( queue ) {
+			queue->push_back( t );
+			return true;
+		}
 		return WwVkPresent::flyBakeRun( t, vkWhy );
 	};
 	bool onVk = false;
-	bool ok = wwFlyBakeRoute( wantVk, false, vkRun, glSlice, from, to, onVk );
-	if ( g.shared && !onVk )
+	// a pass GL draws flushes the queued passes first (they come before it); a refused flush skips the pass (the build redoes on GL)
+	const bool held = queue && !wantVk && !flyQueueRun( *queue, *queueWhy );
+	bool ok = true;
+	if ( !held )
+		ok = wwFlyBakeRoute( wantVk, false, vkRun, glSlice, from, to, onVk );
+	if ( g.shared && !onVk && !held )
 		WwVkPresent::flyBakeOnGl( ( wantVk ? vkWhy : glWhy ).c_str() );
 	r->stopProgram();
 	for ( int u = 2; u >= 0; u-- ) {
@@ -576,8 +605,15 @@ void wwCloudFlyPrepare( Scene * scene, const float camKm[3], double secs )
 	};
 	if ( full ) {
 		start();
-		for ( int pass = 0; pass < 4 && ok; pass++ )
-			ok = runPass( scene, g, p, pass, 0, p.nz );
+		// lane VKCLOUD9: the four passes in one crossing; a refused crossing redoes the whole build on GL
+		std::vector<WwVkPresent::FlyBakeRun> q;
+		std::string qWhy;
+		for ( int pass = 0; pass < 4 && ok && qWhy.empty(); pass++ )
+			ok = runPass( scene, g, p, pass, 0, p.nz, &q, nullptr, &qWhy );
+		if ( ok && qWhy.empty() )
+			flyQueueRun( q, qWhy );
+		for ( int pass = 0; pass < 4 && ok && !qWhy.empty(); pass++ )
+			ok = runPass( scene, g, p, pass, 0, p.nz, nullptr, qWhy.c_str() );
 		if ( ok ) {
 			publish();
 			g.full++;

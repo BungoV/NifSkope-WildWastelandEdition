@@ -746,6 +746,7 @@ struct FxStat
 	int refusedPacks = 0;           //!< rain / snow: fxPack calls made for runs then refused (asked before the packs: 0)
 	int reusedHandles = 0;          //!< lane VKWATER4: water ray runs whose depth twin kept its VkImage handle over a sharedGen() move
 	int fenceMisses = 0;            //!< lane VKWATER4: waterRun's wait on the last crossing's fence that did not return VK_SUCCESS
+	int crossings = 0;              //!< lane VKCLOUD9: GL <-> Vulkan crossings that went through (the fly bake: runs = passes)
 };
 FxStat takeVolSkyStat();
 //! lane VKCLOUD2: the fly march's t0.. (cloud_fly_ps / cloud_fly_a_ps reflected; t7 cvBlue only in _a, cfSdf Load'd)
@@ -795,10 +796,16 @@ struct FlyBakeRun
 	std::uintptr_t src = 0;         //!< passes 1..3: the read volume's sharedTarget key
 	FxTex tex[kFlyBakeTex];         //!< pass 0: the density's inputs (fxTexOf over GL's program)
 	std::uint8_t loose[kT_flybakeBytes] = {};  //!< b31 packed from GL's program (fxPack, kT_flybake or kT_flysdf); cfLayer is set here
-	int red = 0;                    //!< gates only: 1 every slice into slice 0, 2 slice k into k + 1, 4 the other pass's program
+	int red = 0;                    //!< gates only: 1 every slice into slice 0, 2 slice k into k + 1, 4 the other pass's program;
+	                                //!< lane VKCLOUD9 (read off the first run of a batch): 16 a crossing a pass, 32 every pass on
+	                                //!< pass 0's descriptor set and b31 slots
 };
 //! GL current: one pass over slices [from, to) of t.dst on Vulkan (one render pass a slice), one crossing; false: why, GL draws it
 bool flyBakeRun( const FlyBakeRun & t, std::string & why );
+inline constexpr int kFlyBakePasses = 4;  //!< lane VKCLOUD9: the most runs one crossing records (a full build)
+//! lane VKCLOUD9: n runs in order in ONE crossing (a barrier between runs: a later pass reads / overwrites an earlier one's
+//! volume); every run is checked before anything is recorded; false: why, nothing drawn (GL draws all n)
+bool flyBakeRunN( const FlyBakeRun * t, int n, std::string & why );
 void flyBakeOnGl( const char * why );
 FxStat takeFlyBakeStat();
 

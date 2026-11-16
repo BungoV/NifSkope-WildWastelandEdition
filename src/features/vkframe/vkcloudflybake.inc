@@ -18,7 +18,7 @@ struct FlyBakeJob
 	std::string brokenWhy;
 	VkDescriptorSetLayout dsl = VK_NULL_HANDLE;
 	VkDescriptorPool dpool = VK_NULL_HANDLE;
-	VkDescriptorSet set = VK_NULL_HANDLE;
+	VkDescriptorSet set[WwVkPresent::kFlyBakePasses] = {};  // lane VKCLOUD9: one a run of the crossing
 	VkPipelineLayout layout = VK_NULL_HANDLE;
 	VkShaderModule ps[2] = {};  // 0 cloud_flybake, 1 cloud_flysdf
 	VkBuffer ubo = VK_NULL_HANDLE;
@@ -28,10 +28,19 @@ struct FlyBakeJob
 	VkPipeline pipe[2] = {};
 	int pipelines = 0;
 	double buildMs = 0.0;
-	// this run's job (the drawing thread writes it before the hand, the worker records it)
-	VkImageView views[kFlyBakeSlots] = {};
-	VkFramebuffer fbs[kFlyBakeSlots] = {};
-	int n = 0, w = 0, h = 0, prog = 0;
+	// this crossing's job (the drawing thread writes it before the hand, the worker records it). Lane VKCLOUD9: up to
+	// kFlyBakePasses runs, run b's slices at [b * kFlyBakeSlots, + its count) of views / fbs / the b31 slots
+	struct Rec
+	{
+		int n = 0, w = 0, h = 0, prog = 0;
+		int set = 0, slot0 = 0;  // the descriptor set and the first b31 slot it records with (red 32: run 0's)
+	};
+	static constexpr int kSlices = kFlyBakeSlots * WwVkPresent::kFlyBakePasses;
+	VkImageView views[kSlices] = {};
+	VkFramebuffer fbs[kSlices] = {};
+	Rec rec[WwVkPresent::kFlyBakePasses];
+	int nrec = 0;
+	int n = 0;  // slices of every run (0: nothing to free)
 	WwVkPresent::FxStat st;
 };
 
@@ -46,7 +55,7 @@ void flyBFreeSlices()
 {
 	Vk & v = vk();
 	FlyBakeJob & D = flyBakeJob();
-	for ( int i = 0; i < kFlyBakeSlots; i++ ) {
+	for ( int i = 0; i < FlyBakeJob::kSlices; i++ ) {
 		if ( D.fbs[i] )
 			v.vkDestroyFramebuffer( v.dev, D.fbs[i], nullptr );
 		if ( D.views[i] )
@@ -55,6 +64,7 @@ void flyBFreeSlices()
 		D.views[i] = VK_NULL_HANDLE;
 	}
 	D.n = 0;
+	D.nrec = 0;
 }
 
 bool flyBStatic( std::string & why )
@@ -76,9 +86,11 @@ bool flyBStatic( std::string & why )
 	VkDescriptorSetLayoutCreateInfo lci { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
 	lci.bindingCount = kFlyBakeBindings;
 	lci.pBindings = b;
-	VkDescriptorPoolSize ps[3] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1 }, { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 3 }, { VK_DESCRIPTOR_TYPE_SAMPLER, 3 } };
+	constexpr std::uint32_t kP = WwVkPresent::kFlyBakePasses;
+	VkDescriptorPoolSize ps[3] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, kP }, { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 3 * kP },
+		{ VK_DESCRIPTOR_TYPE_SAMPLER, 3 * kP } };
 	VkDescriptorPoolCreateInfo pci { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
-	pci.maxSets = 1;
+	pci.maxSets = kP;
 	pci.poolSizeCount = 3;
 	pci.pPoolSizes = ps;
 	if ( v.vkCreateDescriptorSetLayout( v.dev, &lci, nullptr, &D.dsl ) != VK_SUCCESS
@@ -86,14 +98,17 @@ bool flyBStatic( std::string & why )
 		why = "the fly bake's descriptor set layout / pool failed";
 		return false;
 	}
+	VkDescriptorSetLayout dsls[kP];
+	for ( VkDescriptorSetLayout & l : dsls )
+		l = D.dsl;
 	VkDescriptorSetAllocateInfo dai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
 	dai.descriptorPool = D.dpool;
-	dai.descriptorSetCount = 1;
-	dai.pSetLayouts = &D.dsl;
+	dai.descriptorSetCount = kP;
+	dai.pSetLayouts = dsls;
 	VkPipelineLayoutCreateInfo plci { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
 	plci.setLayoutCount = 1;
 	plci.pSetLayouts = &D.dsl;
-	if ( v.vkAllocateDescriptorSets( v.dev, &dai, &D.set ) != VK_SUCCESS
+	if ( v.vkAllocateDescriptorSets( v.dev, &dai, D.set ) != VK_SUCCESS
 		|| v.vkCreatePipelineLayout( v.dev, &plci, nullptr, &D.layout ) != VK_SUCCESS ) {
 		why = "the fly bake's descriptor set / pipeline layout failed";
 		return false;
@@ -104,7 +119,7 @@ bool flyBStatic( std::string & why )
 		return false;
 	}
 	VkBufferCreateInfo bci { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-	bci.size = kFlyBakeStride * kFlyBakeSlots;
+	bci.size = kFlyBakeStride * VkDeviceSize( FlyBakeJob::kSlices );
 	bci.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
 	bool mapped = v.vkCreateBuffer( v.dev, &bci, nullptr, &D.ubo ) == VK_SUCCESS;
 	if ( mapped ) {
@@ -223,39 +238,48 @@ bool flyBakeRecord( std::string & why )
 	Vk & v = vk();
 	Fx & F = fx();
 	FlyBakeJob & D = flyBakeJob();
-	if ( D.n < 1 || !D.pipe[D.prog] ) {
-		why = "no slices / pipeline for the fly bake";
+	if ( D.nrec < 1 ) {
+		why = "no slices for the fly bake";
 		return false;
 	}
-	// the source written by an earlier crossing (passes 1..3) and the target written by GL or an earlier run
-	VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
-	mb.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT;
-	mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-	v.vkCmdPipelineBarrier( F.cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-		VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr );
-	const VkViewport vpt { 0.0f, 0.0f, float( D.w ), float( D.h ), 0.0f, 1.0f };
-	const VkRect2D sc { { 0, 0 }, { std::uint32_t( D.w ), std::uint32_t( D.h ) } };
-	for ( int i = 0; i < D.n; i++ ) {
-		if ( !D.fbs[i] )
-			continue;  // red 2's last slice (no slice past the end)
-		VkRenderPassBeginInfo rbi { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
-		rbi.renderPass = D.pass;
-		rbi.framebuffer = D.fbs[i];
-		rbi.renderArea = sc;
-		v.vkCmdBeginRenderPass( F.cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE );
-		v.vkCmdSetViewport( F.cmd, 0, 1, &vpt );
-		v.vkCmdSetScissor( F.cmd, 0, 1, &sc );
-		v.vkCmdBindPipeline( F.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, D.pipe[D.prog] );
-		const std::uint32_t off = std::uint32_t( kFlyBakeStride * VkDeviceSize( i ) );
-		v.vkCmdBindDescriptorSets( F.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, D.layout, 0, 1, &D.set, 1, &off );
-		v.vkCmdDraw( F.cmd, 3, 1, 0, 0 );
-		v.vkCmdEndRenderPass( F.cmd );
-		if ( i + 1 < D.n ) {  // red 1 draws every slice into one: keep GL's draw order between them
-			VkMemoryBarrier ob { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
-			ob.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-			ob.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-			v.vkCmdPipelineBarrier( F.cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 1, &ob, 0,
-				nullptr, 0, nullptr );
+	for ( int b = 0; b < D.nrec; b++ ) {
+		const FlyBakeJob::Rec & R = D.rec[b];
+		if ( R.n < 1 || !D.pipe[R.prog] ) {
+			why = "no slices / pipeline for the fly bake's run " + std::to_string( b );
+			return false;
+		}
+		// the source written by an earlier crossing or run (passes 1..3) and the target written by GL or an earlier run (lane
+		// VKCLOUD9: before every run of the crossing: the next pass reads the last one's volume, or overwrites one it read)
+		VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+		mb.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT;
+		mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		v.vkCmdPipelineBarrier( F.cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr );
+		const VkViewport vpt { 0.0f, 0.0f, float( R.w ), float( R.h ), 0.0f, 1.0f };
+		const VkRect2D sc { { 0, 0 }, { std::uint32_t( R.w ), std::uint32_t( R.h ) } };
+		const int base = b * kFlyBakeSlots;
+		for ( int i = 0; i < R.n; i++ ) {
+			if ( !D.fbs[base + i] )
+				continue;  // red 2's last slice (no slice past the end)
+			VkRenderPassBeginInfo rbi { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+			rbi.renderPass = D.pass;
+			rbi.framebuffer = D.fbs[base + i];
+			rbi.renderArea = sc;
+			v.vkCmdBeginRenderPass( F.cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE );
+			v.vkCmdSetViewport( F.cmd, 0, 1, &vpt );
+			v.vkCmdSetScissor( F.cmd, 0, 1, &sc );
+			v.vkCmdBindPipeline( F.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, D.pipe[R.prog] );
+			const std::uint32_t off = std::uint32_t( kFlyBakeStride * VkDeviceSize( R.slot0 + i ) );
+			v.vkCmdBindDescriptorSets( F.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, D.layout, 0, 1, &D.set[R.set], 1, &off );
+			v.vkCmdDraw( F.cmd, 3, 1, 0, 0 );
+			v.vkCmdEndRenderPass( F.cmd );
+			if ( i + 1 < R.n ) {  // red 1 draws every slice into one: keep GL's draw order between them
+				VkMemoryBarrier ob { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+				ob.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+				ob.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+				v.vkCmdPipelineBarrier( F.cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 1, &ob,
+					0, nullptr, 0, nullptr );
+			}
 		}
 	}
 	return true;
@@ -271,11 +295,56 @@ void flyBakeDrop()
 	fx().pending = false;
 	flyBFreeSlices();
 }
+
+// one run's checks, nothing written (lane VKCLOUD9: every run of a crossing is checked before any is recorded)
+bool flyBCheck( const WwVkPresent::FlyBakeRun & t, const Shared *& dst, const Shared *& src, std::string & why )
+{
+	src = nullptr;
+	dst = nullptr;
+	if ( t.pass < 0 || t.pass > 3 ) {
+		why = "pass " + std::to_string( t.pass ) + " (0 the bake, 1..3 the distance passes)";
+		return false;
+	}
+	if ( t.from < 0 || t.to <= t.from ) {
+		why = "an empty slice range";
+		return false;
+	}
+	if ( t.to - t.from > kFlyBakeSlots ) {
+		why = "more than " + std::to_string( kFlyBakeSlots ) + " slices in one run";
+		return false;
+	}
+	dst = flyBVolume( t.dst, "the target", why );
+	if ( !dst )
+		return false;
+	if ( t.to > dst->d ) {
+		why = "slices to " + std::to_string( t.to ) + " of a target " + std::to_string( dst->d ) + " deep";
+		return false;
+	}
+	if ( t.pass > 0 ) {
+		src = flyBVolume( t.src, "the distance pass's source", why );
+		if ( !src )
+			return false;
+		if ( src == dst ) {
+			why = "the distance pass reads its own target";
+			return false;
+		}
+		if ( src->w != dst->w || src->h != dst->h || src->d != dst->d ) {
+			why = "the distance pass's source is not the target's size";
+			return false;
+		}
+	}
+	return true;
+}
 }  // namespace
 
 namespace WwVkPresent
 {
 bool flyBakeRun( const FlyBakeRun & t, std::string & why )
+{
+	return flyBakeRunN( &t, 1, why );
+}
+
+bool flyBakeRunN( const FlyBakeRun * t, int n, std::string & why )
 {
 	Fx & F = fx();
 	FlyBakeJob & D = flyBakeJob();
@@ -296,30 +365,25 @@ bool flyBakeRun( const FlyBakeRun & t, std::string & why )
 	};
 	if ( D.broken )
 		return refuse( D.brokenWhy );
-	if ( t.pass < 0 || t.pass > 3 )
-		return refuse( "pass " + std::to_string( t.pass ) + " (0 the bake, 1..3 the distance passes)" );
-	if ( t.from < 0 || t.to <= t.from )
-		return refuse( "an empty slice range" );
-	if ( t.to - t.from > kFlyBakeSlots )
-		return refuse( "more than " + std::to_string( kFlyBakeSlots ) + " slices in one run" );
+	if ( !t || n < 1 || n > kFlyBakePasses )
+		return refuse( "a crossing of " + std::to_string( n ) + " runs (1.." + std::to_string( kFlyBakePasses ) + ")" );
+	if ( n > 1 && ( t[0].red & 16 ) ) {  // red 16 (gates): a crossing a run, the submit before lane VKCLOUD9
+		for ( int b = 0; b < n; b++ ) {
+			FlyBakeRun one = t[b];
+			one.red &= ~16;
+			if ( !flyBakeRunN( &one, 1, why ) )
+				return false;
+		}
+		return true;
+	}
 	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
 		return refuse( "the present device or GL's entry points are not ready in this context" );
 	std::string w;
-	const Shared * dst = flyBVolume( t.dst, "the target", w );
-	if ( !dst )
-		return refuse( w );
-	if ( t.to > dst->d )
-		return refuse( "slices to " + std::to_string( t.to ) + " of a target " + std::to_string( dst->d ) + " deep" );
-	const Shared * src = nullptr;
-	if ( t.pass > 0 ) {
-		src = flyBVolume( t.src, "the distance pass's source", w );
-		if ( !src )
-			return refuse( w );
-		if ( src == dst )
-			return refuse( "the distance pass reads its own target" );
-		if ( src->w != dst->w || src->h != dst->h || src->d != dst->d )
-			return refuse( "the distance pass's source is not the target's size" );
-	}
+	const Shared * dsts[kFlyBakePasses] = {};
+	const Shared * srcs[kFlyBakePasses] = {};
+	for ( int b = 0; b < n; b++ )
+		if ( !flyBCheck( t[b], dsts[b], srcs[b], w ) )
+			return refuse( ( n > 1 ? "run " + std::to_string( b ) + ": " : std::string() ) + w );
 	// the last crossing (any fx pass) is done before its command buffer, sets, framebuffers and buffers are written again
 	if ( F.pending ) {
 		v.vkWaitForFences( v.dev, 1, &F.fence, VK_TRUE, 1000000000ull );
@@ -329,22 +393,27 @@ bool flyBakeRun( const FlyBakeRun & t, std::string & why )
 	if ( !fxStatic( w ) || !fxSems( w ) || !flyBStatic( w ) )
 		return breakOff( w );
 	FxNames names;
+	const bool oneSet = ( t[0].red & 32 ) != 0;  // red 32 (gates): every run records with run 0's set and b31 slots
+	for ( int b = 0; b < n; b++ ) {
+	const FlyBakeRun & r = t[b];
+	const Shared * dst = dsts[b];
+	const Shared * src = srcs[b];
 	names.add( dst->tex );
 	VkImageView views[3] = { F.d3, F.d3, F.d2 };
 	int smp[3] = {};
-	if ( t.pass == 0 ) {
+	if ( r.pass == 0 ) {
 		for ( int k = 0; k < kFlyBakeTex; k++ ) {
-			if ( !fxSlot( t.tex[k], views[k], names, S.copies, w ) )
+			if ( !fxSlot( r.tex[k], views[k], names, S.copies, w ) )
 				return refuse( "the fly bake's input " + std::to_string( k ) + ": " + w );
-			smp[k] = t.tex[k].sampler;
+			smp[k] = r.tex[k].sampler;
 		}
 	} else {
 		views[0] = src->view;
 		names.add( src->tex );
 	}
 	// red 4: the other pass's program, b31 zero but cfLayer
-	const int prog = ( t.pass == 0 ? 0 : 1 ) ^ ( ( t.red & 4 ) ? 1 : 0 );
-	const int bytes = t.pass == 0 ? kT_flybakeBytes : kT_flysdfBytes;
+	const int prog = ( r.pass == 0 ? 0 : 1 ) ^ ( ( r.red & 4 ) ? 1 : 0 );
+	const int bytes = r.pass == 0 ? kT_flybakeBytes : kT_flysdfBytes;
 	const int layerAt = prog == 0 ? kT_flybakeLayerAt : kT_flysdfLayerAt;
 	VkFramebufferCreateInfo fci { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
 	fci.renderPass = D.pass;
@@ -352,22 +421,32 @@ bool flyBakeRun( const FlyBakeRun & t, std::string & why )
 	fci.width = std::uint32_t( dst->w );
 	fci.height = std::uint32_t( dst->h );
 	fci.layers = 1;
-	D.n = t.to - t.from;
-	for ( int i = 0; i < D.n; i++ ) {
-		const int k = t.from + i;
-		const int z = ( t.red & 1 ) ? 0 : ( t.red & 2 ) ? k + 1 : k;  // red 1 every slice into slice 0, red 2 slice k into k + 1
-		std::uint8_t * slot = D.uboPtr + kFlyBakeStride * VkDeviceSize( i );
+	FlyBakeJob::Rec & R = D.rec[b];
+	R = FlyBakeJob::Rec();
+	R.n = r.to - r.from;
+	R.w = dst->w;
+	R.h = dst->h;
+	R.prog = prog;
+	R.set = oneSet ? 0 : b;
+	R.slot0 = oneSet ? 0 : b * kFlyBakeSlots;
+	D.nrec = b + 1;
+	D.n += R.n;
+	const int base = b * kFlyBakeSlots;
+	for ( int i = 0; i < R.n; i++ ) {
+		const int k = r.from + i;
+		const int z = ( r.red & 1 ) ? 0 : ( r.red & 2 ) ? k + 1 : k;  // red 1 every slice into slice 0, red 2 slice k into k + 1
+		std::uint8_t * slot = D.uboPtr + kFlyBakeStride * VkDeviceSize( base + i );
 		std::memset( slot, 0, size_t( kFlyBakeStride ) );
-		if ( !( t.red & 4 ) )
-			std::memcpy( slot, t.loose, size_t( bytes ) );
+		if ( !( r.red & 4 ) )
+			std::memcpy( slot, r.loose, size_t( bytes ) );
 		std::memcpy( slot + layerAt, &k, 4 );
 		if ( z >= dst->d )
 			continue;
-		D.views[i] = sliceView( *dst, z, w );
-		if ( !D.views[i] )
+		D.views[base + i] = sliceView( *dst, z, w );
+		if ( !D.views[base + i] )
 			return breakOff( w );
-		fci.pAttachments = &D.views[i];
-		if ( v.vkCreateFramebuffer( v.dev, &fci, nullptr, &D.fbs[i] ) != VK_SUCCESS )
+		fci.pAttachments = &D.views[base + i];
+		if ( v.vkCreateFramebuffer( v.dev, &fci, nullptr, &D.fbs[base + i] ) != VK_SUCCESS )
 			return breakOff( "the fly bake's slice framebuffer failed" );
 	}
 	VkDescriptorBufferInfo bi { D.ubo, 0, VkDeviceSize( kT_flybakeBytes ) };
@@ -376,7 +455,7 @@ bool flyBakeRun( const FlyBakeRun & t, std::string & why )
 	for ( int k = 0; k < kFlyBakeBindings; k++ ) {
 		VkWriteDescriptorSet & x = ws[k];
 		x.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		x.dstSet = D.set;
+		x.dstSet = D.set[b];
 		x.descriptorCount = 1;
 		if ( k == 0 ) {
 			x.dstBinding = 31;
@@ -396,16 +475,15 @@ bool flyBakeRun( const FlyBakeRun & t, std::string & why )
 		}
 	}
 	v.vkUpdateDescriptorSets( v.dev, std::uint32_t( kFlyBakeBindings ), ws, 0, nullptr );
-	D.w = dst->w;
-	D.h = dst->h;
-	D.prog = prog;
+	}
 	F.kind = 19;
-	F.w = dst->w;
-	F.h = dst->h;
+	F.w = D.rec[0].w;
+	F.h = D.rec[0].h;
 	if ( !fxCross( names, w ) )
 		return breakOff( w );
 	const double ms = nowMs() - t0;
-	S.runs++;
+	S.crossings++;
+	S.runs += n;
 	S.cpuMs += ms;
 	S.maxMs = std::max( S.maxMs, ms );
 	return true;
