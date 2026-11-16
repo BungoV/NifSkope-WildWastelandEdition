@@ -739,6 +739,7 @@ bool boltRecord( std::string & why );  // lane VKOBJ15 (vkbolt.inc): fxWork's ki
 void waterDrop();
 void underDrop();  // lane VKWATER4 (vkunder.inc)
 void objVelDrop();  // lane VKOBJ12 (vkobjvel.inc)
+void camVelDrop();  // lane VKOBJ18 (vkcamvel.inc)
 void objDrop();  // lane VKOBJ1
 void blFree();  // lane VKOBJ2
 
@@ -3760,6 +3761,7 @@ void shutdown()
 	waterDrop();  // lane VKWATER3: the water draw's buffers (GL's names); pipelines and samplers stay with the device
 	underDrop();  // lane VKWATER4 (L7): the underwater draw's framebuffer, depth view and host buffer
 	objVelDrop();  // lane VKOBJ12: the TAA inputs' step 3 framebuffer and host buffers
+	camVelDrop();  // lane VKOBJ18: the TAA inputs' step 2 framebuffer and host buffers
 }
 
 bool viewBegin( int w, int h, int samples, GlProc gp, std::string & why )
@@ -9198,4 +9200,5 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 #include "features/vkframe/vkwater.inc"  // lane VKWATER1: the water's route and census (row G5)
 #include "features/vkframe/vkunder.inc"  // lane VKWATER4 (L7): the underwater fog on the view
 #include "features/vkframe/vkobjvel.inc"  // lane VKOBJ12: the TAA inputs' step 3 (taa_objvel) on the view
+#include "features/vkframe/vkcamvel.inc"  // lane VKOBJ18: the TAA inputs' step 2 (game_taa_mv, the camera's vectors) on the view
 #include "features/vkframe/vkbolt.inc"  // lane VKOBJ15: the lightning strips' preview (census row 146)
