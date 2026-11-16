@@ -6,7 +6,9 @@
 // the present device's read (twice, equal) == GL's own read of the shared name == GL's draw of the same program into a
 // plain texture of the right size, byte for byte (compared count > 0, no sentinel texel left); rtImgGen() moved after a
 // resize and after a drop + remake. Checks: after a write, a second write, a resize (160x90 -> 161x91 at step 2), a drop +
-// remake, and after each red. An unknown name refuses.
+// remake, and after each red. An unknown name refuses. Added before the fix run (VKBUF2 round 2): the lookup's view == the
+// target's own view; a share at the same size keeps both (gen, made and GL names unmoved); the first `vk rtimg:` line said
+// (the owner says once a pass, after both shares) names both images sized (the .sh reads it).
 // Reds (each must FAIL): dropped (the lookup after a drop), unshared (WW_VKVIEW_GIHALF_RED=1), not read this frame (the
 // owner's fresh() false), wrong size (the size rounded down at 161x91), stale (cellGiHalf: a remake whose FBO still holds
 // the old attachment, so GL's draw misses the shared image). Last line `RTIMG GATE OK` or `RTIMG GATE FAILED`.
@@ -72,6 +74,7 @@ bool share( Owner & o, int W, int H, int step, std::string & why )
 	if ( !WwVkPresent::rtImgShare( WwVkPresent::kRtImgGiHalf, o.k( WwVkPresent::kRtImgGiHalf ), w, h, o.attachOn ? o.fbo : 0, 0, a, why ) )
 		return false;
 	f.bindFramebuffer( fFb, 0 );
+	WwVkPresent::rtImgSay();  // the owner says once a pass, after both shares (ao.cpp giHalfPass)
 	o.half = a;
 	o.key = b;
 	o.w = w;
@@ -261,14 +264,16 @@ void check( GLuint prog, Owner & o, int W, int H, int step, int seed, bool wantG
 		const std::uintptr_t fk = farSharedOf( r[s].glTex );
 		const bool is = WwVkPresent::sharedTargetIs( r[s].key, r[s].glTex );
 		const bool genOk = !wantGen || r[s].gen != lastGen;
+		const Shared * sf = sharedFind( r[s].key );
+		const bool viewOk = sf && sf->view && r[s].view == std::uint64_t( reinterpret_cast<std::uintptr_t>( sf->view ) );
 		std::snprintf( b, sizeof b,
-			"%dx%d (want %dx%d), fmt 0x%04X, farSharedOf %s, sharedTargetIs %d, read %s, compared %zu bytes, %zu differ, read twice %zu differ, "
+			"%dx%d (want %dx%d), fmt 0x%04X, view %s, farSharedOf %s, sharedTargetIs %d, read %s, compared %zu bytes, %zu differ, read twice %zu differ, "
 			"GL's own read %zu differ, sentinel texels %zu, gen %llu%s, fbo %s, GL error 0x%04X",
-			r[s].w, r[s].h, ew, eh, r[s].glFmt, fk == r[s].key ? "= key" : "!= key", is ? 1 : 0, rd ? "ok" : w1.c_str(), std::min( vk1.size(), want.size() ),
+			r[s].w, r[s].h, ew, eh, r[s].glFmt, viewOk ? "= the target's" : "WRONG", fk == r[s].key ? "= key" : "!= key", is ? 1 : 0, rd ? "ok" : w1.c_str(), std::min( vk1.size(), want.size() ),
 			bad, twice, glBad, sent, static_cast<unsigned long long>( r[s].gen ), wantGen ? ( genOk ? " (moved)" : " (did NOT move)" ) : "",
 			complete ? "complete" : "INCOMPLETE", unsigned( err ) );
 		c.text = b;
-		c.ok = rd && r[s].w == ew && r[s].h == eh && r[s].glFmt == riRgba32f && fk == r[s].key && is && !want.empty() && bad == 0 && twice == 0
+		c.ok = rd && r[s].w == ew && r[s].h == eh && r[s].glFmt == riRgba32f && viewOk && fk == r[s].key && is && !want.empty() && bad == 0 && twice == 0
 			&& glBad == 0 && sent == 0 && genOk && complete && err == GL_NO_ERROR;
 	}
 	if ( found[0] )
@@ -359,6 +364,20 @@ int main( int argc, char ** argv )
 		return fatal( "share: " + why );
 	run( 160, 90, true, "after a write", true );
 	run( 160, 90, false, "after a second write", true );
+	{  // kept: a share at the same size keeps both images (no remake, no gen move, the same GL names)
+		const std::uint64_t g0 = WwVkPresent::rtImgGen();
+		const WwVkPresent::RtImgStat s0 = WwVkPresent::rtImgStat();
+		const unsigned h0 = o.half, k0 = o.key;
+		if ( !share( o, 160, 90, 2, why ) )
+			return fatal( "kept: " + why );
+		const WwVkPresent::RtImgStat s1 = WwVkPresent::rtImgStat();
+		const int dm = s1.made[0] - s0.made[0] + s1.made[1] - s0.made[1];
+		const bool kOk = WwVkPresent::rtImgGen() == g0 && dm == 0 && o.half == h0 && o.key == k0;
+		std::printf( "RTIMG kept (a share at the same size): gen moved %d, made moved %d, GL names kept %d: %s\n", WwVkPresent::rtImgGen() != g0 ? 1 : 0,
+			dm, o.half == h0 && o.key == k0 ? 1 : 0, kOk ? "OK" : "FAIL" );
+		ok = ok && kOk;
+	}
+	run( 160, 90, false, "after the kept share", true );
 	// resize: 161 x 91 at step 2 -> 81 x 46 (rounded up)
 	if ( !share( o, 161, 91, 2, why ) )
 		return fatal( "resize: " + why );

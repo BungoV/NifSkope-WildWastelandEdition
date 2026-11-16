@@ -94,6 +94,7 @@ struct RtImg
 	std::uintptr_t key = 0;  //!< the sharedTarget key (sharedFind / farSharedOf( glTex ) give the same)
 	unsigned glTex = 0;      //!< GL's name (the crossing's texture list; GL wrote it)
 	unsigned glFmt = 0;      //!< GL_RGBA32F
+	std::uint64_t view = 0;  //!< the VkImageView (GENERAL layout), as the target's own view
 	int w = 0, h = 0;
 	std::uint64_t gen = 0;   //!< rtImgGen() at the answer
 };
