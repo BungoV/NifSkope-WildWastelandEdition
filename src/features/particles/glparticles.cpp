@@ -716,7 +716,7 @@ void Particles::drawShapes( NodeList * secondPass )
 	// lane VKOBJ5 (plan row G4 round 3): a particles_cell system on Vulkan (WW_VKOBJ_SHADE, the base variant; `vk objpfx:`)
 	if ( !( cellPfx && numVerts > 0 && WwBl::vkPfxDraw( prog, attrData[0], attrData[1], attrData[2],
 			attrData[3], attrData[4], std::size_t( numVerts ) ) ) )
-		scene->renderer->fn->glDrawArrays( GL_POINTS, 0, GLsizei( numVerts ) );
+		WwBl::countGl( 1 ), scene->renderer->fn->glDrawArrays( GL_POINTS, 0, GLsizei( numVerts ) );	// lane VKFLIGHT6: the view guard
 	if ( vpAlways )
 		glDepthFunc( GLenum( prevDepthFunc ) );
 	if ( !scene->selecting )

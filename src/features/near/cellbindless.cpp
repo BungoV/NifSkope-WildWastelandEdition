@@ -615,15 +615,17 @@ bool vkBlDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * coun
 {
 	Ctx & c = cx();
 	QOpenGLContext * qc = QOpenGLContext::currentContext();
+	// lane VKFLIGHT6: each refusal is noted for the GL draw after it (zoneWhy; `vk sorted:`)
 	if ( !vkShadeOn() || !prog || n <= 0 || !c.map || !qc )
-		return false;
+		return zoneWhy( !vkShadeOn() ? "WW_VKOBJ_SHADE=0: the twins are off" : !c.map ? "the bindless ring is not up" : "no program or no draw",
+			false ), false;
 	const bool own = !geo.on;  // unpooled: the shape's own VAO is bound (bsshape), its indices from 0, base vertex 0
 	if ( ( !own && !c.boundCls ) || ( own && !verts ) )
-		return false;
+		return zoneWhy( "no pool class bound", false ), false;
 	const std::string_view nm = prog->name;
 	const int twin = nm.find( "cellcsmbl" ) != std::string_view::npos ? 1 : nm.find( "cellbl" ) != std::string_view::npos ? 0 : -1;
 	if ( twin < 0 )
-		return false;
+		return zoneWhy( "no twin: " + std::string( prog->name ), false ), false;
 	QOpenGLFunctions * gf = qc->functions();
 	// skinned: the bone codes at location 5 (bsshape feeds them only for a GPU-skinned shape): the class's, or the VAO's
 	GLint loc5 = 0;
@@ -644,6 +646,7 @@ bool vkBlDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * coun
 		for ( int i = 0; i < kBlKinds; i++ )
 			if ( in[i] )
 				blWhy[i] = w;
+		zoneWhy( w, true );
 		return false;
 	};
 	/* lane VKOBJ20: the twin variant by GL's pixel-stage key, as the run route picks it (objBlVariant: 0 the app's base key, 1 the
@@ -653,9 +656,11 @@ bool vkBlDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * coun
 	const int variant = WwVkPresent::objBlVariant( prog->wwDefs, no );
 	if ( variant < 0 )
 		return refuse( no );
-	// lane VKOBJ19: a decal-fade piece blends by its own alpha (GL's loose alpha, mirrored per call by objBlLoose)
-	if ( rigid && !fadeBand && gf->glIsEnabled( GL_BLEND ) )
-		return refuse( "a blended rigid shape (the opaque route only)" );
+	/* lane VKOBJ19: a decal-fade piece blends by its own alpha (GL's loose alpha, mirrored per call by objBlLoose). Lane VKFLIGHT6:
+	 * every blended shape takes the twin now (the sorted pass, bungo 11-16: no GL in the Vulkan view): GL's blend state reaches the
+	 * pipeline through objBlTargetState (blview `blend run`; a constant factor refuses by name), and each draw is its own crossing,
+	 * so the sort order holds */
+	static_cast<void>( fadeBand );
 	static std::vector<std::uint32_t> cmds;
 	cmds.clear();
 	const std::uintptr_t idxOff = own ? 0 : geo.idxOff;
@@ -699,6 +704,7 @@ bool vkBlDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * coun
 		return refuse( why );
 	for ( int i = 0; i < kBlKinds; i++ )
 		blDrawn[i] += in[i];
+	zoneVk( 1 );
 	return true;
 }
 
@@ -715,6 +721,7 @@ bool runIssue(NifSkopeOpenGLContext::GLFunctions * f, const NifSkopeOpenGLContex
 	const GLsizei n = GLsizei( c.cmdCursor - run.cmd0 );
 	if ( n > 0 && vkShadeOn() && vkShade( prog, n ) ) {
 		c.vkRuns++;
+		zoneVk( run.rows );	// lane VKFLIGHT6
 	} else if ( n > 0 ) {
 		f->glBindBuffer( GL_DRAW_INDIRECT_BUFFER, c.cmdBuf );
 		WwBl::countGl( 1 ), c.mdi( GL_TRIANGLES, GL_UNSIGNED_SHORT, (const void *) ( std::size_t( run.cmd0 ) * kCmdBytes ), n, GLsizei( kCmdBytes ) );
@@ -762,11 +769,13 @@ CellTwinRoute cellTwinRoute( const NifSkopeOpenGLContext::Program * prog )
 
 bool vkCellDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * counts, const void * const * offs, GLsizei n, std::size_t verts )
 {
-	if ( !vkShadeOn() || !prog || n <= 0 || geo.on )
+	if ( !vkShadeOn() )
+		return zoneWhy( "WW_VKOBJ_SHADE=0: the twins are off", false ), false;	// lane VKFLIGHT6
+	if ( !prog || n <= 0 || geo.on )	// geo.on: a pooled bindless draw (vkBlDraw's)
 		return false;
 	const int twin = cellTwinOf( prog->name );
 	if ( twin < 2 || ( twin > 8 && twin != 10 ) )
-		return false;
+		return zoneWhy( "no twin: " + std::string( prog->name ), false ), false;
 	const bool fx = twin >= 7;
 	const bool pbrm = twin >= 4 && !fx;
 	( fx ? fxTried : pbrm ? pbrmTried : cellTried )++;
@@ -778,6 +787,7 @@ bool vkCellDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * co
 	if ( no ) {
 		WwVkPresent::objBlOnGl( no );
 		lastWhy = no;
+		zoneWhy( no, true );
 		return false;
 	}
 	static std::vector<std::uint32_t> cmds;
@@ -802,10 +812,13 @@ bool vkCellDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * co
 	const bool drew = WwVkPresent::objCellShade( []( const char * name ) -> void * {
 		return reinterpret_cast<void *>( QOpenGLContext::currentContext()->getProcAddress( name ) );
 	}, s, why );
-	if ( drew )
+	if ( drew ) {
 		( fx ? fxDrawn : pbrm ? pbrmDrawn : cellDrawn )++;
-	else
+		zoneVk( 1 );
+	} else {
 		lastWhy = why;
+		zoneWhy( why, true );
+	}
 	return drew;
 }
 
@@ -820,7 +833,8 @@ bool vkPfxDraw( const NifSkopeOpenGLContext::Program * prog, const float * pos, 
 {
 	QOpenGLContext * qc = QOpenGLContext::currentContext();
 	if ( !vkShadeOn() || !prog || !n || !pos || !qc || std::string_view( prog->name ) != "particles_cell.prog" )
-		return false;
+		return zoneWhy( !vkShadeOn() ? std::string( "WW_VKOBJ_SHADE=0: the twins are off" ) : prog ? "no twin: " + std::string( prog->name )
+			: std::string( "no program" ), false ), false;	// lane VKFLIGHT6
 	pfxTried++;
 	GLboolean mask[4] = {};
 	qc->functions()->glGetBooleanv( GL_COLOR_WRITEMASK, mask );
@@ -834,6 +848,7 @@ bool vkPfxDraw( const NifSkopeOpenGLContext::Program * prog, const float * pos, 
 	if ( no ) {
 		WwVkPresent::objBlOnGl( no );
 		pfxWhy = no;
+		zoneWhy( no, true );
 		return false;
 	}
 	WW_SWITCH_STATIC( int, red, WwVkPresent::objPfxRed( wwEnv( "WW_VKVIEW_OBJPFX_RED" ).trimmed().toStdString().c_str() ) );
@@ -854,8 +869,11 @@ bool vkPfxDraw( const NifSkopeOpenGLContext::Program * prog, const float * pos, 
 	if ( drew ) {
 		pfxDrawn++;
 		pfxPoints += static_cast<long long>( n );
-	} else
+		zoneVk( 1 );
+	} else {
 		pfxWhy = why;
+		zoneWhy( why, true );
+	}
 	return drew;
 }
 
@@ -1355,8 +1373,10 @@ void frame()
 		glZ[z] = gz.draws[z];
 		if ( gz.draws[z] )
 			WwVkPresent::glGuard( glZoneName( z ), gz.draws[z] );
-		gz.draws[z] = 0;
 	}
+	// lane VKFLIGHT6: the sorted pass's twin draws and GL's draws by the refusal before them (said in the view, below)
+	const std::string sortedLine = zoneLine( ZoneSorted, "sorted" );
+	zoneReset();
 	if ( ctxs().empty() )
 		return;
 	Ctx & c = cx();
@@ -1514,6 +1534,11 @@ void frame()
 		if ( vkOpaqueLine != b && wwFrameLog() ) {
 			vkOpaqueLine = b;
 			std::fprintf( stderr, "%s\n", b );
+		}
+		static std::string vkSortedLine;	// lane VKFLIGHT6
+		if ( vkSortedLine != sortedLine && wwFrameLog() ) {
+			vkSortedLine = sortedLine;
+			std::fprintf( stderr, "%s\n", sortedLine.c_str() );
 		}
 	}
 	// lane VKOBJ5: the bindless shapes outside a run (vkBlDraw) drawn on Vulkan per kind, and the last refusal

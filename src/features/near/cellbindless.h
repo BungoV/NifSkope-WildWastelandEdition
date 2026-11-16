@@ -94,12 +94,14 @@ bool vkPfxDraw( const NifSkopeOpenGLContext::Program * prog, const float * pos, 
 	const float * size, std::size_t n );
 /* lane VKOBJ5 (plan row G4): a fo4_cellbl / fo4_cellcsmbl shape outside a run on Vulkan through the bl twins (objBlShade, one
  * row: the one commit wrote, wwDrawBase 0 on Vulkan; under vkShadeOn): skinned (bone codes at location 5), alpha-tested
- * (alphaFlags & 7), or rigid and opaque (no blend; a blended rigid shape stays on GL); pooled (its class's arena) or unpooled
+ * (alphaFlags & 7), or rigid (opaque or blended); pooled (its class's arena) or unpooled
  * (the shape's own VAO, `verts` its vertex count, indices from 0). false: GL draws it, the reason in `vk objskin:` /
  * `vk objalpha:` / `vk objrigid:` (unpooled ones also in `vk objown:`). Reds WW_VKVIEW_OBJSKIN_RED=bone (the bone transforms
  * one bone on), WW_VKVIEW_OBJALPHA_RED=flags (alphaFlags 0), WW_VKVIEW_OBJOWN_RED=offset|half (the VAO read from offset 0 /
  * halves as 16-bit unorm). Lane VKOBJ19: fadeBand admits a blended rigid shape (a DecalFade kept piece or band, its
- * per-band alpha read live from GL's loose uniforms; a constant-alpha band still refuses by name) */
+ * per-band alpha read live from GL's loose uniforms; a constant-alpha band still refuses by name). Lane VKFLIGHT6: every blended
+ * shape is admitted (the sorted pass; GL's blend state in the pipeline key, one crossing a draw keeps the order); fadeBand is
+ * kept for the callers */
 bool vkBlDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * counts, const void * const * offs, GLsizei n,
 	std::size_t verts = 0, bool fadeBand = false );
 //! the cache deletes tex next (its handles were dropped): a twin leaves the table, its Vulkan half at the next frame
