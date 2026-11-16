@@ -890,70 +890,6 @@ int main( int argc, char ** argv )
 			if ( l >= 0 )
 				f.uniform1fv( l, 1, &v );
 		}
-		/* FLD_SET=name=v[:v:v:v],...: one value set on the drawn program AFTER seeding (BATCH1118: a probe on the same
-		 * world; FLD_ZERO skips a draw and shifts every later value). Ints by the uniform's GL type, else floats */
-		if ( const char * fs = getenv( "FLD_SET" ) ) {
-			std::string list( fs );
-			size_t s = 0;
-			while ( s < list.size() ) {
-				size_t e = list.find( ',', s );
-				if ( e == std::string::npos )
-					e = list.size();
-				const std::string item = list.substr( s, e - s );
-				s = e + 1;
-				const size_t eq = item.find( '=' );
-				if ( eq == std::string::npos )
-					continue;
-				const std::string nm = item.substr( 0, eq );
-				std::vector<float> v;
-				for ( size_t a = eq + 1; a <= item.size(); ) {
-					size_t b = item.find( ':', a );
-					if ( b == std::string::npos )
-						b = item.size();
-					v.push_back( std::strtof( item.substr( a, b - a ).c_str(), nullptr ) );
-					a = b + 1;
-				}
-				GLenum ty = 0;
-				GLint n = 0;
-				f.getProgramiv( pFg, fActiveUnis, &n );
-				for ( GLint i = 0; i < n; i++ ) {
-					char un[256] = {};
-					GLint sz = 0;
-					GLenum t = 0;
-					f.getActiveUniform( pFg, GLuint( i ), 256, nullptr, &sz, &t, un );
-					if ( nm == un || nm + "[0]" == un )
-						ty = t;
-				}
-				const GLint l = f.getUniformLocation( pFg, nm.c_str() );
-				const bool isInt = ty == 0x1404 || ty == 0x8B56;
-				if ( l >= 0 && isInt ) {
-					const GLint iv = GLint( v[0] );
-					f.uniform1iv( l, 1, &iv );
-				} else if ( l >= 0 )
-					( v.size() == 1 ? f.uniform1fv : v.size() == 2 ? f.uniform2fv : v.size() == 3 ? f.uniform3fv : f.uniform4fv )( l, 1, v.data() );
-				std::printf( "FARGNDRTDRAW seed %d FLD_SET %s (%zu values, type 0x%X, location %d)\n", seed, nm.c_str(), v.size(), ty, l );
-			}
-		}
-		// FLD_GET=name,...: the value GL holds for each named loose uniform after seeding (both programs: the same world?)
-		if ( const char * fg = getenv( "FLD_GET" ) ) {
-			std::string list( fg );
-			for ( size_t s = 0; s < list.size(); ) {
-				size_t e = list.find( ',', s );
-				if ( e == std::string::npos )
-					e = list.size();
-				const std::string nm = list.substr( s, e - s );
-				s = e + 1;
-				const GLint l = f.getUniformLocation( pFg, nm.c_str() );
-				GLfloat v[16] = {};
-				GLint iv[16] = {};
-				if ( l >= 0 ) {
-					gw.glGetUniformfv( pFg, l, v );
-					gw.glGetUniformiv( pFg, l, iv );
-				}
-				std::printf( "FARGNDRTDRAW seed %d FLD_GET %s location %d: f %.6g %.6g %.6g %.6g i %d %d %d %d\n", seed, nm.c_str(), l,
-					v[0], v[1], v[2], v[3], iv[0], iv[1], iv[2], iv[3] );
-			}
-		}
 		{	/* lane VKGROUND5 (VKGROUND4's fgpagesdraw fix): volPackDims.xyz = the packed air volume's size in texels, as
 			 * cellvolair.cpp sets it. Seeded in [0.05, 1) it made wwGridAt's clamp( uv * share, 0.5 / dims, share - 0.5 / dims )
 			 * run with lo > hi (undefined in GLSL and SPIR-V; NV's two compilers differ) on seed 1, whose far air grid is on */
@@ -1049,6 +985,71 @@ int main( int argc, char ** argv )
 				atlas[4 * t + 3] = ( t - 192 * kProbes ) % 2 ? 1.0f : 2.0f;
 			}
 			bufWrite( atBuf, atlas.data(), atBytes );
+		}
+		// lane VKGROUND12: here, after the RT seeding (before it, the seeding overwrote the RT switches)
+		/* FLD_SET=name=v[:v:v:v],...: one value set on the drawn program AFTER seeding (BATCH1118: a probe on the same
+		 * world; FLD_ZERO skips a draw and shifts every later value). Ints by the uniform's GL type, else floats */
+		if ( const char * fs = getenv( "FLD_SET" ) ) {
+			std::string list( fs );
+			size_t s = 0;
+			while ( s < list.size() ) {
+				size_t e = list.find( ',', s );
+				if ( e == std::string::npos )
+					e = list.size();
+				const std::string item = list.substr( s, e - s );
+				s = e + 1;
+				const size_t eq = item.find( '=' );
+				if ( eq == std::string::npos )
+					continue;
+				const std::string nm = item.substr( 0, eq );
+				std::vector<float> v;
+				for ( size_t a = eq + 1; a <= item.size(); ) {
+					size_t b = item.find( ':', a );
+					if ( b == std::string::npos )
+						b = item.size();
+					v.push_back( std::strtof( item.substr( a, b - a ).c_str(), nullptr ) );
+					a = b + 1;
+				}
+				GLenum ty = 0;
+				GLint n = 0;
+				f.getProgramiv( pFg, fActiveUnis, &n );
+				for ( GLint i = 0; i < n; i++ ) {
+					char un[256] = {};
+					GLint sz = 0;
+					GLenum t = 0;
+					f.getActiveUniform( pFg, GLuint( i ), 256, nullptr, &sz, &t, un );
+					if ( nm == un || nm + "[0]" == un )
+						ty = t;
+				}
+				const GLint l = f.getUniformLocation( pFg, nm.c_str() );
+				const bool isInt = ty == 0x1404 || ty == 0x8B56;
+				if ( l >= 0 && isInt ) {
+					const GLint iv = GLint( v[0] );
+					f.uniform1iv( l, 1, &iv );
+				} else if ( l >= 0 )
+					( v.size() == 1 ? f.uniform1fv : v.size() == 2 ? f.uniform2fv : v.size() == 3 ? f.uniform3fv : f.uniform4fv )( l, 1, v.data() );
+				std::printf( "FARGNDRTDRAW seed %d FLD_SET %s (%zu values, type 0x%X, location %d)\n", seed, nm.c_str(), v.size(), ty, l );
+			}
+		}
+		// FLD_GET=name,...: the value GL holds for each named loose uniform after seeding (both programs: the same world?)
+		if ( const char * fg = getenv( "FLD_GET" ) ) {
+			std::string list( fg );
+			for ( size_t s = 0; s < list.size(); ) {
+				size_t e = list.find( ',', s );
+				if ( e == std::string::npos )
+					e = list.size();
+				const std::string nm = list.substr( s, e - s );
+				s = e + 1;
+				const GLint l = f.getUniformLocation( pFg, nm.c_str() );
+				GLfloat v[16] = {};
+				GLint iv[16] = {};
+				if ( l >= 0 ) {
+					gw.glGetUniformfv( pFg, l, v );
+					gw.glGetUniformiv( pFg, l, iv );
+				}
+				std::printf( "FARGNDRTDRAW seed %d FLD_GET %s location %d: f %.6g %.6g %.6g %.6g i %d %d %d %d\n", seed, nm.c_str(), l,
+					v[0], v[1], v[2], v[3], iv[0], iv[1], iv[2], iv[3] );
+			}
 		}
 		std::printf( "FARGNDRTDRAW seed %d: %d loose uniforms seeded%s, fgMode 1, decals on\n", seed, nu, scissor ? ", a scissor" : "" );
 
@@ -1183,9 +1184,12 @@ int main( int argc, char ** argv )
 		for ( const char * sw : { "cellRestirOn", "cellDdgiOn" } ) {
 			if ( kv == 2 && std::strcmp( sw, "cellRestirOn" ) == 0 )
 				continue;
+			GLint was = 1;	// lane VKGROUND12: put back the value seeded (an FLD_SET probe's 0 too), not a hard 1
+			if ( f.getUniformLocation( pFg, sw ) >= 0 )
+				gw.glGetUniformiv( pFg, f.getUniformLocation( pFg, sw ), &was );
 			setIp( sw, 0 );
 			const size_t moved = movedIn( cov, glC, glFrame() );
-			setIp( sw, 1 );
+			setIp( sw, was );
 			const bool ok = glCovered > 0 && moved * 5 >= glCovered;
 			std::printf( "FARGNDRTDRAW %s seed %d GL probe %s 0: moved %zu of %zu covered samples (%.1f %%): %s\n", tag, seed, sw, moved,
 				glCovered, glCovered ? 100.0 * double( moved ) / double( glCovered ) : 0.0, ok ? "OK" : "FAIL (the input does not reach the colour)" );
