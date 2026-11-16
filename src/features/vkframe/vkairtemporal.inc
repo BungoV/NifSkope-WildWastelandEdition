@@ -62,7 +62,7 @@ int & atCur()
 
 At & atS( int i )
 {
-	static At s[2];
+	static At s[3];  // lane VKAIR21: 2 the near grid's stage 1 with temporal off
 	return s[i];
 }
 
@@ -382,6 +382,12 @@ bool afWork( std::string & why )
 	return atWorkOn( atS( 1 ), why );
 }
 
+// lane VKAIR21: the near grid's temporal-off crossing
+bool apWork( std::string & why )
+{
+	return atWorkOn( atS( 2 ), why );
+}
+
 // a GL buffer texture that is the present device's texel buffer (farTexelBuffer: GL writes it, Vulkan reads it in place)
 const FcBuf * texelOnDevice( GLuint tex )
 {
@@ -407,15 +413,15 @@ std::string airTemporalRefusal()
 	return std::string();
 }
 
-WaterRun & airTemporalScratch( bool isFar )
+WaterRun & airTemporalScratch( bool isFar, bool plain )
 {
-	return airtemporal::atS( isFar ? 1 : 0 ).run;
+	return airtemporal::atS( plain ? 2 : isFar ? 1 : 0 ).run;
 }
 
 bool airTemporalRunState( const AirTemporalRun & r, WaterRun & s, std::string & why )
 {
 	using namespace airtemporal;
-	atCur() = r.far ? 1 : 0;  // lane VKAIR20: the far grid's own instance
+	atCur() = r.plain ? 2 : r.far ? 1 : 0;  // lane VKAIR20: the far grid's own instance; VKAIR21: the plain one
 	At & S = atS();
 	S.isFar = r.far;
 	Gl & g = gl();
@@ -430,7 +436,8 @@ bool airTemporalRunState( const AirTemporalRun & r, WaterRun & s, std::string & 
 	};
 	auto breakOff = [&]( const std::string & w ) {
 		S.broken = true;
-		S.brokenWhy = std::string( r.far ? "the far air inject" : "the air temporal reader" ) + " on Vulkan broke: " + w;
+		S.brokenWhy = std::string( r.plain ? "the near air inject (temporal off)" : r.far ? "the far air inject" : "the air temporal reader" )
+			+ " on Vulkan broke: " + w;
 		return refuse( S.brokenWhy );
 	};
 	if ( const std::string no = airTemporalRefusal(); !no.empty() )
@@ -447,6 +454,8 @@ bool airTemporalRunState( const AirTemporalRun & r, WaterRun & s, std::string & 
 	if ( r.far && ( r.base < 0 || r.k0 < 0 || r.k0 > r.k1 || r.k1 > r.slices ) )  // lane VKAIR20
 		return refuse( "the far run " + std::to_string( r.k0 ) + ".." + std::to_string( r.k1 ) + " at base " + std::to_string( r.base )
 			+ " is outside the grid" );
+	if ( r.plain && !r.far )  // lane VKAIR21
+		return refuse( "the plain run without the far shape (far unset)" );
 	// the targets: the inject (3D, at least the grid) and the out history (3D, the grid x strata exactly), both slice-viewable
 	const Shared * inj = sharedFind( r.injectKey );
 	const Shared * out = r.far ? nullptr : sharedFind( r.histOutKey );  // lane VKAIR20: the far grid has no history
@@ -704,7 +713,7 @@ bool airTemporalRunState( const AirTemporalRun & r, WaterRun & s, std::string & 
 	}
 	Work j;
 	j.k = -1;
-	j.fn = r.far ? afWork : atWork;
+	j.fn = r.plain ? apWork : r.far ? afWork : atWork;
 	hand( j );
 	bool ok = false;
 	{
@@ -761,6 +770,19 @@ AirTemporalStat takeAirFarStat()
 void airFarOnGl( const char * why )
 {
 	airtemporal::At & S = airtemporal::atS( 1 );
+	S.st.gl++;
+	S.st.glWhy = why ? why : "";
+}
+
+// lane VKAIR21: the near grid's temporal-off stat and GL fallback
+AirTemporalStat takeAirPlainStat()
+{
+	return atTake( airtemporal::atS( 2 ) );
+}
+
+void airPlainOnGl( const char * why )
+{
+	airtemporal::At & S = airtemporal::atS( 2 );
 	S.st.gl++;
 	S.st.glWhy = why ? why : "";
 }

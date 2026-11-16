@@ -1,3 +1,16 @@
+## VKAIR21 (2026-11-16): the near air grid's inject with temporal off runs on Vulkan
+
+Changed, not built, not checked live. Offline: tests/vkframe/airtemporalview.sh passes (GATE OK).
+
+- When the air's history is off (temporal off, or the MRT refused), the near grid's inject (stage 1, 64 layers) now draws
+  on Vulkan in one crossing, like the temporal reader and the far grid already do. It uses its own route state, so the near
+  and far grids keep their pipelines and counts apart. A refusal is named and GL draws the layers as before.
+- New log line `vk airplain:` (runs, drawn, gl, layers, copies, ms, glWhy). Red WW_VKVIEW_AIRPLAIN_RED=1 keeps GL.
+- Gate: two new arms in airtemporalview (default and all-on), Vulkan against GL on every texel of the 64 layers, with
+  reds (layer stuck, route dropped, a wrong input bound, inputs rewritten after GL's draw, wrong key, feedback, RT GI
+  buffers) that must all FAIL.
+- Left on GL by name: the integrate (stage 2) in that same branch, reached only when the Vulkan integrate is refused.
+
 ## BATCH1120 (2026-11-16): the glow shoulder acts smoothly over darker backgrounds
 
 Changed, not checked live. Offline: tests/vkframe/toneview.sh `BOTH both add B` (see notes/batch1120/next.md).

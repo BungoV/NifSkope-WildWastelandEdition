@@ -20,6 +20,9 @@
  * arms of tests/vkframe/airtemporalview.cpp). windef.h's empty `far` macro would eat the field's name: undefined here, FAR
  * kept meaning nothing */
 #define WW_VK_AIRFAR 1
+/* lane VKAIR21: the near grid's stage 1 with temporal off (cellvolair.cpp vaPassInner's last else) rides it too, in a third
+ * instance (AirTemporalRun::plain, airPlainOnGl, takeAirPlainStat; gate: the plain arms of airtemporalview.cpp) */
+#define WW_VK_AIRPLAIN 1
 #ifdef far
 #undef far
 #ifdef FAR
@@ -46,6 +49,9 @@ struct AirTemporalRun
 	 * base dropped (layers k), 8 the run's bounds ignored (0..slices) */
 	bool far = false;
 	int base = 0, k0 = 0, k1 = 0;
+	/* lane VKAIR21: the near grid's stage 1 with temporal off: the far shape (far set, base 0, k 0..slices) in its own instance,
+	 * so the near and far grids keep their pipelines and stats apart; plain without far is refused */
+	bool plain = false;
 };
 
 struct AirTemporalStat
@@ -68,15 +74,18 @@ std::string airTemporalRefusal();
 void airTemporalOnGl( const char * why );
 AirTemporalStat takeAirTemporalStat();
 //! the route's WaterRun, in its own state (the reader's or the far grid's); GL's thread only
-WaterRun & airTemporalScratch( bool isFar = false );
+WaterRun & airTemporalScratch( bool isFar = false, bool plain = false );
 //! lane VKAIR20: the far grid's GL fallback (its why) and stat, apart from the reader's
 void airFarOnGl( const char * why );
 AirTemporalStat takeAirFarStat();
+//! lane VKAIR21: the near grid's temporal-off stage 1, its GL fallback and stat
+void airPlainOnGl( const char * why );
+AirTemporalStat takeAirPlainStat();
 
 //! GL current, r.prog in use with its uniforms and stage 1's inputs bound: GL's side read, then the run
 template <class GL> bool airTemporalRun( const AirTemporalRun & r, GL & fn, std::string & why )
 {
-	WaterRun & s = airTemporalScratch( r.far );
+	WaterRun & s = airTemporalScratch( r.far, r.plain );
 	s = WaterRun();
 	if ( r.rt )
 		twinStateOf( &fn, r.prog, s, kT_airinjectRtPs, int( sizeof( kT_airinjectRtPs ) / sizeof( kT_airinjectRtPs[0] ) ), kT_airinjectRtPsBytes );
