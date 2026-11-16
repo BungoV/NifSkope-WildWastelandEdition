@@ -66,6 +66,8 @@
 #include "features/vkframe/csm_view_vs.spv.h"  // lane VKSHADOW1
 #include "features/vkframe/csm_remap_view_vs.spv.h"  // lane VKSHADOW6: the cascade cache's Scroll remap
 #include "features/vkframe/csm_remap_view_ps.spv.h"
+#include "features/vkframe/csm_at_view_vs.spv.h"  // lane VKSHADOW8: the cascades' alpha-tested casters
+#include "features/vkframe/csm_at_view_ps.spv.h"
 // lane VKAIR1: the air over the sky (cell_volsky), the clouds' march + resolve (and their accumulation twins)
 #include "features/vkframe/volsky_view_ps.spv.h"
 #include "features/vkframe/cloud_march_view_ps.spv.h"
@@ -7889,6 +7891,7 @@ struct CsmPlace
 	std::uint64_t gen = 0;
 	std::uint32_t firstIndex = 0, verts = 0, indices = 0;
 	std::int32_t baseVertex = 0;
+	bool uv = false;  // lane VKSHADOW8: its uvs copied into muv
 };
 struct Csm
 {
@@ -7927,8 +7930,20 @@ struct Csm
 	VkImageView rmView = VK_NULL_HANDLE;
 	std::uint64_t rmGen = 0;
 	bool rmRed = false;
+	// lane VKSHADOW8: the alpha-tested casters (csm_at_view_vs / _ps): the uvs beside mpos (8 bytes a vertex at the same
+	// base vertex), their pipelines (0 culled, 1 two-sided; the map + its sampler, push 64 vertex + 24 fragment bytes) and
+	// kCsmAtSets sets made once, one a distinct map a run (written each run: the last run is done); dSet = per draw (none: solid)
+	CsmBuf muv;
+	VkDescriptorSetLayout atDsl = VK_NULL_HANDLE;
+	VkPipelineLayout atLayout = VK_NULL_HANDLE;
+	VkShaderModule atVs = VK_NULL_HANDLE, atPs = VK_NULL_HANDLE;
+	VkPipeline atPipe[2] = { VK_NULL_HANDLE, VK_NULL_HANDLE };
+	VkDescriptorPool atPool = VK_NULL_HANDLE;
+	std::vector<VkDescriptorSet> atSets, dSet;
 };
 constexpr std::uint32_t kCsmCmdBytes = 20;
+constexpr std::uint32_t kCsmAtPush = 24;   // lane VKSHADOW8: uvScale, uvOffset, alpha, alphaThreshold (after the 64-byte clip)
+constexpr std::uint32_t kCsmAtSets = 256;  // lane VKSHADOW8: distinct alpha maps a run
 constexpr std::uint32_t kCsmRemapPush = 28;  // lane VKSHADOW6: layer, srcX, srcY, srcW, srcH, zScale, zBias  // GpuDriven::DrawCmd = VkDrawIndexedIndirectCommand
 
 Csm & csmS()
@@ -8101,7 +8116,74 @@ bool csmStatic( std::string & why )
 			return false;
 		}
 	}
-	S.pipelines = 3;
+	// lane VKSHADOW8: the alpha-tested casters (csm_at_view_vs / _ps, lookdev_csmdepth_at's twin): the casters' state plus
+	// the uvs (binding 2, location 5) and the alpha test; the map and its sampler at set 0 bindings 0 / 1
+	{
+		const VkDescriptorSetLayoutBinding ab[2] = { { 0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr },
+			{ 1, VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr } };
+		VkDescriptorSetLayoutCreateInfo dci { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+		dci.bindingCount = 2;
+		dci.pBindings = ab;
+		const VkPushConstantRange apr[2] = { { VK_SHADER_STAGE_VERTEX_BIT, 0, 64 }, { VK_SHADER_STAGE_FRAGMENT_BIT, 64, kCsmAtPush } };
+		VkShaderModuleCreateInfo avm { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO }, apm { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+		avm.codeSize = sizeof( vkframe_csm_at_view_vs_spv );
+		avm.pCode = vkframe_csm_at_view_vs_spv;
+		apm.codeSize = sizeof( vkframe_csm_at_view_ps_spv );
+		apm.pCode = vkframe_csm_at_view_ps_spv;
+		const VkDescriptorPoolSize aps[2] = { { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, kCsmAtSets }, { VK_DESCRIPTOR_TYPE_SAMPLER, kCsmAtSets } };
+		VkDescriptorPoolCreateInfo adp { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+		adp.maxSets = kCsmAtSets;
+		adp.poolSizeCount = 2;
+		adp.pPoolSizes = aps;
+		if ( v.vkCreateDescriptorSetLayout( v.dev, &dci, nullptr, &S.atDsl ) != VK_SUCCESS
+			|| v.vkCreateShaderModule( v.dev, &avm, nullptr, &S.atVs ) != VK_SUCCESS
+			|| v.vkCreateShaderModule( v.dev, &apm, nullptr, &S.atPs ) != VK_SUCCESS
+			|| v.vkCreateDescriptorPool( v.dev, &adp, nullptr, &S.atPool ) != VK_SUCCESS ) {
+			why = "the cascades' alpha set layout / shader modules / descriptor pool failed";
+			return false;
+		}
+		VkPipelineLayoutCreateInfo al { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+		al.setLayoutCount = 1;
+		al.pSetLayouts = &S.atDsl;
+		al.pushConstantRangeCount = 2;
+		al.pPushConstantRanges = apr;
+		const std::vector<VkDescriptorSetLayout> sl( kCsmAtSets, S.atDsl );
+		VkDescriptorSetAllocateInfo aai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+		aai.descriptorPool = S.atPool;
+		aai.descriptorSetCount = kCsmAtSets;
+		aai.pSetLayouts = sl.data();
+		S.atSets.assign( kCsmAtSets, VK_NULL_HANDLE );
+		if ( v.vkCreatePipelineLayout( v.dev, &al, nullptr, &S.atLayout ) != VK_SUCCESS
+			|| v.vkAllocateDescriptorSets( v.dev, &aai, S.atSets.data() ) != VK_SUCCESS ) {
+			why = "the cascades' alpha pipeline layout / descriptor sets failed";
+			return false;
+		}
+		VkPipelineShaderStageCreateInfo ast[2] = { st, st };
+		ast[0].module = S.atVs;
+		ast[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+		ast[1].module = S.atPs;
+		const VkVertexInputBindingDescription avb[3] = { vb[0], vb[1], { 2, 8, VK_VERTEX_INPUT_RATE_VERTEX } };
+		const VkVertexInputAttributeDescription ava[6] = { va[0], va[1], va[2], va[3], va[4], { 5, 2, VK_FORMAT_R32G32_SFLOAT, 0 } };
+		VkPipelineVertexInputStateCreateInfo avi { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+		avi.vertexBindingDescriptionCount = 3;
+		avi.pVertexBindingDescriptions = avb;
+		avi.vertexAttributeDescriptionCount = 6;
+		avi.pVertexAttributeDescriptions = ava;
+		rs.depthBiasEnable = VK_TRUE;  // the remap above turned bias off and its compare may be the red's
+		ds.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+		gp.stageCount = 2;
+		gp.pStages = ast;
+		gp.pVertexInputState = &avi;
+		gp.layout = S.atLayout;
+		for ( int k = 0; k < 2; k++ ) {
+			rs.cullMode = k ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
+			if ( v.vkCreateGraphicsPipelines( v.dev, tone().cache, 1, &gp, nullptr, &S.atPipe[k] ) != VK_SUCCESS ) {
+				why = std::string( "vkCreateGraphicsPipelines (the cascades' alpha test, " ) + ( k ? "two-sided" : "culled" ) + ") failed";
+				return false;
+			}
+		}
+	}
+	S.pipelines = 5;
 	S.buildMs = nowMs() - t0;
 	toneCacheSave();
 	S.made = true;
@@ -8334,7 +8416,7 @@ bool csmPool( const WwVkPresent::CsmRun & t, int red, std::string & why )
 			missI += me.indices;
 		}
 	}
-	if ( !S.mpos.buf || !S.midx.buf || S.posUsed + missV > S.mpos.cap / 12 || S.idxUsed + missI > S.midx.cap / 2 ) {
+	if ( !S.mpos.buf || !S.midx.buf || !S.muv.buf || S.posUsed + missV > S.mpos.cap / 12 || S.idxUsed + missI > S.midx.cap / 2 ) {
 		S.st.repacks++;
 		if ( red != 2 ) {
 			S.pool.clear();
@@ -8342,7 +8424,8 @@ bool csmPool( const WwVkPresent::CsmRun & t, int red, std::string & why )
 		}
 		const std::uint64_t needV = 2 * ( red == 2 ? S.posUsed + missV : liveV ), needI = 2 * ( red == 2 ? S.idxUsed + missI : liveI );
 		if ( !csmBuf( S.mpos, VkDeviceSize( needV ) * 12, false, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, why, "the cascades' mesh positions" )
-			|| !csmBuf( S.midx, VkDeviceSize( needI ) * 2, false, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, why, "the cascades' mesh indices" ) ) {
+			|| !csmBuf( S.midx, VkDeviceSize( needI ) * 2, false, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, why, "the cascades' mesh indices" )
+			|| !csmBuf( S.muv, VkDeviceSize( needV ) * 8, false, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, why, "the cascades' mesh uvs" ) ) {
 			S.pool.clear();
 			S.posUsed = S.idxUsed = 0;
 			return false;
@@ -8354,6 +8437,11 @@ bool csmPool( const WwVkPresent::CsmRun & t, int red, std::string & why )
 		const WwVkPresent::CsmMesh & me = t.meshes[m];
 		if ( kept( me, false ) ) {
 			S.st.hits++;
+			CsmPlace & kp = S.pool[me.key];  // lane VKSHADOW8: a kept mesh an alpha-tested draw now wants the uvs of
+			if ( me.uv && !kp.uv ) {
+				std::memcpy( static_cast<char *>( S.muv.ptr ) + std::size_t( kp.baseVertex ) * 8, me.uv, std::size_t( me.verts ) * 8 );
+				kp.uv = true;
+			}
 			continue;
 		}
 		CsmPlace p;
@@ -8366,6 +8454,9 @@ bool csmPool( const WwVkPresent::CsmRun & t, int red, std::string & why )
 		std::memcpy( static_cast<char *>( S.midx.ptr ) + std::size_t( S.idxUsed ) * 2, me.idx, std::size_t( me.indices ) * 2 );
 		S.posUsed += me.verts;
 		S.idxUsed += me.indices;
+		p.uv = me.uv != nullptr;  // lane VKSHADOW8: the uvs at the same base vertex
+		if ( p.uv )
+			std::memcpy( static_cast<char *>( S.muv.ptr ) + std::size_t( p.baseVertex ) * 8, me.uv, std::size_t( me.verts ) * 8 );
 		S.pool[me.key] = p;
 		S.st.copies++;
 		S.st.copyKb += double( std::size_t( me.verts ) * 12 + std::size_t( me.indices ) * 2 ) / 1024.0;
@@ -8382,8 +8473,8 @@ bool csmWork( std::string & why )
 	VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	v.vkBeginCommandBuffer( S.cmd, &bi );
-	const VkBuffer vbs[2] = { S.pos.buf, S.mats.buf }, mvbs[2] = { S.mpos.buf, S.mats.buf };
-	const VkDeviceSize vbo[2] = { 0, 0 };
+	const VkBuffer vbs[2] = { S.pos.buf, S.mats.buf }, mvbs[3] = { S.mpos.buf, S.mats.buf, S.muv.buf };  // VKSHADOW8: 2 = uvs
+	const VkDeviceSize vbo[3] = { 0, 0, 0 };
 	for ( std::size_t f = 0; f < S.fbs.size(); f++ ) {
 		const CsmFb & F = S.fbs[f];
 		bool any = false;
@@ -8396,6 +8487,7 @@ bool csmWork( std::string & why )
 		rbi.framebuffer = F.fb;
 		rbi.renderArea = { { 0, 0 }, { std::uint32_t( F.w ), std::uint32_t( F.h ) } };
 		v.vkCmdBeginRenderPass( S.cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE );
+		VkDescriptorSet boundSet = VK_NULL_HANDLE;  // lane VKSHADOW8: the alpha-tested draws' map set bound
 		int bound = -1, form = -1;  // form: 0 the queue's pool, 1 the mesh pool (lane VKSHADOW4), the same pipelines
 		for ( std::size_t k = 0; k < S.d.size(); k++ ) {
 			if ( S.dFb[k] != int( f ) )
@@ -8420,13 +8512,18 @@ bool csmWork( std::string & why )
 				v.vkCmdDraw( S.cmd, 3, 1, 0, 0 );
 				continue;
 			}
-			const int p = D.cull ? 0 : 1;
+			// lane VKSHADOW8: an alpha-tested draw (its map's set) takes pipelines 3 / 4 (2 is the remap)
+			const VkDescriptorSet set = S.dSet[k];
+			const int p = ( D.cull ? 0 : 1 ) + ( set ? 3 : 0 );
 			if ( p != bound )
-				v.vkCmdBindPipeline( S.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, S.pipe[p] );
+				v.vkCmdBindPipeline( S.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, set ? S.atPipe[p - 3] : S.pipe[p] );
+			if ( set && ( set != boundSet || p != bound ) )
+				v.vkCmdBindDescriptorSets( S.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, S.atLayout, 0, 1, &set, 0, nullptr );
+			boundSet = set;
 			bound = p;
 			if ( int( D.mesh ) != form ) {
 				form = int( D.mesh );
-				v.vkCmdBindVertexBuffers( S.cmd, 0, 2, D.mesh ? mvbs : vbs, vbo );
+				v.vkCmdBindVertexBuffers( S.cmd, 0, D.mesh ? 3 : 2, D.mesh ? mvbs : vbs, vbo );
 				v.vkCmdBindIndexBuffer( S.cmd, D.mesh ? S.midx.buf : S.idx.buf, 0, VK_INDEX_TYPE_UINT16 );
 			}
 			const VkViewport vp { 0.0f, 0.0f, float( D.vw ), float( D.vh ), 0.0f, 1.0f };
@@ -8439,7 +8536,11 @@ bool csmWork( std::string & why )
 			v.vkCmdSetViewport( S.cmd, 0, 1, &vp );
 			v.vkCmdSetScissor( S.cmd, 0, 1, &sc );
 			v.vkCmdSetDepthBias( S.cmd, D.unit, D.clamp, D.slope );  // glPolygonOffset( slope, unit ): the same D16 law
-			v.vkCmdPushConstants( S.cmd, S.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, D.clip );
+			v.vkCmdPushConstants( S.cmd, set ? S.atLayout : S.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, D.clip );
+			if ( set ) {
+				const float ap[6] = { D.uvScale[0], D.uvScale[1], D.uvOffset[0], D.uvOffset[1], D.atAlpha, D.atRef };
+				v.vkCmdPushConstants( S.cmd, S.atLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 64, kCsmAtPush, ap );
+			}
 			if ( D.mesh ) {
 				for ( std::uint32_t k = D.first; k < D.first + D.n; k++ ) {
 					const std::uint32_t * c = &S.mcmd[5 * std::size_t( k )];
@@ -8488,12 +8589,13 @@ void csmDrop()
 	S.pending = false;
 	csmFbsDrop();
 	S.fbGen = 0;
-	for ( CsmBuf * b : { &S.pos, &S.idx, &S.mats, &S.cmds, &S.mpos, &S.midx } )
+	for ( CsmBuf * b : { &S.pos, &S.idx, &S.mats, &S.cmds, &S.mpos, &S.midx, &S.muv } )
 		csmBufFree( *b, gl().ok && b->glCtx == gl().ctx );
 	S.pool.clear();
 	S.posUsed = S.idxUsed = 0;
 	csmSemsDrop( gl().ok && S.semCtx == gl().ctx );
 }
+bool csmAtTex( unsigned name, VkImageView & view, VkSampler & smp, std::string & why );  // lane VKSHADOW8 (after vkflare.inc)
 }  // namespace
 
 namespace WwVkPresent
@@ -8578,6 +8680,18 @@ bool csmRun( const CsmRun & t, std::string & why )
 	for ( int k = 0; k < 2; k++ )
 		if ( t.tex[k] && !sharedTargetIs( t.key[k], t.tex[k] ) )
 			return refuse( "a cascade target is not the shared one" );
+	// lane VKSHADOW8: an alpha-tested draw is a mesh draw, and every mesh it draws carries its uvs
+	bool alphas = false;
+	for ( const CsmDraw & D : t.d ) {
+		if ( !D.atTex )
+			continue;
+		alphas = true;
+		if ( !D.mesh || D.remap )
+			return refuse( "an alpha-tested draw that is not a mesh draw" );
+		for ( std::uint32_t k = D.first; k < D.first + D.n; k++ )
+			if ( !t.meshes[t.mdraws[4 * std::size_t( k )]].uv )
+				return refuse( "alpha uv: an alpha-tested draw's mesh has no uvs" );
+	}
 	// the last run is done before its command buffer, buffers and framebuffers are touched again
 	if ( std::string fw; !fenceDone( S.fence, S.pending, "csm", fw ) )
 		return refuse( fw );
@@ -8595,6 +8709,45 @@ bool csmRun( const CsmRun & t, std::string & why )
 		S.dFb[k] = csmFb( t.key[t.d[k].target], t.d[k].layer, w );
 		if ( S.dFb[k] < 0 )
 			return breakOff( w );
+	}
+	// lane VKSHADOW8: the alpha-tested draws' maps: the twins made since the last flush on the device, then one set a
+	// distinct map (the last run is done: fenceDone above), the twin's view with GL's own sampler state
+	S.dSet.assign( t.d.size(), VK_NULL_HANDLE );
+	int nAlpha = 0, nAlphaTex = 0;
+	if ( alphas ) {
+		if ( !objTexFlush( w ) )
+			return refuse( "the alpha maps' twins: " + w );
+		std::map<unsigned, VkDescriptorSet> sets;
+		for ( std::size_t k = 0; k < t.d.size(); k++ ) {
+			const unsigned name = t.d[k].atTex;
+			if ( !name )
+				continue;
+			auto it = sets.find( name );
+			if ( it == sets.end() ) {
+				if ( sets.size() >= kCsmAtSets )
+					return refuse( "more than " + std::to_string( kCsmAtSets ) + " alpha maps in one run" );
+				VkImageView iv = VK_NULL_HANDLE;
+				VkSampler sm = VK_NULL_HANDLE;
+				if ( !csmAtTex( name, iv, sm, w ) )
+					return refuse( w );
+				const VkDescriptorSet set = S.atSets[sets.size()];
+				const VkDescriptorImageInfo ii[2] = { { VK_NULL_HANDLE, iv, VK_IMAGE_LAYOUT_GENERAL },
+					{ sm, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED } };
+				VkWriteDescriptorSet wr[2] = { { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET }, { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET } };
+				for ( int b = 0; b < 2; b++ ) {
+					wr[b].dstSet = set;
+					wr[b].dstBinding = std::uint32_t( b );
+					wr[b].descriptorCount = 1;
+					wr[b].descriptorType = b ? VK_DESCRIPTOR_TYPE_SAMPLER : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+					wr[b].pImageInfo = &ii[b];
+				}
+				v.vkUpdateDescriptorSets( v.dev, 2, wr, 0, nullptr );
+				it = sets.emplace( name, set ).first;
+			}
+			S.dSet[k] = it->second;
+			nAlpha++;
+		}
+		nAlphaTex = int( sets.size() );
 	}
 	// lane VKSHADOW6: the remap's set names the scratch's view (the last run is done: fenceDone above)
 	if ( remaps && ( scr->view != S.rmView || S.rmGen != sharedGen() ) ) {
@@ -8696,6 +8849,8 @@ bool csmRun( const CsmRun & t, std::string & why )
 	S.st.requeues += requeues;
 	S.st.remaps += nRemap;
 	S.st.remapRed += S.rmRed ? nRemap : 0;
+	S.st.alphaDraws += nAlpha;
+	S.st.alphaTex += nAlphaTex;
 	S.st.cpuMs += ms;
 	S.st.maxMs = std::max( S.st.maxMs, ms );
 	return true;
@@ -9181,6 +9336,33 @@ ObjStat takeObjStat()
 #include "features/vkframe/vkpost7.inc"  // lane VKFAR2 P7: DoF, motion blur and object blur in the deferred tone pass
 #include "features/vkframe/vkobjpipe.inc"  // lane VKOBJ4: the bl twins' shaded pipelines (row G4 slice 4)
 #include "features/vkframe/vkddgi.inc"  // lane VKFAR3: the DDGI probe atlas imported from bakert's device
+
+namespace
+{
+void * csmGlProc( const char * name )
+{
+	return reinterpret_cast<void *>( wglGetProcAddress( name ) );
+}
+
+// lane VKSHADOW8: an alpha-tested caster's map (CsmDraw::atTex): the texture cache's BC twin with GL's own sampler state,
+// resolved as the flare's sprite maps are (vkflare.inc flTex)
+bool csmAtTex( unsigned name, VkImageView & view, VkSampler & smp, std::string & why )
+{
+	// NV GL's anisotropic footprint is not Vulkan's: shadowview alpha (VKSHADOW8) read 133-213 of 99k texels flipped at
+	// every Vulkan level 1..16 against GL's 4, and EXACT with both at 1. Such a map stays on GL.
+	WwVkPresent::BlSampler bs;
+	std::string w;
+	if ( WwVkPresent::blSamplerRead( name, bs, csmGlProc, w ) && bs.aniso > 1.0f ) {
+		why = "an alpha caster's map is anisotropic (" + std::to_string( int( bs.aniso ) ) + "x: GL's footprint is not "
+			  "Vulkan's)";
+		return false;
+	}
+	if ( flTex( name, csmGlProc, view, smp, why ) )
+		return true;
+	why = "an alpha caster's map: " + why;
+	return false;
+}
+}  // namespace
 
 namespace
 {

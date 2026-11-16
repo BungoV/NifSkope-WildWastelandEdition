@@ -67,7 +67,9 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 VKFRAME_CSM = {'csm_view_vs': ('res/shaders/hlsl/near', 'csm_view_vs'),
 	'obj_depth_vs': ('res/shaders/hlsl/near', 'obj_depth_vs'),  # lane VKOBJ1: the objects' prepass
 	'csm_remap_view_vs': ('res/shaders/hlsl/near', 'csm_remap_view_vs'),  # lane VKSHADOW6: the Scroll remap (the loop's
-	'csm_remap_view_ps': ('res/shaders/hlsl/near', 'csm_remap_view_ps')}  # profile is the name's suffix)
+	'csm_remap_view_ps': ('res/shaders/hlsl/near', 'csm_remap_view_ps'),  # profile is the name's suffix)
+	'csm_at_view_vs': ('res/shaders/hlsl/near', 'csm_at_view_vs'),  # lane VKSHADOW8: the alpha-tested casters
+	'csm_at_view_ps': ('res/shaders/hlsl/near', 'csm_at_view_ps')}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_CSM]
 # lane VKAIR1: the air's sky pass and the clouds, the script's `fx <name> <dir/file>` lines (sky's register shifts, ps_6_0)
 # lane HLSLSRC2: the views' frozen spirv-cross twins under the view's name (the readable sources took the programs' names;
