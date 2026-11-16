@@ -7,7 +7,7 @@ import os
 import re
 import sys
 
-FUNCS = ["delTex", "vkKeyOf", "delShared", "delIn", "sharedIn", "mipLevels", "freeDecals", "freeKit", "freePools",
+FUNCS = ["delTex", "vkKeyOf", "vkIs", "delShared", "delIn", "sharedIn", "mipLevels", "freeDecals", "freeKit", "freePools",
          "freeAll", "tex2D", "mipBytes", "uploadBase", "uploadAtlas", "uploadDecals", "reshare", "uploadInputs"]
 RUNG_NEED = ["delTex", "freeDecals", "freeKit", "freePools", "freeAll", "tex2D", "mipBytes", "uploadBase", "uploadDecals"]
 

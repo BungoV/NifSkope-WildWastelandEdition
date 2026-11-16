@@ -89,6 +89,7 @@ struct GLFunctions
 	void glDeleteTextures( GLsizei n, const GLuint * t ) { rec( "glDeleteTextures %d %u", n, t[0] ); }
 	void glDeleteBuffers( GLsizei n, const GLuint * t ) { rec( "glDeleteBuffers %d %u", n, t[0] ); }
 	void glDeleteFramebuffers( GLsizei n, const GLuint * t ) { rec( "glDeleteFramebuffers %d %u", n, t[0] ); }
+	void glDeleteSamplers( GLsizei n, const GLuint * t ) { rec( "glDeleteSamplers %d %u", n, t[0] ); }	// VKGROUND8: paintJobs' ltexSmp
 	void glBindTexture( GLenum a, GLuint t ) { rec( "glBindTexture %x %u", a, t ); }
 	void glBindBuffer( GLenum a, GLuint t ) { rec( "glBindBuffer %x %u", a, t ); }
 	void glPixelStorei( GLenum a, GLint v ) { rec( "glPixelStorei %x %d", a, v ); }
@@ -161,6 +162,19 @@ void sharedTargetDrop( std::uintptr_t key )
 {
 	if ( fk().live.erase( key ) )
 		fk().dropped++;
+}
+// lane VKGROUND8: VKGROUND5's far twins (slots 4, 5, the page pools) on the same fake: one table of keys, made and dropped
+bool farTwin( std::uintptr_t key, int type, int w, int h, int layers, unsigned glFmt, unsigned & tex, std::string & why, int levels = 1 )
+{
+	return sharedTarget( key, type, w, h, layers, glFmt, tex, why, levels );
+}
+void farTwinDrop( std::uintptr_t key )
+{
+	sharedTargetDrop( key );
+}
+bool farTwinIs( std::uintptr_t key, unsigned tex )
+{
+	return sharedTargetIs( key, tex );
 }
 }  // namespace WwVkPresent
 
