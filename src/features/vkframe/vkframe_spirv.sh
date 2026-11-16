@@ -348,6 +348,9 @@ fxdg() {
 }
 fxr farlod_view_rt_ps core/fo4_cellcsm_ps
 fxdg farlod_view_dg_ps core/fo4_cellcsm_ps
+# lane VKGROUND11: the far ground's (fo4_cellcsmfgl, mode 1) RT GI twins, the same keys, vertex stage fargnd_view_vs
+fxr fargnd_view_rt_ps far-ground/fo4_cellcsmfgl_ps
+fxdg fargnd_view_dg_ps far-ground/fo4_cellcsmfgl_ps
 # lane VKFAR21: the probe G-buffer capture (cell_reflcap.prog, cellreflprobe.cpp) on fxg / fxt's shifts; the loader builds it
 # with no define and fxg's two defines are inert there (ReflectionsBindingsVk.hlsli has no #if)
 fxg reflcap_view_ps reflections/cell_reflcap_ps
