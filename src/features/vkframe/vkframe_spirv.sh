@@ -351,6 +351,13 @@ fxa airinject_view_ps air/cell_volair_ps
 fxar airinject_view_rt_ps air/cell_volair_ps
 fxt airinject_view_vs air/cell_volair_vs
 ls -la airinject_view_ps.spv.h airinject_view_rt_ps.spv.h airinject_view_vs.spv.h
+# lane VKGROUND6: the far ground page paint (cell_fgpage.prog) and its BC1 encode (cell_fgbc1.prog), cellfarground.cpp paintJobs,
+# vkfgpaint.inc, on fxg / fxt's shifts; the loader builds both with no define (fxg's two are inert: no #if on them in either
+# source). One vertex stage (cell_ao.vert's twin, it declares nothing) serves both
+fxg fgpage_view_ps far-ground/cell_fgpage_ps
+fxg fgbc1_view_ps far-ground/cell_fgbc1_ps
+fxt fgpage_view_vs core/cell_ao_vs
+ls -la fgpage_view_ps.spv.h fgbc1_view_ps.spv.h fgpage_view_vs.spv.h
 # lane VKFAR7: the TAA mask's reactive pass (taainputs.cpp pass 4, vktaareactive.inc): pixel stage on fx()'s shifts (b31 at 31,
 # BaseMap at 64 / 128), vertex stage on fxb()'s (its b31 at 32)
 fx taareactive_view_ps post/taa_reactive_ps
