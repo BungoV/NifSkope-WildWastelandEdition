@@ -23,6 +23,10 @@
 //      (flyBakeRun, today's path), Q1 = the batch. After each: S1 vs gv1, S0 vs gv2, S2 vs gv3. Crossings and runs are read off
 //      the bake's own stat (before / after, no take; the counter moves where fxCross returned true).
 //      Bars: Q4 4 crossings and 4 runs (the counter counts); Q1 1 crossing and 4 runs; Q1's three volumes byte-EXACT vs Q4's.
+//   V  lane VKCLOUD9, pass 0 reads its inputs in place: cvShape, cvDetail, cvMap copied (glCopyImageSubData, every level fxTexOf
+//      gave) into harness shared targets with the same levels, filter and wrap. GL's bake on the shared names vs gv0 EXACT (the
+//      same bytes); a warm Vulkan run, then plain (GL's own names bound) and shared (the shared names bound), copies read off the
+//      bake's stat before / after each. Bars: plain copies > 0, shared copies == 0, plain and shared S0 vs gv0 EXACT.
 // Bar (set before the first run, never widened): every arm EXACT (0 texels differ), read twice equal, no GL error.
 // Job checks (else the job cannot judge): 0 < occupancy < total, gv0 holds only 0 / 255, gv1..gv3 only 0..15, each pass
 // changes its input, some slice differs from slice 0 and at least one adjacent slice pair differs.
@@ -36,6 +40,7 @@
 //   perpass  (lane VKCLOUD9) Q1 with red 16: flyBakeRunN crosses once a pass (today's submit): must FAIL the crossing bar
 //            (4, want 1); its texels are INFO
 //   oneset   (lane VKCLOUD9) Q1 with red 32: every pass records with pass 0's descriptor set and b31 slots: texels must differ
+//   skip     (lane VKCLOUD9) V's shared run with red 8: the farSharedOf lookup skipped: copies must be > 0 (FAIL the bar)
 //   swap     the other pass's program (red 4: cloud_flysdf, b31 zero but cfLayer), run LAST
 // Last line `FLYBAKEVIEW GATE OK` or `FLYBAKEVIEW GATE FAILED`.
 #define main fxview_main
@@ -514,6 +519,75 @@ int main( int argc, char ** argv )
 		std::printf( "FLYBAKEVIEW Q1 vs Q4 (the 4-crossing path), S0 S1 S2: %zu texels differ: %s\n", d, same ? "EXACT" : "FAIL" );
 		ok = ok && c4 && c1 && same;
 	}
+	// ---- lane VKCLOUD9, V: pass 0 reads shared inputs in place (no copy); red skip (red 8) must copy
+	static char inKeys[3];
+	GLuint inSh[3] = {};
+	for ( int k = 0; k < 3; k++ ) {
+		const TexIn & x = tin[static_cast<size_t>( k )];
+		GLenum ifmt = 0, pf = 0, ty = 0;
+		int bpp = 0;
+		if ( !fmtOf( x.fmt, ifmt, pf, ty, bpp ) || texLevels[k] < 1
+			|| !WwVkPresent::sharedTarget( keyOf( inKeys[k] ), x.type, x.w, x.h, x.d, ifmt, inSh[k], why, texLevels[k] ) )
+			return fatal( "arm V's shared " + x.name + ": " + why );
+		glBindTexture( x.target, inSh[k] );
+		texParams( x.target, x.filt == "linear", x.wrap == "repeat", x.mips != 0 );
+		glBindTexture( x.target, 0 );
+		for ( int l = 0; l < texLevels[k]; l++ )
+			f.copyImageSubData( x.gl, x.target, l, 0, 0, 0, inSh[k], x.target, l, 0, 0, 0, std::max( x.w >> l, 1 ), std::max( x.h >> l, 1 ),
+				std::max( x.d >> l, 1 ) );
+	}
+	glFinish();
+	if ( glGetError() != GL_NO_ERROR )
+		return fatal( "arm V's shared inputs: a GL error" );
+	const GLuint plainGl[3] = { tin[0].gl, tin[1].gl, tin[2].gl };
+	auto useIn = [&]( bool shared ) {
+		for ( int k = 0; k < 3; k++ )
+			tin[static_cast<size_t>( k )].gl = shared ? inSh[k] : plainGl[k];
+		shapeGl = tin[0].gl;
+	};
+	auto vRun = [&]( bool shared, int red, int & copies ) {
+		useIn( shared );
+		sentinel( 0 );
+		const int c0 = flyBakeJob().st.copies;
+		const bool ran = vkRun( 0, -1, 0, 0, nz, red );
+		copies = flyBakeJob().st.copies - c0;
+		useIn( false );
+		return ran;
+	};
+	{
+		useIn( true );
+		GLuint t = vol3();
+		const bool drew = glPass( 0, 0, t, 0, nz );
+		const std::vector<std::uint8_t> a = read( t );
+		glDeleteTextures( 1, &t );
+		useIn( false );
+		size_t d = 0;
+		for ( size_t i = 0; i < a.size() && i < ref[0].size(); i++ )
+			d += a[i] != ref[0][i];
+		const bool same = drew && a.size() == ref[0].size() && d == 0;
+		std::printf( "FLYBAKEVIEW V GL's bake on the shared inputs vs gv0: %zu of %zu texels differ: %s\n", d, a.size(), same ? "EXACT" : "FAIL" );
+		ok = ok && same;
+		int cw = 0, cp = 0, cs = 0;
+		const bool ranW = vRun( true, 0, cw );
+		const bool ranP = vRun( false, 0, cp );
+		arm( "V plain (GL's own input names) vs GL", judgeVol( 0, ref[0] ), ranP );
+		const bool ranS = vRun( true, 0, cs );
+		arm( "V shared (the inputs read in place) vs GL", judgeVol( 0, ref[0] ), ranS );
+		const bool cOk = ranW && ranP && ranS && cp > 0 && cs == 0;
+		std::printf( "FLYBAKEVIEW V copies a run: warm %d, plain %d, shared %d (want plain > 0, shared 0): %s\n", cw, cp, cs, cOk ? "OK" : "FAIL" );
+		ok = ok && cOk;
+		int cr = 0;
+		const bool ranR = vRun( true, 8, cr );
+		const bool bit = ranR && cr > 0;
+		std::printf( "FLYBAKEVIEW red skip (the shared lookup skipped, red 8): %s (%d copies, want 0; INFO S0 %zu texels differ)\n", bit ? "FAIL" : "EXACT",
+			cr, judgeVol( 0, ref[0] ).diff );
+		if ( !bit ) {
+			std::printf( "FLYBAKEVIEW red skip PASSED: the gate cannot see it\n" );
+			ok = false;
+		}
+	}
+	for ( char & k : inKeys )
+		WwVkPresent::sharedTargetDrop( keyOf( k ) );
 	{
 		const WwVkPresent::FxStat st0 = WwVkPresent::takeFlyBakeStat();
 		std::printf( "FLYBAKEVIEW stat: %d runs, %d failed (%s), %d pipelines built in %.1f ms, %d input copies\n", st0.runs, st0.fails,
