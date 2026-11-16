@@ -427,7 +427,7 @@ void quad( Renderer * r )
  * WW_VKVIEW_CLOUDSHADOW_RED=1: GL's quad). cloud_shadowmap's uniforms are set and its units bound as for GL's quad and read
  * back. true: drawn there (GL draws nothing, no timing query); false: GL's quad (the reason on "vk cloudshadow:") */
 bool vkRows( NifSkopeOpenGLContext::GLFunctions * fn, NifSkopeOpenGLContext::Program * p, const CsGpu & g, bool intoBack, int n,
-	int row0, int rows, bool variety )
+	int row0, int rows, bool variety, int mode, int sheetN )
 {
 	static QString said;
 	static auto at = std::chrono::steady_clock::now();
@@ -458,16 +458,21 @@ bool vkRows( NifSkopeOpenGLContext::GLFunctions * fn, NifSkopeOpenGLContext::Pro
 		t.row0 = row0;
 		t.rows = rows;
 		t.key = key;
-		// cloud_shadowmap_view_ps's t64..t66, t67[8], t75[8]; the sheets are read in place through the texture cache's twins
+		/* cloud_shadowmap_view_ps's t64..t66, t67[8], t75[8]; the sheets are read in place through the texture cache's twins
+		 * (textures/sky/: gltex.cpp wwSkyTexTwin). Only what this mode samples is read: the volume's noise in mode 1 (made
+		 * once: still), the sheets below csSheetN in mode 3; the other slots keep the zero texture (stale units are not read) */
 		static const char * const kName[3] = { "cvShape", "cvDetail", "cvMap" };
 		static const int kType[3] = { 1, 1, 0 };
 		static char twin[3 + 2 * WwVkPresent::kCloudShadowSheets];
 		bool ok = true;
 		for ( int k = 0; k < 3 && ok; k++ ) {
+			if ( k < 2 && mode != 1 )
+				continue;
 			ok = WwVkPresent::fxTexOf( fn, p->id, kName[k], kType[k], t.tex[k], why );
 			t.tex[k].twin = reinterpret_cast<std::uintptr_t>( &twin[k] );
+			t.tex[k].still = k < 2;
 		}
-		for ( int i = 0; i < WwVkPresent::kCloudShadowSheets && ok; i++ ) {
+		for ( int i = 0; i < ( mode == 3 ? std::min( sheetN, WwVkPresent::kCloudShadowSheets ) : 0 ) && ok; i++ ) {
 			const std::string a = "csSheetTex[" + std::to_string( i ) + "]", b = "csSheetTex2[" + std::to_string( i ) + "]";
 			ok = WwVkPresent::fxTexOf( fn, p->id, a.c_str(), 0, t.sheet[i], why )
 				&& WwVkPresent::fxTexOf( fn, p->id, b.c_str(), 0, t.sheet2[i], why );
@@ -996,7 +1001,7 @@ void wwCloudShadowPass( Scene * scene )
 	}
 	p->uni1i( "csSteps", std::max( pr.steps, 1 ) );
 	// lane VKCLOUD3: the rows on the present device when the map is its shared target (no GL timing query that run)
-	const bool onVk = vkRows( fn, p, g, intoBack, n, row0, rowN, variety );
+	const bool onVk = vkRows( fn, p, g, intoBack, n, row0, rowN, variety, mode, sheets.n );
 	const int slot = g.qcur;
 	const bool timing = !onVk && !g.pending[slot];
 	if ( timing )
