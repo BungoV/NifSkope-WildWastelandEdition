@@ -196,7 +196,8 @@ bool smpOf( Smp & s, int W, int H )
 			s.rgbBytes = true;
 		} else if ( n == "CubeMap" && s.kind == 3 ) {
 			s.unbound = false;
-			s.fmt = 0x8058;  // RGBA8
+			const char * cf = std::getenv( "FLD_CUBEFMT" );  // lane VKFLIGHT7: the app's env cube format (the .sh sets SRGB8_ALPHA8)
+			s.fmt = GLenum( std::strtoul( cf ? cf : "0x8058", nullptr, 0 ) );
 			s.w = s.h = 32;
 			s.levels = 6;
 		}

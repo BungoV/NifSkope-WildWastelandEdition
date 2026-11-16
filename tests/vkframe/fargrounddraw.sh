@@ -16,6 +16,8 @@ if [ -n "${FLD_FLIGHT:-}" ]; then
 	LF=$(grep -o 'glTexImage3D( GL_TEXTURE_3D, 0, GL_RGBA\?8, 16, 16, 16' "$ROOT/src/gl/celllights.cpp" | grep -o 'GL_RGBA\?8')
 	case "$LF" in GL_RGB8) export FLD_LUTFMT=0x8051 ;; GL_RGBA8) export FLD_LUTFMT=0x8058 ;; *) echo "FARGROUNDDRAW GATE FAILED (the app's LUT upload not found: '$LF')"; exit 1 ;; esac
 	export FLD_SET="${FLD_SET:-hasCubeMap=1,cellIsLutOn=1}"
+	# lane VKFLIGHT7: the flight's env cube is SRGB8_ALPHA8 (0x8C43), refused "other formats CubeMap(0x8C43)" on every draw
+	export FLD_CUBEFMT="${FLD_CUBEFMT:-0x8C43}"
 	echo "FARGROUNDDRAW flight arm: the app's LUT is $LF ($FLD_LUTFMT), FLD_SET $FLD_SET"
 fi
 # BATCH1117: GL's program is the HLSL-built SPIR-V pair (build_all into $FARGROUNDDRAW_SPVSET, default $OUT/spvset)
