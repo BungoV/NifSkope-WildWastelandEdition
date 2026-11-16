@@ -8801,7 +8801,7 @@ bool csmRun( const CsmRun & t, std::string & why )
 	// lane VKSHADOW8: the alpha-tested draws' maps: the twins made since the last flush on the device, then one set a
 	// distinct map (the last run is done: fenceDone above), the twin's view with GL's own sampler state
 	S.dSet.assign( t.d.size(), VK_NULL_HANDLE );
-	int nAlpha = 0, nAlphaTex = 0;
+	int nAlpha = 0, nAlphaTex = 0, nQAlpha = 0;
 	if ( alphas ) {
 		if ( !objTexFlush( w ) )
 			return refuse( "the alpha maps' twins: " + w );
@@ -8834,6 +8834,7 @@ bool csmRun( const CsmRun & t, std::string & why )
 			}
 			S.dSet[k] = it->second;
 			nAlpha++;
+			nQAlpha += t.d[k].queued ? 1 : 0;
 		}
 		nAlphaTex = int( sets.size() );
 	}
@@ -8940,6 +8941,7 @@ bool csmRun( const CsmRun & t, std::string & why )
 	S.st.alphaDraws += nAlpha;
 	S.st.alphaTex += nAlphaTex;
 	S.st.swayDraws += nSway;
+	S.st.qAlphaDraws += nQAlpha;
 	S.st.cpuMs += ms;
 	S.st.maxMs = std::max( S.st.maxMs, ms );
 	return true;
@@ -9907,6 +9909,8 @@ void csmSay( bool wanted, const char * glWhy )
 		line += QStringLiteral( ", %1 alpha draws (%2 base maps)" ).arg( st.alphaDraws ).arg( st.alphaTex );
 	if ( st.swayDraws > 0 )  // lane VKSHADOW10: swaying casters drawn in the crossing
 		line += QStringLiteral( ", %1 sway draws" ).arg( st.swayDraws );
+	if ( st.qAlphaDraws > 0 )  // lane VKSHADOW11: alpha-tested casters from the QAlpha queue drawn in the crossing
+		line += QStringLiteral( ", %1 queued alpha draws" ).arg( st.qAlphaDraws );
 	line += pool;
 	said = line;
 	qInfo().noquote() << line;

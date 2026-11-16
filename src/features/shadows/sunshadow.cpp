@@ -1757,8 +1757,21 @@ static void sunShadowPassImpl( Scene * scene )
 	std::vector<std::uint32_t> vkMDraw;	// 4 words a draw: mesh, matrix (in vkMeshMv), first index, index count
 	// lane VKSHADOW9: the per-draw pass's alpha casters (pass 1), one record a caster: its mesh draws [mFirst, mFirst + mN) in
 	// vkMDraw, culled or two-sided, and its base map's GL name as the GL draw bound it (TexCache::wwBound); VkRec atFirst / atN
-	struct VkAt { std::size_t kn; bool cull; unsigned tex; std::uint32_t mFirst, mN; };
+	// lane VKSHADOW11: queued = a QAlpha span (atSpan[span]) recorded as mesh draws of its pooled shape (GL replays it from the pool)
+	struct VkAt { std::size_t kn; bool cull; unsigned tex; std::uint32_t mFirst, mN; bool queued = false; std::size_t span = 0; };
 	std::vector<VkAt> vkAt;
+	// lane VKSHADOW11: the distinct alpha maps recorded this pass; csmRun refuses a run past kCsmAtSets (256, vkpresent.cpp),
+	// so a caster with a new map past that stays on GL instead
+	std::vector<unsigned> vkAtNames;
+	auto vkAtRoom = [&]( unsigned name ) {
+		for ( unsigned seen : vkAtNames )
+			if ( seen == name )
+				return true;
+		if ( vkAtNames.size() >= 256 )
+			return false;
+		vkAtNames.push_back( name );
+		return true;
+	};
 	auto vkMeshFor = [&]( std::size_t kn, bool uv = false, bool wind = false ) {
 		if ( vkMeshOf[kn] >= 0 )
 			return std::uint32_t( vkMeshOf[kn] );
@@ -1865,8 +1878,27 @@ static void sunShadowPassImpl( Scene * scene )
 					k.sh->wwLeafCovArm( "sun" );	// lane TREELEAF2: the colour pass's coverage copy
 					ShadowAt::bindState[2] = 0;
 					progAtQ->uniSampler( bsp, "BaseMap", 0, texunit, QString(), bsp->clampMode, QString() );
+					const GLuint atName = ShadowAt::bindState[2] ? scene->textures->wwBound : 0;	// lane VKSHADOW11: as pass 1
 					atSampler( fn );
 					k.sh->wwLeafCovDisarm();
+					std::string atWhy;
+					const std::size_t kn = std::size_t( queue[QAlpha][j] );
+					if ( vkThis && atName && !k.sh->coords.isEmpty() && k.sh->coords.constFirst().size() >= k.sh->verts.size()
+						&& WwVkPresent::csmAtTexOk( atName, atWhy ) && vkAtRoom( atName ) ) {
+						// lane VKSHADOW11: the span recorded for the crossing as mesh alpha draws of the pooled shape (the pool holds its
+						// triangles verbatim: csmSpanMDraws); GL replays it from the pool on a refusal
+						const std::uint32_t mi = vkMeshFor( kn, true ), mx = std::uint32_t( vkMeshMv.size() );
+						vkMeshMv.push_back( k.sh->viewTrans().toMatrix4() );
+						VkAt a { kn, !k.twoSided, atName, std::uint32_t( vkMDraw.size() / 4 ), 0 };
+						WwVkPresent::csmSpanMDraws( reinterpret_cast<const std::uint32_t *>( cmds.data() ), sp.first, sp.n, entry[kn].firstIndex,
+							mi, mx, vkMDraw );
+						a.mN = std::uint32_t( vkMDraw.size() / 4 ) - a.mFirst;
+						a.queued = true;
+						a.span = jb * queue[QAlpha].size() + j;
+						if ( a.mN )
+							vkAt.push_back( a );
+						continue;
+					}
 					progAtQ->uni2f( "uvScale", bsp->uvScale.x, bsp->uvScale.y );
 					progAtQ->uni2f( "uvOffset", bsp->uvOffset.x, bsp->uvOffset.y );
 					progAtQ->uni1f( "alpha", lsp ? lsp->alpha : 1.0f );
@@ -1960,7 +1992,8 @@ static void sunShadowPassImpl( Scene * scene )
 			}
 			std::string atWhy;
 			if ( vkThis && pass && atName && !k.sway && !k.sh->triangles.isEmpty() && !k.sh->coords.isEmpty()
-				&& k.sh->coords.constFirst().size() >= k.sh->verts.size() && WwVkPresent::csmAtTexOk( atName, atWhy ) ) {
+				&& k.sh->coords.constFirst().size() >= k.sh->verts.size() && WwVkPresent::csmAtTexOk( atName, atWhy )
+				&& vkAtRoom( atName ) ) {
 				// lane VKSHADOW9: an alpha caster recorded for the crossing (one CsmDraw); GL draws it there on a refusal
 				const std::uint32_t mi = vkMeshFor( kn, true ), mx = std::uint32_t( vkMeshMv.size() );
 				vkMeshMv.push_back( k.sh->viewTrans().toMatrix4() );
@@ -2430,6 +2463,7 @@ static void sunShadowPassImpl( Scene * scene )
 				d.uvOffset[1] = bsp->uvOffset.y;
 				d.atAlpha = lsp ? lsp->alpha : 1.0f;
 				d.atRef = k.atRef;
+				d.queued = a.queued;	// lane VKSHADOW11
 				run.d.push_back( d );
 			}
 		}
@@ -2479,6 +2513,39 @@ static void sunShadowPassImpl( Scene * scene )
 					qCalls++;
 					qCommands += qint64( span[v.jb][q].n );
 				}
+				bool atq = false;	// lane VKSHADOW11: the recorded QAlpha spans, as the queue draws them (the pool still bound)
+				for ( std::uint32_t ai = v.atFirst; ai < v.atFirst + v.atN && progAtQ; ai++ ) {
+					const VkAt & a = vkAt[ai];
+					if ( !a.queued )
+						continue;
+					if ( !atq ) {
+						r->useProgram( "lookdev_csmdepth_atq.prog" );
+						if ( const int l = progAtQ->uniLocation( "csmClipFromView" ); l >= 0 )
+							fn->glUniformMatrix4fv( l, 1, GL_FALSE, c.clipFromView );
+						atq = true;
+					}
+					const Caster & k = casters[a.kn];
+					const Span & sp = atSpan[a.span];
+					a.cull ? fn->glEnable( GL_CULL_FACE ) : fn->glDisable( GL_CULL_FACE );
+					int texunit = 0;
+					const BSLightingShaderProperty * lsp = k.sh->wwLightingShader();
+					BSShaderLightingProperty * bsp = k.sh->wwShaderLighting();
+					k.sh->wwLeafCovArm( "sun" );
+					ShadowAt::bindState[2] = 0;
+					progAtQ->uniSampler( bsp, "BaseMap", 0, texunit, QString(), bsp->clampMode, QString() );
+					atSampler( fn );
+					k.sh->wwLeafCovDisarm();
+					progAtQ->uni2f( "uvScale", bsp->uvScale.x, bsp->uvScale.y );
+					progAtQ->uni2f( "uvOffset", bsp->uvOffset.x, bsp->uvOffset.y );
+					progAtQ->uni1f( "alpha", lsp ? lsp->alpha : 1.0f );
+					progAtQ->uni1f( "alphaThreshold", k.atRef );
+					GpuDriven::poolDraw( r, sp.first, sp.n );
+					PassTime::countDraw( qint64( sp.n ) );
+					qCalls++;
+					qCommands += qint64( sp.n );
+				}
+				if ( atq )
+					fn->glBindSampler( 0, 0 );
 				r->useProgram( "lookdev_csmdepth.prog" );
 				// lane VKSHADOW4: the recorded per-draw casters, as the per-draw loop would have drawn them
 				prog->uni1i( "lodTreeAnim", 0 );
@@ -2522,6 +2589,8 @@ static void sunShadowPassImpl( Scene * scene )
 					progAt->uni1i( "lodTreeAnim", 0 );
 					for ( std::uint32_t ai = v.atFirst; ai < v.atFirst + v.atN; ai++ ) {
 						const VkAt & a = vkAt[ai];
+						if ( a.queued )
+							continue;	// lane VKSHADOW11: replayed from the pool above
 						const Caster & k = casters[a.kn];
 						a.cull ? fn->glEnable( GL_CULL_FACE ) : fn->glDisable( GL_CULL_FACE );
 						int texunit = 0;
