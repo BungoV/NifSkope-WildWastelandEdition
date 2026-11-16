@@ -795,7 +795,9 @@ int main( int argc, char ** argv )
 				gateOk = false;
 			}
 		}
-		if ( seed == 1 ) {	// GL probes: each part of the fixture is on screen and read (moved >= 1 sample each)
+		std::vector<std::vector<char>> masks;	// diagnosis (print only): the samples each probe moved
+		const char * maskNames[4] = { "near pool", "far pool", "no-page cell", "faded cell" };
+		{	// GL probes: each part of the fixture is on screen and read (moved >= 1 sample each); judged on seed 1 only
 			auto probe = [&]( const char * what, const std::function<void()> & on, const std::function<void()> & off ) {
 				on();
 				before( fbRef );
@@ -805,11 +807,17 @@ int main( int argc, char ** argv )
 				off();
 				const std::vector<std::uint16_t> pC = readColor( refCol );
 				size_t moved = 0;
-				for ( size_t s = 0; s * 4 + 3 < pC.size() && s * 4 + 3 < glC.size(); s++ )
-					moved += pC[s * 4] != glC[s * 4] || pC[s * 4 + 1] != glC[s * 4 + 1] || pC[s * 4 + 2] != glC[s * 4 + 2];
+				std::vector<char> m( glC.size() / 4, 0 );
+				for ( size_t s = 0; s * 4 + 3 < pC.size() && s * 4 + 3 < glC.size(); s++ ) {
+					m[s] = pC[s * 4] != glC[s * 4] || pC[s * 4 + 1] != glC[s * 4 + 1] || pC[s * 4 + 2] != glC[s * 4 + 2];
+					moved += size_t( m[s] );
+				}
+				masks.push_back( m );
 				const bool ok = moved >= 1 && glGetError() == GL_NO_ERROR;
-				std::printf( "FGPAGESDRAW seed 1 GL probe %s: %zu samples moved (%s)\n", what, moved, ok ? "read" : "NOT READ: blind" );
-				gateOk = gateOk && ok;
+				std::printf( "FGPAGESDRAW seed %d GL probe %s: %zu samples moved (%s)\n", seed, what, moved,
+					seed != 1 ? "info" : ok ? "read" : "NOT READ: blind" );
+				if ( seed == 1 )
+					gateOk = gateOk && ok;
 			};
 			probe( "near pool rewritten", [&]() { putPages( iPagesN, pagesNRed ); }, [&]() { putPages( iPagesN, pagesN ); } );
 			probe( "far pool rewritten", [&]() { putPages( iPagesF, pagesFRed ); }, [&]() { putPages( iPagesF, pagesF ); } );
@@ -878,6 +886,29 @@ int main( int argc, char ** argv )
 				red ? ( fail ? " -> red FAILS as it must" : " -> red PASSES: the gate is blind" ) : "" );
 			if ( red ? !fail : fail )
 				gateOk = false;
+			if ( !red && !viaPlain && masks.size() == 4 ) {	// diagnosis (print only): where red 0's parted samples sit
+				size_t in[4] = {}, past = 0, rest = 0, cov = 0, covIn[4] = {};
+				for ( size_t s = 0; s < glD.size() && s < masks[0].size(); s++ ) {
+					bool p = false, cv = glD[s] != bgD[s];
+					for ( int c = 0; c < 3; c++ ) {
+						const float fa = h2f( vkC[s * 4 + size_t( c )] ), fb = h2f( glC[s * 4 + size_t( c )] );
+						p = p || std::fabs( double( fa ) - double( fb ) ) / std::max( 1.0, std::fabs( double( fb ) ) ) > 1e-2;
+					}
+					bool any = false;
+					for ( int k = 0; k < 4; k++ ) {
+						in[k] += size_t( p && masks[size_t( k )][s] );
+						covIn[k] += size_t( cv && masks[size_t( k )][s] );
+						any = any || masks[size_t( k )][s];
+					}
+					past += p;
+					rest += p && !any;
+					cov += cv;
+				}
+				std::printf( "FGPAGESDRAW seed %d red 0 parted (past 1e-2) samples by probe mask (info): %zu in all;", seed, past );
+				for ( int k = 0; k < 4; k++ )
+					std::printf( " %s %zu (of %zu covered)", maskNames[k], in[k], covIn[k] );
+				std::printf( "; in no mask %zu (GL covered %zu)\n", rest, cov );
+			}
 		}
 		if ( seed == 1 ) {	// the shared input never copied: exactly one copy fewer a run than on the plain twin
 			const bool fewer = copiesShared >= 0 && copiesPlain - copiesShared == 1;
