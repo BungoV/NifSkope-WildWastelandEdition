@@ -268,7 +268,11 @@ bool mdiOn()
 
 bool vkTexOn()
 {
-	WW_SWITCH_STATIC( bool, want, wwEnv( "WW_VKOBJ_TEX" ).trimmed() == "1" );
+	// lane VKSHADOW8: unset follows WW_VKVIEW (the Vulkan view samples the twins); WW_VKOBJ_TEX=0 still forces it off
+	WW_SWITCH_STATIC( bool, want, [] {
+		const QByteArray v = wwEnv( "WW_VKOBJ_TEX" ).trimmed();
+		return v.isEmpty() ? wwEnv( "WW_VKVIEW" ).trimmed() == "1" : v == "1";
+	}() );
 	return want;
 }
 
