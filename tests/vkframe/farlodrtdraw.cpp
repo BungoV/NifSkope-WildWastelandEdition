@@ -29,7 +29,7 @@
 // the DG program (FAIL or REFUSE both count).
 // Refusal check (seed 1 of the DG key, counted): cellGiHalfOn 1 must REFUSE with the "cellGiHalfOn 1" reason (the DG twin
 // reads the screen GI too, but its route is not gated yet). Lane VKFAR30: on the RT key (twin 1, the all-on key) this refusal became a route, so its
-// check is replaced by the all-on arm.
+// check is replaced by the all-on arm. Lane VKFAR31: the DG key's check is replaced the same way (the arm runs on both keys).
 // All-on arm (seed 1 of the RT key): cellGiHalf / cellGiHalfKey are VKBUF2's shared images (vkrtbuf.h rtImgShare at W x H,
 // step 1: cellGiHalfScale 1, cellGiHalfRect (0, 0, W, H); owners registered, always fresh) and GL binds THOSE names;
 // cellGiHalfOn 1, cellPass 0, cellProbe 0. The key is the rings' own surface: a GL normals pass (cellProbe 1: under RTDDGI without
@@ -44,6 +44,18 @@
 // texture with the same bytes bound on cellGiHalf: must REFUSE, naming "cellGiHalf:"), wrong image (the twin side binds
 // cellGiHalfKey's shared image on cellGiHalf and cellGiHalf's on cellGiHalfKey), stale gen (the WaterRun taken, then the
 // owner drops and remakes cellGiHalf: rtImgGen must move, the new image is cleared to a sentinel; the run must not be BOUND).
+// Lane VKFAR31 (bar and reds set before the run that lifts the DG twin; the earlier bar unchanged):
+// - The all-on arm runs on seed 1 of the DG key too (twin 2: the same seeding, key, probes, bar and reds; lines "DG all-on").
+// - Two more all-on reds, each REFUSED with its own reason text: key mismatch (a borrowed shared entry, of a key that sorts
+//   before the owner's, on cellGiHalf's GL name, so farSharedOf answers that key: "the shared image is not the bound name's")
+//   and no sampler (cellGiHalf taken out of the run's census after GL's state is read: "GL's program has no such sampler").
+//   A clean run after each must be BOUND. Reds failing: 5 of 5 per key.
+// - Half-rate arm (after the reds, each key): both images shared again at rtImgSize( W, 2 ) x rtImgSize( H, 2 ),
+//   cellGiHalfRect (0, 0, hw, hh), cellGiHalfScale 0.5, as ao.cpp sets them; key texel h is the pixel 2h of the same normals
+//   pass (cell_gihalf_ps's writer); cellGiHalf from its own side rng. Its own GL reference. Bar: >= 250 key texels written and
+//   >= 90 % of them decode to a unit normal; GL probes cellGiHalfOn 0, cellGiHalf reseeded and cellGiHalfScale 1 each move
+//   >= 20 % of GL's covered samples; the clean run BOUND; red half rate ignored (the twin's cellGiHalfScale set to 1 in the
+//   run's pixel block) must FAIL; a clean run after it BOUND. Then both images are shared again at W x H.
 // Last line `FARLODRTDRAW GATE OK` or `FARLODRTDRAW GATE FAILED`.
 // Seeding fix after run frt1 (bar and reds unchanged): the run refused every Vulkan arm with "no owner" on cellDdgiAtlas
 // (rtBufOf answers only for a slot with an owner: the gate now registers one per slot, always fresh, as the app's owners
@@ -612,7 +624,7 @@ int main( int argc, char ** argv )
 
 	static char twinKeys[2][208], redKeys[2][208];
 	bool gateOk = true;
-	int runs = 0, refusals = 0, refusalsWanted = 0;
+	int runs = 0;
 	for ( int ki = 0; ki < 2; ki++ )
 		for ( int seed = 1; seed <= 2; seed++ ) {
 			KeyArm & k = keys[ki];
@@ -872,8 +884,8 @@ int main( int argc, char ** argv )
 				if ( cs != kMain ? !fail : fail )
 					gateOk = false;
 			}
-			// lane VKFAR30: the all-on arm (header): cellGiHalfOn 1 on VKBUF2's shared screen GI images
-			if ( seed == 1 && k.v == 1 ) {
+			// lane VKFAR30: the all-on arm (header): cellGiHalfOn 1 on VKBUF2's shared screen GI images (lane VKFAR31: both keys)
+			if ( seed == 1 ) {
 				Smp * sg = nullptr, * sk = nullptr;
 				for ( Smp & s : k.smp ) {
 					if ( s.name == "cellGiHalf" )
@@ -882,7 +894,7 @@ int main( int argc, char ** argv )
 						sk = &s;
 				}
 				if ( !sg || !sk )
-					return fatal( "RT program: cellGiHalf / cellGiHalfKey not active (the all-on arm would test nothing)" );
+					return fatal( std::string( k.tag ) + " program: cellGiHalf / cellGiHalfKey not active (the all-on arm would test nothing)" );
 				const GLuint plainG = sg->tex, plainK = sk->tex;	// the gate's own fills, bound again after the arm
 				auto getI = [&]( const char * n ) {
 					float x = 0.0f;
@@ -912,34 +924,41 @@ int main( int argc, char ** argv )
 				setI( k, "landSplat", splatWas );
 				const std::vector<std::uint16_t> nC = readColor( refCol );
 				const std::vector<float> nD = readDepth( refDs, false );
-				std::vector<float> keyT( static_cast<size_t>( W ) * static_cast<size_t>( H ) * 4u, 0.0f ), giT( keyT.size() ), giT2( keyT.size() );
+				// lane VKFAR31: the key at one texel per `step` pixels, texel h = the pixel step * h (cell_gihalf_ps's writer)
 				size_t written = 0, unitN = 0;
-				for ( int y = 0; y < H; y++ )
-					for ( int x = 0; x < W; x++ ) {
-						const size_t s0 = size_t( y ) * size_t( WS ) + size_t( x ) * size_t( S ), t = 4 * ( size_t( y ) * size_t( W ) + size_t( x ) );
-						keyT[t + 3] = -1.0f;
-						if ( nD[s0] == bgD[s0] )
-							continue;
-						written++;
-						float n[3];
-						for ( int c = 0; c < 3; c++ )
-							n[c] = 2.0f * h2f( nC[s0 * 4 + size_t( c )] ) - 1.0f;
-						if ( std::fabs( std::sqrt( n[0] * n[0] + n[1] * n[1] + n[2] * n[2] ) - 1.0f ) > 0.03f )
-							continue;	// not a normal: no surface there
-						unitN++;
-						const float D = proj[14] / ( 2.0f * nD[s0] - 1.0f + proj[10] );
-						const float xn = ( float( x ) + 0.5f ) / float( W ) * 2.0f - 1.0f, yn = ( float( y ) + 0.5f ) / float( H ) * 2.0f - 1.0f;
-						keyT[t] = xn * D / proj[0];
-						keyT[t + 1] = yn * D / proj[5];
-						keyT[t + 2] = -D;
-						const float a = std::fabs( n[0] ) + std::fabs( n[1] ) + std::fabs( n[2] );
-						float ox = n[0] / a, oy = n[1] / a;
-						if ( n[2] < 0.0f ) {
-							const float tx = ( 1.0f - std::fabs( oy ) ) * ( ox >= 0.0f ? 1.0f : -1.0f ), ty = ( 1.0f - std::fabs( ox ) ) * ( oy >= 0.0f ? 1.0f : -1.0f );
-							ox = tx, oy = ty;
+				auto makeKey = [&]( int step, int tw, int th, std::vector<float> & keyT ) {
+					keyT.assign( size_t( tw ) * size_t( th ) * 4u, 0.0f );
+					written = 0, unitN = 0;
+					for ( int hy = 0; hy < th; hy++ )
+						for ( int hx = 0; hx < tw; hx++ ) {
+							const int x = std::min( step * hx, W - 1 ), y = std::min( step * hy, H - 1 );
+							const size_t s0 = size_t( y ) * size_t( WS ) + size_t( x ) * size_t( S ), t = 4 * ( size_t( hy ) * size_t( tw ) + size_t( hx ) );
+							keyT[t + 3] = -1.0f;
+							if ( nD[s0] == bgD[s0] )
+								continue;
+							written++;
+							float n[3];
+							for ( int c = 0; c < 3; c++ )
+								n[c] = 2.0f * h2f( nC[s0 * 4 + size_t( c )] ) - 1.0f;
+							if ( std::fabs( std::sqrt( n[0] * n[0] + n[1] * n[1] + n[2] * n[2] ) - 1.0f ) > 0.03f )
+								continue;	// not a normal: no surface there
+							unitN++;
+							const float D = proj[14] / ( 2.0f * nD[s0] - 1.0f + proj[10] );
+							const float xn = ( float( x ) + 0.5f ) / float( W ) * 2.0f - 1.0f, yn = ( float( y ) + 0.5f ) / float( H ) * 2.0f - 1.0f;
+							keyT[t] = xn * D / proj[0];
+							keyT[t + 1] = yn * D / proj[5];
+							keyT[t + 2] = -D;
+							const float a = std::fabs( n[0] ) + std::fabs( n[1] ) + std::fabs( n[2] );
+							float ox = n[0] / a, oy = n[1] / a;
+							if ( n[2] < 0.0f ) {
+								const float tx = ( 1.0f - std::fabs( oy ) ) * ( ox >= 0.0f ? 1.0f : -1.0f ), ty = ( 1.0f - std::fabs( ox ) ) * ( oy >= 0.0f ? 1.0f : -1.0f );
+								ox = tx, oy = ty;
+							}
+							keyT[t + 3] = std::floor( ( ox * 0.5f + 0.5f ) * 2047.0f + 0.5f ) * 2048.0f + std::floor( ( oy * 0.5f + 0.5f ) * 2047.0f + 0.5f );
 						}
-						keyT[t + 3] = std::floor( ( ox * 0.5f + 0.5f ) * 2047.0f + 0.5f ) * 2048.0f + std::floor( ( oy * 0.5f + 0.5f ) * 2047.0f + 0.5f );
-					}
+				};
+				std::vector<float> keyT, giT( static_cast<size_t>( W ) * static_cast<size_t>( H ) * 4u ), giT2( giT.size() );
+				makeKey( 1, W, H, keyT );
 				{
 					std::mt19937 giRng( 20261130u );	// a side rng: the other arms' seeding stays as it was
 					std::uniform_real_distribution<float> gu( 0.05f, 1.0f );
@@ -957,8 +976,8 @@ int main( int argc, char ** argv )
 				toShared( gPlain, 0 );
 				toShared( kPlain, 1 );
 				const bool keyOk = written >= 1000 && unitN * 10 >= written * 9;
-				std::printf( "FARLODRTDRAW RT all-on key: %zu texels on the rings, %zu decode to a unit normal (want >= 1000, >= 90 %%): %s\n", written,
-					unitN, keyOk ? "OK" : "FAIL" );
+				std::printf( "FARLODRTDRAW %s all-on key: %zu texels on the rings, %zu decode to a unit normal (want >= 1000, >= 90 %%): %s\n", k.tag,
+					written, unitN, keyOk ? "OK" : "FAIL" );
 				if ( !keyOk )
 					gateOk = false;
 				// GL's reference on the shared names
@@ -1003,34 +1022,36 @@ int main( int argc, char ** argv )
 				for ( int pr = 0; pr < 2; pr++ ) {
 					const size_t m = pr == 0 ? mOff : mImg;
 					const bool ok = aCov > 0 && m * 5 >= aCov;
-					std::printf( "FARLODRTDRAW RT all-on GL probe %s: moved %zu of %zu covered samples (%.1f %%): %s\n",
+					std::printf( "FARLODRTDRAW %s all-on GL probe %s: moved %zu of %zu covered samples (%.1f %%): %s\n", k.tag,
 						pr == 0 ? "cellGiHalfOn 0" : "cellGiHalf reseeded", m, aCov, aCov ? 100.0 * double( m ) / double( aCov ) : 0.0,
 						ok ? "OK" : "FAIL (the screen GI does not reach the colour)" );
 					if ( !ok )
 						gateOk = false;
 				}
 				// the Vulkan runs: BOUND / EXACT, FAIL, or REFUSED (with the reason)
-				auto vkRun = [&]( const char * name, const std::function<void()> & between ) {
+				// lane VKFAR31: `between` gets the run (a red edits it); refC / refD: another GL reference (the half-rate arm)
+				auto vkRun = [&]( const char * name, const std::function<void( WwVkPresent::WaterRun & )> & between,
+						const std::vector<std::uint16_t> * refC = nullptr, const std::vector<float> * refD = nullptr ) {
 					before( fbFrame );
 					drawState( fbFrame, scissor, k );
 					WwVkPresent::WaterRun r;
-					WwVkPresent::farLodRtStateOf( &gw, k.p, r, 1 );
+					WwVkPresent::farLodRtStateOf( &gw, k.p, r, k.v );
 					r.w = W, r.h = H, r.color = fc, r.cmds = cmds, r.key = reinterpret_cast<std::uintptr_t>( twinKeys[ki] );
 					if ( between )
-						between();
+						between( r );
 					std::string w;
-					const bool ran = WwVkPresent::farLodRtRun( r, 1, w );
+					const bool ran = WwVkPresent::farLodRtRun( r, k.v, w );
 					stateEnd( k );
 					runs++;
 					std::string word = "REFUSED";
 					if ( ran ) {
-						const Verdict v = judge( bgC, bgD, readColor( fc ), readDepth( fds, true ), aC, aD );
+						const Verdict v = judge( bgC, bgD, readColor( fc ), readDepth( fds, true ), refC ? *refC : aC, refD ? *refD : aD );
 						word = v.word();
-						std::printf( "FARLODRTDRAW RT all-on %s: %s covered %zu (both %zu, one side only %zu), depth max %ld D24 units (%zu past 1), "
-							"colour %zu halves differ, %zu samples past 1e-2 (max rel %.3g)", name, word.c_str(), v.covered, v.both, v.onlyOne,
+						std::printf( "FARLODRTDRAW %s all-on %s: %s covered %zu (both %zu, one side only %zu), depth max %ld D24 units (%zu past 1), "
+							"colour %zu halves differ, %zu samples past 1e-2 (max rel %.3g)", k.tag, name, word.c_str(), v.covered, v.both, v.onlyOne,
 							v.maxDepthU, v.depthPast, v.halvesDiff, v.colPast, v.maxRel );
 					} else
-						std::printf( "FARLODRTDRAW RT all-on %s: REFUSED (%s)", name, w.c_str() );
+						std::printf( "FARLODRTDRAW %s all-on %s: REFUSED (%s)", k.tag, name, w.c_str() );
 					return std::make_pair( word, w );
 				};
 				int cleanRuns = 0, cleanBound = 0, redsFailing = 0;
@@ -1069,7 +1090,7 @@ int main( int argc, char ** argv )
 					unsigned remade = 0;
 					bool remadeOk = false;
 					std::string rw;
-					const auto res = vkRun( "red stale gen", [&]() {
+					const auto res = vkRun( "red stale gen", [&]( WwVkPresent::WaterRun & ) {
 						WwVkPresent::rtImgDrop( 0, giKeyOf( 0 ) );
 						remadeOk = WwVkPresent::rtImgShare( 0, giKeyOf( 0 ), W, H, 0, 0, remade, rw );
 						const float sentinel[4] = { 64.0f, 64.0f, 64.0f, 1.0f };
@@ -1087,36 +1108,154 @@ int main( int argc, char ** argv )
 					toShared( gPlain, 0 );
 				}
 				clean( "clean after red stale gen" );
-				std::printf( "FARLODRTDRAW RT all-on: clean %d of %d BOUND, reds failing %d of 3\n", cleanBound, cleanRuns, redsFailing );
+				{	// lane VKFAR31 red key mismatch: a borrowed entry of a key that sorts first, on cellGiHalf's GL name (farSharedOf answers it)
+					const Shared * own = sharedFind( giKeyOf( 0 ) );
+					const std::uintptr_t lowKey = 16;
+					std::string bw = "no shared entry of the owner's key";
+					bool borrowed = false;
+					if ( own && lowKey < giKeyOf( 0 ) ) {
+						WwVkPresent::Borrow b;
+						b.device = vk().dev, b.image = own->img, b.view = own->view, b.tex = own->tex, b.glFmt = 0x8814;
+						b.w = own->w, b.h = own->h;
+						borrowed = WwVkPresent::borrowTarget( lowKey, b, bw );
+					}
+					const std::uintptr_t answer = farSharedOf( giTex[0] );
+					const auto res = vkRun( "red key mismatch", nullptr );
+					std::printf( " [borrowed key %llu: %s; owner's key %llu; farSharedOf %llu]", static_cast<unsigned long long>( lowKey ),
+						borrowed ? "OK" : bw.c_str(), static_cast<unsigned long long>( giKeyOf( 0 ) ), static_cast<unsigned long long>( answer ) );
+					if ( borrowed )
+						WwVkPresent::borrowDrop( lowKey );
+					red( res, borrowed && answer == lowKey && res.first == "REFUSED"
+						&& res.second.find( "cellGiHalf: the shared image is not the bound name's" ) != std::string::npos );
+				}
+				clean( "clean after red key mismatch" );
+				{	// lane VKFAR31 red no sampler: cellGiHalf out of the run's census
+					const auto res = vkRun( "red no sampler", []( WwVkPresent::WaterRun & r ) {
+						auto & in = r.census.inputs;
+						in.erase( std::remove_if( in.begin(), in.end(), []( const WwVkPresent::WaterSlot & x ) { return x.name == "cellGiHalf"; } ),
+							in.end() );
+					} );
+					red( res, res.first == "REFUSED" && res.second.find( "cellGiHalf: GL's program has no such sampler" ) != std::string::npos );
+				}
+				clean( "clean after red no sampler" );
+				std::printf( "FARLODRTDRAW %s all-on: clean %d of %d BOUND, reds failing %d of 5\n", k.tag, cleanBound, cleanRuns, redsFailing );
+				{	// lane VKFAR31: the half-rate arm (header)
+					const int hw = WwVkPresent::rtImgSize( W, 2 ), hh = WwVkPresent::rtImgSize( H, 2 );
+					unsigned half[2] = { 0, 0 };
+					for ( int slot = 0; slot < 2; slot++ ) {
+						std::string rw;
+						WwVkPresent::rtImgDrop( slot, giKeyOf( slot ) );	// its GL name goes too
+						if ( !WwVkPresent::rtImgShare( slot, giKeyOf( slot ), hw, hh, 0, 0, half[slot], rw ) )
+							return fatal( std::string( "rtImgShare half " ) + WwVkPresent::rtImgName( slot ) + ": " + rw );
+					}
+					std::vector<float> keyH, giH( size_t( hw ) * size_t( hh ) * 4u ), giH2( giH.size() );
+					makeKey( 2, hw, hh, keyH );
+					{
+						std::mt19937 hRng( 20261131u );	// its own side rng
+						std::uniform_real_distribution<float> gu( 0.05f, 1.0f );
+						for ( float & g : giH )
+							g = gu( hRng );
+						for ( float & g : giH2 )
+							g = gu( hRng );
+					}
+					const GLuint hPlain = tex2d( hw, hh, fRgba32f, GL_RGBA, GL_FLOAT, giH.data(), false ),
+						hPlain2 = tex2d( hw, hh, fRgba32f, GL_RGBA, GL_FLOAT, giH2.data(), false ),
+						hKey = tex2d( hw, hh, fRgba32f, GL_RGBA, GL_FLOAT, keyH.data(), false );
+					auto toHalf = [&]( GLuint src, int slot ) {
+						f.copyImageSubData( src, GL_TEXTURE_2D, 0, 0, 0, 0, half[slot], GL_TEXTURE_2D, 0, 0, 0, 0, hw, hh, 1 );
+					};
+					toHalf( hPlain, 0 );
+					toHalf( hKey, 1 );
+					const bool hKeyOk = written >= 250 && unitN * 10 >= written * 9;
+					std::printf( "FARLODRTDRAW %s half rate (%dx%d): key %zu texels on the rings, %zu decode to a unit normal (want >= 250, >= 90 %%): %s\n",
+						k.tag, hw, hh, written, unitN, hKeyOk ? "OK" : "FAIL" );
+					if ( !hKeyOk )
+						gateOk = false;
+					sg->tex = half[0], sk->tex = half[1];
+					const float hRect[4] = { 0.0f, 0.0f, float( hw ), float( hh ) }, hScale = 0.5f, one = 1.0f;
+					setF( k, "cellGiHalfRect", 4, 1, hRect );
+					setF( k, "cellGiHalfScale", 1, 1, &hScale );
+					const std::vector<std::uint16_t> hC = glFrame();
+					const std::vector<float> hD = readDepth( refDs, false );
+					std::vector<char> hMask( hD.size(), 0 );
+					size_t hCov = 0;
+					for ( size_t s = 0; s < hD.size(); s++ ) {
+						bool c = hD[s] != bgD[s];
+						for ( int ch = 0; ch < 4; ch++ )
+							c = c || hC[s * 4 + size_t( ch )] != bgC[s * 4 + size_t( ch )];
+						hMask[s] = c;
+						hCov += c;
+					}
+					auto hMoved = [&]( const std::vector<std::uint16_t> & pc ) {
+						size_t m = 0;
+						for ( size_t s = 0; s < hMask.size(); s++ ) {
+							if ( !hMask[s] )
+								continue;
+							bool d = false;
+							for ( int ch = 0; ch < 4; ch++ )
+								d = d || pc[s * 4 + size_t( ch )] != hC[s * 4 + size_t( ch )];
+							m += d;
+						}
+						return m;
+					};
+					size_t hm[3];
+					setI( k, "cellGiHalfOn", 0 );
+					hm[0] = hMoved( glFrame() );
+					setI( k, "cellGiHalfOn", 1 );
+					toHalf( hPlain2, 0 );
+					hm[1] = hMoved( glFrame() );
+					toHalf( hPlain, 0 );
+					setF( k, "cellGiHalfScale", 1, 1, &one );
+					hm[2] = hMoved( glFrame() );
+					setF( k, "cellGiHalfScale", 1, 1, &hScale );
+					const char * hProbe[3] = { "cellGiHalfOn 0", "cellGiHalf reseeded", "cellGiHalfScale 1" };
+					for ( int pr = 0; pr < 3; pr++ ) {
+						const bool ok = hCov > 0 && hm[pr] * 5 >= hCov;
+						std::printf( "FARLODRTDRAW %s half rate GL probe %s: moved %zu of %zu covered samples (%.1f %%): %s\n", k.tag, hProbe[pr], hm[pr],
+							hCov, hCov ? 100.0 * double( hm[pr] ) / double( hCov ) : 0.0, ok ? "OK" : "FAIL (the half-rate read does not reach the colour)" );
+						if ( !ok )
+							gateOk = false;
+					}
+					int hClean = 0, hRed = 0;
+					auto hRun = [&]( const char * name, const std::function<void( WwVkPresent::WaterRun & )> & between, bool isRed ) {
+						const auto res = vkRun( name, between, &hC, &hD );
+						const bool bound = res.first == "BOUND" || res.first == "EXACT";
+						const bool ok = isRed ? res.first == "FAIL" : bound;
+						( isRed ? hRed : hClean ) += ok;
+						std::printf( "%s\n", isRed ? ( ok ? " -> red FAILS as it must" : " -> red does not FAIL: the gate is blind" )
+							: ( ok ? "" : " -> FAIL (must be BOUND)" ) );
+						if ( !ok )
+							gateOk = false;
+					};
+					hRun( "half rate clean", nullptr, false );
+					hRun( "half rate red half rate ignored", [&]( WwVkPresent::WaterRun & r ) {
+						const WwVkPresent::FxField * fs = k.v == 2 ? WwVkPresent::kT_farlodDgPs : WwVkPresent::kT_farlodRtPs;
+						const size_t nf = k.v == 2 ? sizeof( WwVkPresent::kT_farlodDgPs ) / sizeof( WwVkPresent::kT_farlodDgPs[0] )
+							: sizeof( WwVkPresent::kT_farlodRtPs ) / sizeof( WwVkPresent::kT_farlodRtPs[0] );
+						for ( size_t i = 0; i < nf; i++ )
+							if ( std::strcmp( fs[i].name, "cellGiHalfScale" ) == 0 && fs[i].offset + 4 <= r.psBytes )
+								std::memcpy( r.psLoose + fs[i].offset, &one, 4 );
+					}, true );
+					hRun( "half rate clean after red", nullptr, false );
+					std::printf( "FARLODRTDRAW %s half rate: clean %d of 2 BOUND, reds failing %d of 1\n", k.tag, hClean, hRed );
+					// both images at W x H again (the next key's arm copies W x H into them)
+					for ( int slot = 0; slot < 2; slot++ ) {
+						std::string rw;
+						WwVkPresent::rtImgDrop( slot, giKeyOf( slot ) );
+						if ( !WwVkPresent::rtImgShare( slot, giKeyOf( slot ), W, H, 0, 0, giTex[slot], rw ) )
+							return fatal( std::string( "rtImgShare full " ) + WwVkPresent::rtImgName( slot ) + ": " + rw );
+					}
+					setF( k, "cellGiHalfScale", 1, 1, &one );
+					const GLuint hDel[3] = { hPlain, hPlain2, hKey };
+					glDeleteTextures( 3, hDel );
+				}
 				sg->tex = plainG, sk->tex = plainK;
 				setI( k, "cellGiHalfOn", 0 );
 				setI( k, "cellPass", passWas );
 				const GLuint del[3] = { gPlain, gPlain2, kPlain };
 				glDeleteTextures( 3, del );
 			}
-			// the refusal check: cellGiHalfOn 1 stays on GL, by name (the DG key; the RT key's became the all-on arm above)
-			if ( seed == 1 && k.v == 2 ) {
-				refusalsWanted++;
-				setI( k, "cellGiHalfOn", 1 );
-				before( fbFrame );
-				drawState( fbFrame, scissor, k );
-				WwVkPresent::WaterRun r;
-				WwVkPresent::farLodRtStateOf( &gw, k.p, r, k.v );
-				r.w = W, r.h = H, r.color = fc, r.cmds = cmds, r.key = reinterpret_cast<std::uintptr_t>( twinKeys[ki] );
-				std::string w;
-				const bool ran = WwVkPresent::farLodRtRun( r, k.v, w );
-				stateEnd( k );
-				setI( k, "cellGiHalfOn", 0 );
-				runs++;
-				const bool ok = !ran && w.find( "cellGiHalfOn 1" ) != std::string::npos;
-				refusals += ok;
-				std::printf( "FARLODRTDRAW %s seed %d cellGiHalfOn 1: %s (%s): %s\n", k.tag, seed, ran ? "RAN" : "REFUSED", w.c_str(),
-					ok ? "OK" : "FAIL (must refuse by the cellGiHalfOn 1 reason)" );
-				if ( !ok )
-					gateOk = false;
-			}
 		}
-	std::printf( "FARLODRTDRAW cellGiHalfOn 1 refusals: %d of %d\n", refusals, refusalsWanted );
 	for ( int v = 1; v <= 2; v++ ) {
 		const WwVkPresent::FxStat st = WwVkPresent::takeFarLodRtDrawStat( v );
 		std::printf( "FARLODRTDRAW twin %d (%s): %d on Vulkan, %.2f ms CPU each (max %.2f), %d fails (%s), %d copies\n", v, v == 1 ? "RT" : "DG",
