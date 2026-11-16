@@ -104,7 +104,7 @@ src/features/post/gametaa.cpp|taaResolveImpl|drawShape|3	other		post / bloom / T
 src/features/post/gametaa.cpp|taaResolveImpl|drawShape|4	other		post / bloom / TAA resolve / lens flare: screen passes
 src/features/post/gametaa.cpp|taaResolveImpl|drawShape|5	other		post / bloom / TAA resolve / lens flare: screen passes
 src/features/post/gametaa.cpp|taaResolveImpl|drawShape|6	other		post / bloom / TAA resolve / lens flare: screen passes
-src/features/post/taainputs.cpp|wwTaaInputsPass|drawShape|1	other		TAA inputs: the camera-motion screen quad (a screen pass, not an object)
+src/features/post/taainputs.cpp|wwTaaInputsPass|drawShape|1	twin	WwVkPresent::camVelRun	TAA inputs: the camera-motion screen quad (game_taa_mv.prog, camVelRun; gate tests/vkframe/camveldraw.sh)
 src/features/post/taainputs.cpp|wwTaaInputsPass|drawShape|2	twin	WwVkPresent::objVelRun	TAA inputs: moving objects' velocity redraw (taa_objvel.prog, objVelRun; gate tests/vkframe/objveldraw.sh)
 src/features/post/taainputs.cpp|wwTaaInputsPass|glDrawElements|1	twin	WwVkPresent::objVelRun	TAA inputs: moving objects' velocity redraw (taa_objvel.prog, objVelRun; gate tests/vkframe/objveldraw.sh)
 src/features/post/taainputs.cpp|wwTaaInputsPass|drawShape|3	glonly		TAA inputs: the see-through layers into the reactive mask (taa_reactive.prog, step 4), no Vulkan route yet
