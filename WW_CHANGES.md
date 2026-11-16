@@ -2,8 +2,9 @@
 
 Changed, not built, not checked in the app. Offline: tests/vkframe/airlampview.sh (GATE OK, 42 of 42 reds fired) and
 tests/vkframe/airtemporalview.sh (GATE OK, 39 of 39 reds fired) pass; their old arms print the same lines as VKAIR16's.
-- With the view on Vulkan (WW_VKVIEW=1) and the air's stage 1 on Vulkan, the lamps' 8192 x 8192 shadow atlas
-  (airlampatlas.cpp) is made as a shared target on the present device, so the air's Vulkan stages read it in place
+- With the view on Vulkan (WW_VKVIEW=1), the air's stage 1 on Vulkan and an air program that samples the atlas (fog
+  leak fix + RT GI, the all-on route), the lamps' 8192 x 8192 shadow atlas (airlampatlas.cpp) is made as a shared target
+  on the present device, so the air's Vulkan stages read it in place
   instead of refusing ("volLampAtlas: bound and not shared"). Otherwise it stays GL's own texture, as before. The light
   table is copied each run. The new `vk airatlas:` line says where the atlas landed.
 - Only the RT GI program (all-on) samples the atlas: the default air program does not, so the default route never met

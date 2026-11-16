@@ -2609,7 +2609,7 @@ static void vaPassInner( Scene * scene, bool run )
 			for ( int j = 0; j < 3; j++ )
 				camW[k] -= vt.rotation( j, k ) * vt.translation[j] / sc;
 		}
-		wwAirLampAtlasShare( s1Share );	// lane VKAIR17: stage 1 and stage 4 read the atlas (s4Share implies s1Share)
+		wwAirLampAtlasShare( s1Share && wwFogLeakShaderDefine() && rtddgiCellShaderDefine() );	// lane VKAIR17: only a WW_AIR_LEAK program (FOGLEAK + RTDDGI) samples the atlas; stage 1 and 4 read it (s4Share implies s1Share)
 		lampN = wwAirLampAtlasFrame( scene, L, camW, p11, H, farD );
 		// route (b): the shadowed share a froxel traced on the DDGI volume's BVH; its cubeless lamps read it (mode 2)
 		if ( wwAirLampVisMode() == 2 && rtddgiAirRaysFrame( scene, cols, rows, kSlices, nearD, logRatio, distScale ) )
