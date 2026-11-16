@@ -168,7 +168,7 @@ VKFRAME_PFX = {
 	'p7_ob_vec': ('post/objblur_vec', 'cs_6_0', ''), 'p7_ob_tile': ('post/objblur_tile', 'cs_6_0', ''),
 	'p7_ob': ('post/objblur', 'cs_6_0', '')}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_PFX]
-# lane VKOBJ4: the bl twins, the script's `fxb <name> <near file> <profile> "$PS_SHIFT|$VS_SHIFT"` lines (-D WW_VK_BINDLESS, every
+# lane VKOBJ4: the bl twins, the script's `fxn <name> <near file> <profile> "$PS_SHIFT|$VS_SHIFT"` lines (-D WW_VK_BINDLESS, every
 # binding kept); the vertex stage on its own shifts (VS_SHIFT), the pixel stages on fx()'s
 VKFRAME_PS_SHIFT = VKFRAME_SKY_ARGS
 VKFRAME_VS_SHIFT = ['-fvk-b-shift', '256', '0', '-fvk-t-shift', '320', '0', '-fvk-s-shift', '384', '0', '-fvk-u-shift', '448', '0']
@@ -372,11 +372,11 @@ def script_ok(tree):
 		if '\n%s="%s"\n' % (n, ' '.join(a)) not in vf:
 			bad.append('src/features/vkframe/vkframe_spirv.sh: its %s changed' % n)
 	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main -D WW_VK_BINDLESS $4 ${5:-} -fspv-preserve-bindings -Fo "$1.spv" ' not in vf:
-		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxb() compile line changed')
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxn() compile line changed')
 	blines = dict((k, (f, p, s, x)) for k, f, p, s, x in
-	              re.findall(r'^fxb ([a-z0-9_]+) ([a-z0-9_]+) ([vp]s_6_0) "\$([A-Z_]+)"(?: "([^"]*)")?$', vf, re.M))
+	              re.findall(r'^fxn ([a-z0-9_]+) ([a-z0-9_]+) ([vp]s_6_0) "\$([A-Z_]+)"(?: "([^"]*)")?$', vf, re.M))
 	if blines != VKFRAME_FXBL:
-		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxb lines (%s) are not this checker\'s bl twins' % ' '.join(sorted(blines)))
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxn lines (%s) are not this checker\'s bl twins' % ' '.join(sorted(blines)))
 	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main -D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 $4 ${5:-} -fspv-preserve-bindings ' \
 			'-fvk-use-dx-position-w -Fo "$1.spv" ' not in vf:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxc() compile line changed')
