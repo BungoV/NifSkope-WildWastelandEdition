@@ -1,3 +1,13 @@
+## VKFAR31 (2026-11-16): the far LOD rings' Ray-traced GI twin (no RT preset) reads the half-rate screen GI too
+
+Changed, not checked in the app.
+- The far LOD rings' Vulkan twin for Ray-traced GI without an RT preset (RTDDGI + cascades) now reads GL's half-rate
+  screen GI and its key in place, as the all-on twin does since VKFAR30. Before, those draws stayed on GL ("the DG twin's
+  read ... is not routed yet").
+- Offline gate tests/vkframe/farlodrtdraw.sh: the all-on arm runs on both twins, with two more checks (a shared image of
+  another key on the bound name, and a program with no such sampler; both stay on GL by name) and a half-rate arm
+  (half-size images, scale 0.5, as the app runs it) that matches GL; the "half rate ignored" check fails as it must.
+
 ## VKFAR30 (2026-11-16): the far LOD rings draw on Vulkan with all settings on (the half-rate screen GI read in place)
 
 Changed, not checked in the app.
