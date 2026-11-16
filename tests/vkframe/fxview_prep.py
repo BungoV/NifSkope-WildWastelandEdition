@@ -145,6 +145,11 @@ else:
                         for dx in (0, 1, 2):
                             m = np.minimum(m, p[dz:dz + nz, dy:dy + nxy, dx:dx + nxy] + 1)
                 far = m
+            # The jumps are exact only on a field that bounds the density (cloudfly.cpp bakes one). On this random field
+            # one float ulp picks another cell and the march diverges (g1: GL vs Vulkan 5134 past MARCH_RULE with the
+            # field twin EXACT), so the gate's field holds 0 / 1 (free < 1 after cfSafe 1): every fine step and field read
+            # runs, no jump. The jump path stays the CPU-checked tests/features/clouds/cloudfly_check.py gate F.
+            far = np.minimum(far, 1)
             T['cfSdf'] = Tex('3d', 'r8', np.minimum(far, 255).astype(np.uint8), 'nearest', 'clamp')
             order = ['cvShape', 'cvDetail', 'cvMap', 'cvTrans', 'cvSunView', 'cvMoonView', 'cvScene'] + (['cvBlue'] if src else []) + ['cfSdf']
             print('cloud job cloud%s: the box field %d cells, %d occupied, %d free past cfSafe' % (suffix, far.size, int(occ.sum()), int((far - 1 >= 1).sum())))

@@ -1134,10 +1134,12 @@ int main( int argc, char ** argv )
 				return pass;
 			};
 			// the full job: Vulkan's march and resolve
+			std::vector<float> vMC;  // lane VKCLOUD2: Vulkan's march, kept for the INFO beside the reach check
 			if ( !runVk( 0, false ) ) {
 				ok = false;
 			} else {
-				ok = rel( "march colour", gMC, readRgba16f( sMC, mw, mh ), false ) && ok;
+				vMC = readRgba16f( sMC, mw, mh );
+				ok = rel( "march colour", gMC, vMC, false ) && ok;
 				ok = rel( "march depth", gMD, readRg32f( sMD, mw, mh ), false ) && ok;
 				ok = rel( "hist[0] colour", gHC, readRgba16f( sHC[0], hw, hh ), false ) && ok;
 				ok = rel( "hist[0] depth", gHD, readRg32f( sHD[0], hw, hh ), false ) && ok;
@@ -1162,6 +1164,28 @@ int main( int argc, char ** argv )
 				}
 				const bool same = d == 0 && glGetError() == GL_NO_ERROR;
 				std::printf( "%s %s %s twin, %d levels %s (%zu of %zu texels differ)\n", gTag, var, tex[k].name.c_str(), levels, same ? "EXACT" : "FAIL", d, all );
+				ok = ok && same;
+			}
+			// lane VKCLOUD2: the box's field twin holds GL's texels (64 x 64 x 16 R8, one level, recopied every run)
+			if ( fly ) {
+				const size_t k = names.size() - 1;
+				const int nx = tex[k].w, ny = tex[k].h, nz = tex[k].d;
+				GLuint tw = 0;
+				if ( !WwVkPresent::sharedTarget( reinterpret_cast<std::uintptr_t>( &twins[a][WwVkPresent::kFlyTex - 1] ), 1, nx, ny, nz, fR8, tw, why, 1 ) )
+					return fatal( "the field twin: " + why );
+				std::vector<unsigned char> x( size_t( nx ) * ny * nz ), y( x.size() );
+				glBindTexture( fT3D, tex[k].gl );
+				glGetTexImage( fT3D, 0, fRed, GL_UNSIGNED_BYTE, x.data() );
+				glBindTexture( fT3D, tw );
+				glGetTexImage( fT3D, 0, fRed, GL_UNSIGNED_BYTE, y.data() );
+				size_t d = 0, nzr = 0;
+				for ( size_t i = 0; i < x.size(); i++ ) {
+					d += x[i] != y[i];
+					nzr += x[i] != 0;
+				}
+				const bool same = d == 0 && nzr > 0 && glGetError() == GL_NO_ERROR;
+				std::printf( "%s %s cfSdf twin %dx%dx%d %s (%zu of %zu texels differ, %zu non-zero in GL's)\n", gTag, var, nx, ny, nz,
+					same ? "EXACT" : "FAIL", d, x.size(), nzr );
 				ok = ok && same;
 			}
 			// the resolve alone on GL's own march
@@ -1213,6 +1237,9 @@ int main( int argc, char ** argv )
 				std::printf( "%s %s the box reached: %s (GL's fly vs GL's plain march: %zu of %zu values differ, %zu past rel 1e-3; must differ)\n",
 					gTag, var, reach ? "YES" : "NO", b.differ, b.n, b.past );
 				ok = ok && reach;
+				const Rel vb = compareRel( readRgba16f( mC, mw, mh ), vMC );
+				std::printf( "%s %s INFO Vulkan's fly vs GL's plain march: %zu of %zu values differ, %zu past rel 1e-3\n", gTag, var,
+					vb.differ, vb.n, vb.past );
 			}
 			for ( std::uintptr_t k : { kM, kM + 1, kH0, kH0 + 1, kH1, kH1 + 1 } )
 				WwVkPresent::sharedTargetDrop( k );
