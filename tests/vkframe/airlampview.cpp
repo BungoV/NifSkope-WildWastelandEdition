@@ -729,7 +729,7 @@ int main( int argc, char ** argv )
 
 	// lane VKAIR18: the all-on arm's RT GI inputs, shared by name as rtddgicell.cpp shares them (slot, format, owner)
 	constexpr int kRtTexels = 4096;	// cellDdgiAtlas 4096 RGBA32F texels, cellRestir 64 x 64 RG32F
-	GLuint rtBuf[2] = {}, rtTex[2] = {};
+	GLuint rtBuf[2] = {}, rtTex[2] = {}, rtSrc[2] = {};	// rtSrc: GL's own buffers the owner copies from (rtBufCopy, as the app)
 	auto rtData = [&]( int s2, int salt ) {
 		std::vector<float> d( static_cast<size_t>( kRtTexels * ( s2 ? 2 : 4 ) ) );
 		for ( size_t i = 0; i < d.size(); i++ )
@@ -739,9 +739,14 @@ int main( int argc, char ** argv )
 	auto fillRt = [&]( int salt ) {
 		for ( int s2 = 0; s2 < 2; s2++ ) {
 			const std::vector<float> d = rtData( s2, salt );
-			f.bindBuffer( kLvTb, rtBuf[s2] );
-			ex.bufferSubData( kLvTb, 0, std::ptrdiff_t( d.size() * 4 ), d.data() );
+			if ( !rtSrc[s2] )
+				f.genBuffers( 1, &rtSrc[s2] );
+			f.bindBuffer( kLvTb, rtSrc[s2] );
+			f.bufferData( kLvTb, std::ptrdiff_t( d.size() * 4 ), d.data(), fStatic );
 			f.bindBuffer( kLvTb, 0 );
+			std::string w;
+			if ( !WwVkPresent::rtBufCopy( s2, rtSrc[s2], d.size() * 4, w ) )
+				std::printf( "AIRLAMPVIEW rtBufCopy %s: %s\n", WwVkPresent::rtBufName( s2 ), w.c_str() );
 		}
 	};
 #ifdef WW_VK_AIRLAMP
@@ -759,8 +764,11 @@ int main( int argc, char ** argv )
 				return false;
 			} );
 		fillRt( 0 );
-		std::printf( "AIRLAMPVIEW all-on inputs shared: cellDdgiAtlas buf %u tex %u, cellRestir buf %u tex %u\n", rtBuf[0], rtTex[0], rtBuf[1],
-			rtTex[1] );
+		const GLenum fe = glGetError();
+		std::printf( "AIRLAMPVIEW all-on inputs shared: cellDdgiAtlas buf %u tex %u, cellRestir buf %u tex %u, fill GL error 0x%04X\n", rtBuf[0],
+			rtTex[0], rtBuf[1], rtTex[1], unsigned( fe ) );
+		if ( fe )
+			return fatal( "the all-on inputs' fill" );
 	}
 #endif
 	struct Arm
