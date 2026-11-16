@@ -15,10 +15,14 @@
 // Fixture: 256 x 160, a symmetric perspective (near 1, far 60; the pixel stage rebuilds the view point with P00 / P11 only),
 // view scale 1.25 with pitch and yaw. Receivers: a ground quad (its far end past the far plane: background texels, g.w 1e6),
 // a standing wall and a tilted panel, drawn by a small GL program into the g-buffer and the depth. Shapes, every type once,
-// rotated: S0 box (room 2) and S1 cylinder (room 5) overlap (MAX judged where they meet), S2 wedge (room 0), S3 capsule
+// rotated: S0 box (room 2) and S1 cylinder (room 5) overlap (MAX judged where they meet), S2 wedge (room 4), S3 capsule
 // (room 7), S4 sphere (room 3), S5 a box holding the camera whose far face lies past the far plane (only cull FRONT plus
-// depth clamp draw it), room 1, drawn LAST (the count red drops it). S2 floats above the ground by less than the bias: only
-// the grown hull reaches the ground under it.
+// depth clamp draw it), room 0 (the lowest: every other shape inside it still shows), drawn LAST (the count red drops it).
+// S2 floats above the ground by less than the bias: only the grown hull reaches the ground under it.
+// (Fixture moved after the first run, bar unchanged: run 1 had S2 room 0 under S5 room 1, so value 1 could never show.)
+// Known GL defect, kept by the twin (a ruling, not this lane's): cell_givol.vert indexes FC[k - 1] for k = 4, 5, so k = 5
+// reads FC[4] of a 4-entry array (undefined) and the second triangle of every hull face is not (0, 2, 3). An info-only GL
+// probe with k - 2 prints the texels that defect moves (the hole set); judge prints how many differing texels lie in it.
 // Bar:
 //   coverage: GL volMask != 0 on >= 3000 texels, == 0 on >= 500 non-background texels (the outdoors), >= 5 distinct values
 //     (an empty or one-shape fixture FAILS).
@@ -113,10 +117,10 @@ void makeShapes()
 	};
 	add( -2.0f, 1.0f, -6.0f, 0, 5.0f, 3.0f, 4.0f, 2, 0.0f, 25.0f, 0.0f );		// S0 box
 	add( 1.5f, 1.0f, -7.0f, 1, 4.0f, 3.0f, 2.5f, 5, 90.0f, 0.0f, 10.0f );		// S1 cylinder, standing
-	add( 4.5f, 2.3f, -12.0f, 2, 4.0f, 4.0f, 3.0f, 0, 0.0f, -30.0f, 0.0f );		// S2 wedge, its bottom 0.8 over the ground
+	add( 4.5f, 2.3f, -12.0f, 2, 4.0f, 4.0f, 3.0f, 4, 0.0f, -30.0f, 0.0f );		// S2 wedge, its bottom 0.8 over the ground
 	add( -5.0f, 1.0f, -14.0f, 3, 3.0f, 3.0f, 7.0f, 7, 0.0f, 70.0f, 60.0f );	// S3 capsule
 	add( 0.5f, 0.0f, -21.0f, 4, 8.0f, 5.0f, 8.0f, 3, 10.0f, 0.0f, 20.0f );		// S4 sphere
-	add( 0.0f, 8.0f, -10.0f, 0, 16.0f, 20.0f, 140.0f, 1, 0.0f, 0.0f, 0.0f );	// S5 the camera's box, far face past far
+	add( 0.0f, 8.0f, -10.0f, 0, 16.0f, 20.0f, 140.0f, 0, 0.0f, 0.0f, 0.0f );	// S5 the camera's box, far face past far
 }
 
 // clip = volClip[r] . (world, 1) and view -> world rows, the app's arithmetic line for line (ao.cpp giVolMaskPass)
@@ -347,15 +351,32 @@ int moved( const std::vector<float> & a, const std::vector<float> & b )
 	return n;
 }
 
+std::vector<char> holes;	// texels the FC[4] defect moves (GL k - 1 vs GL k - 2), info
+
 // the bar on one Vulkan pass against GL's; prints one line, returns true when it holds
 bool judge( const char * what, const std::vector<float> & gl, const std::vector<float> & vk )
 {
 	const int bad = moved( gl, vk );
-	int vkOn = 0;
-	for ( float x : vk )
-		vkOn += x != 0.0f ? 1 : 0;
-	std::printf( "VOLMASKDRAW %s: volMask diff %d of %zu texels (vk non-zero %d) %s\n", what, bad, gl.size(), vkOn, bad == 0 ? "EXACT" : "FAIL" );
+	int vkOn = 0, inHoles = 0;
+	for ( size_t i = 0; i < vk.size(); i++ ) {
+		vkOn += vk[i] != 0.0f ? 1 : 0;
+		inHoles += ( vk[i] != gl[i] && i < holes.size() && holes[i] ) ? 1 : 0;
+	}
+	std::printf( "VOLMASKDRAW %s: volMask diff %d of %zu texels (in the FC[4] hole set %d; vk non-zero %d) %s\n", what, bad, gl.size(),
+		inHoles, vkOn, bad == 0 ? "EXACT" : "FAIL" );
 	return bad == 0;
+}
+
+std::string histOf( const std::vector<float> & v, int & distinct )
+{
+	std::map<float, int> hist;
+	for ( float x : v )
+		hist[x]++;
+	std::string h;
+	for ( const auto & kv : hist )
+		h += " " + std::to_string( int( kv.first ) ) + ":" + std::to_string( kv.second );
+	distinct = int( hist.size() ) - ( hist.count( 0.0f ) ? 1 : 0 );
+	return h;
 }
 
 std::string inlineInclude( std::string s, const std::string & lib )
@@ -506,22 +527,41 @@ int main( int argc, char ** argv )
 	const std::vector<float> gl = glRun( Knobs {} );
 	{
 		int on = 0, outdoors = 0, bg = 0;
-		std::map<float, int> hist;
 		for ( size_t i = 0; i < gl.size(); i++ ) {
 			const bool back = rowGb[i * 4 + 3] >= 1.0e5f;
 			bg += back ? 1 : 0;
 			on += gl[i] != 0.0f ? 1 : 0;
 			outdoors += !back && gl[i] == 0.0f ? 1 : 0;
-			hist[gl[i]]++;
 		}
-		std::string h;
-		for ( const auto & kv : hist )
-			h += " " + std::to_string( int( kv.first ) ) + ":" + std::to_string( kv.second );
-		const int distinct = int( hist.size() ) - ( hist.count( 0.0f ) ? 1 : 0 );
+		int distinct = 0;
+		const std::string h = histOf( gl, distinct );
 		const bool covOk = on >= 3000 && outdoors >= 500 && distinct >= 5;
 		std::printf( "VOLMASKDRAW coverage: non-zero %d texels, outdoors %d, background %d, %d distinct values (value:texels%s) %s\n", on,
 			outdoors, bg, distinct, h.c_str(), covOk ? "OK" : "FAIL" );
 		okAll = okAll && covOk;
+	}
+	{	// info: the FC[4] defect, GL's program with the hull's second triangle (0, 2, 3) indexed k - 2
+		const std::string idx = "k == 3 ? 0 : k - 1]";
+		std::string vs2 = vs;
+		const size_t at = vs2.find( idx );
+		const GLuint fixed = at == std::string::npos ? 0 : program( vs2.replace( at, idx.size(), "k == 3 ? 0 : k - 2]" ), fs, "cell_givol k-2" );
+		if ( !fixed )
+			return fatal( "the k - 2 probe program (its index text not found or not linked)" );
+		const std::vector<float> full = [&] {
+			glMask( fixed, maskFb, gbuf, shapeTex, volVao, Knobs {} );
+			glFinish();
+			return readR( glVol );
+		}();
+		holes.assign( gl.size(), 0 );
+		int n = 0;
+		for ( size_t i = 0; i < gl.size(); i++ ) {
+			holes[i] = gl[i] != full[i] ? 1 : 0;
+			n += holes[i];
+		}
+		int distinct = 0;
+		const std::string h = histOf( full, distinct );
+		std::printf( "VOLMASKDRAW info FC[4] defect: GL with k - 2 moves %d texels against GL's own (k - 2: %d distinct values,%s)\n", n,
+			distinct, h.c_str() );
 	}
 	const char * redName[6] = { "blend", "depth", "count", "clamp", "cull", "grow" };
 	for ( int r = 0; r < 6; r++ ) {	// the reds' GL probes
