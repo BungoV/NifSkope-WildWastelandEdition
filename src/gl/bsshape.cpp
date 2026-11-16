@@ -674,7 +674,7 @@ void BSShape::drawShapes( NodeList * secondPass )
 			bool hid = ( i < numTriangles ) && hiddenT->contains( int( i ) );
 			if ( hid || i == numTriangles ) {
 				if ( i > runStart )
-					context->fn->glDrawElements( GLenum( context->triMode() ), GLsizei( ( i - runStart ) * 3 ),
+					WwBl::countGl( 1 ), context->fn->glDrawElements( GLenum( context->triMode() ), GLsizei( ( i - runStart ) * 3 ),
 						GL_UNSIGNED_SHORT, (void *) ( size_t( runStart ) * 6 ) );
 				runStart = i + 1;
 			}
@@ -1089,7 +1089,7 @@ void BSShape::drawSelection() const
 					continue;
 
 				setGLColor( cols[(unsigned int) i % 7U] );
-				context->fn->glDrawElements( GL_TRIANGLES, GLsizei( subcnt * 3 ),
+				WwBl::countGl( 1 ), context->fn->glDrawElements( GL_TRIANGLES, GLsizei( subcnt * 3 ),
 												GL_UNSIGNED_SHORT, (void *) ( suboff * 6 ) );
 			}
 
@@ -1103,7 +1103,7 @@ void BSShape::drawSelection() const
 					cnt = std::min< qsizetype >( cnt, maxTris - off );
 
 					setGLColor( cols[(unsigned int) ( idx.row() + l ) % 7U] );
-					context->fn->glDrawElements( GL_TRIANGLES, GLsizei( cnt * 3 ),
+					WwBl::countGl( 1 ), context->fn->glDrawElements( GL_TRIANGLES, GLsizei( cnt * 3 ),
 													GL_UNSIGNED_SHORT, (void *) ( off * 6 ) );
 				}
 			}
@@ -1142,7 +1142,7 @@ void BSShape::drawSelection() const
 			qsizetype	triCnt = part.triangles.size();
 			triCnt = std::min< qsizetype >( triCnt, triangles.size() - k );
 			if ( triCnt > 0 ) {
-				context->fn->glDrawElements( GL_TRIANGLES, GLsizei( triCnt * 3 ),
+				WwBl::countGl( 1 ), context->fn->glDrawElements( GL_TRIANGLES, GLsizei( triCnt * 3 ),
 												GL_UNSIGNED_SHORT, (void *) ( k * 6 ) );
 				k = k + triCnt;
 			}

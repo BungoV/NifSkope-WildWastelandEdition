@@ -31,7 +31,7 @@ inline GlZones & glZones()
 	static GlZones z;
 	return z;
 }
-inline void glDrawn( long long calls )
+inline void countGl( long long calls )
 {
 	GlZones & z = glZones();
 	z.draws[z.cur] += calls;

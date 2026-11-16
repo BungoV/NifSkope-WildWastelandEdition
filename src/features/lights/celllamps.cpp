@@ -10,6 +10,7 @@ BSD License - see nifskope.h
 #include "features/vkframe/vkpresent.h"	// lane VKOBJ4: the shadow cubes as a shared cube array (WW_VKOBJ_SHADE)
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "features/vkframe/vkpresent.h"	// lane VKFAR6 (L8 term 5): the lamp cubes shared with the Vulkan view
+#include "features/near/cellbindless.h"	// lane VKFLIGHT5: WwBl::vkShadeOn (follows the view)
 #include "features/vkframe/vklamp.h"	// lane VKLAMP1: the plain cubes' solid casters on the present device
 
 #include "cellclustergl.h"
@@ -586,7 +587,7 @@ static void shadowDump( Scene * scene )
  * (the lit rain and snow read them in place); red WW_VKVIEW_LAMPSHADOW_RED=1 keeps GL's own */
 static bool shadowShareWanted()
 {
-	return WwVkPresent::shareWanted( "WW_VKVIEW_LAMPSHADOW_RED" ) || wwEnv( "WW_VKOBJ_SHADE" ).trimmed() == "1";  // BATCH1114: or VKOBJ4's runs
+	return WwVkPresent::shareWanted( "WW_VKVIEW_LAMPSHADOW_RED" ) || WwBl::vkShadeOn();  // BATCH1114: or VKOBJ4's runs
 }
 
 //! the shared cubes' key: the renderer's (gpus() is a QHash, whose values move when it grows; an odd address no object has)

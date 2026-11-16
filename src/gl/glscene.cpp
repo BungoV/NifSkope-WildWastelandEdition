@@ -589,6 +589,7 @@ void Scene::drawShapes()
 	NodeList secondPass;
 	wwCellDrawProbe( this, QStringLiteral( "before the scene" ) );	// lane VOLAIR1 (gates only)
 	PassTime::begin( PassTime::Opaque );	// lane PERF1
+	const int wwGlZone = WwBl::glZoneSet( WwBl::ZoneOpaque );	// lane VKFLIGHT5: GL's draw calls here count as "gl opaque"
 	wwCellVrsPass( this, false, true );	// lane VRS1: coarse shading where the last frame was flat
 	wwSetupMemoArm( true );	// lane PERF1: one pass, one set of scene globals
 	GpuDrivenB::cameraWalk( true );
@@ -596,6 +597,7 @@ void Scene::drawShapes()
 	GpuDrivenB::cameraWalk( false );
 	wwSetupMemoArm( false );
 	wwCellVrsPass( this, false, false );
+	WwBl::glZoneSet( wwGlZone );
 	PassTime::end( PassTime::Opaque );
 	wwCellDrawProbe( this, QStringLiteral( "after the first pass" ) );
 	wwCellFarLodEarly( this );	// MODULES1 part 27: the far cards under the smoke (paintGL arms it; no call unarmed)
@@ -606,12 +608,14 @@ void Scene::drawShapes()
 		drawSelection(); // preserve the legacy highlight beneath transparency
 
 	PassTime::begin( PassTime::Sorted );
+	WwBl::glZoneSet( WwBl::ZoneSorted );
 	wwCellVrsPass( this, true, true );	// lane VRS1: the stricter image
 	wwSetupMemoArm( true );
 	wwTaaInputsNoteBlended( this, secondPass.list() );	// lane TAAINPUTS1: the mask's shapes (no GL call)
 	drawDeferredShapes( secondPass );
 	wwSetupMemoArm( false );
 	wwCellVrsPass( this, true, false );
+	WwBl::glZoneSet( wwGlZone );
 	PassTime::end( PassTime::Sorted );
 	wwCellDrawProbe( this, QStringLiteral( "after the second pass" ) );
 	PassTime::begin( PassTime::Effects );

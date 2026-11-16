@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 #include "features/near/cellqueue.h"
 #include "features/near/cellgpucull.h"	// lane GPUDRIVEN1 step B
 #include "wwswitch.h"	// lane LIVESET1: the switches follow a live set
+#include "features/near/cellglzone.h"	// lane VKFLIGHT5: the GL draw count of the Vulkan view's guard
 #include "gl/wwuploadcap.h"	// lane EMPTY240 R5-1: the pool's intake counts in the paint's upload budget
 
 #include "gl/glcontext.hpp"
@@ -523,7 +524,7 @@ void poolDraw( NifSkopeOpenGLContext * r, std::size_t first, std::size_t n )
 	if ( !pp || !n )
 		return;
 	if ( pp->mdi ) {
-		pp->mdi( GL_TRIANGLES, GL_UNSIGNED_SHORT, (const void *) ( first * sizeof( DrawCmd ) ), GLsizei( n ),
+		WwBl::countGl( 1 ), pp->mdi( GL_TRIANGLES, GL_UNSIGNED_SHORT, (const void *) ( first * sizeof( DrawCmd ) ), GLsizei( n ),
 			GLsizei( sizeof( DrawCmd ) ) );
 		return;
 	}
@@ -533,7 +534,7 @@ void poolDraw( NifSkopeOpenGLContext * r, std::size_t first, std::size_t n )
 	r->fn->glGetBufferSubData( GL_DRAW_INDIRECT_BUFFER, GLintptr( first * sizeof( DrawCmd ) ),
 		GLsizeiptr( n * sizeof( DrawCmd ) ), mirror.data() );
 	for ( const DrawCmd & c : mirror )
-		r->fn->glDrawElementsInstancedBaseVertexBaseInstance( GL_TRIANGLES, GLsizei( c.count ), GL_UNSIGNED_SHORT,
+		WwBl::countGl( 1 ), r->fn->glDrawElementsInstancedBaseVertexBaseInstance( GL_TRIANGLES, GLsizei( c.count ), GL_UNSIGNED_SHORT,
 			(const void *) ( std::size_t( c.firstIndex ) * 2 ), GLsizei( c.instanceCount ), c.baseVertex, c.baseInstance );
 }
 

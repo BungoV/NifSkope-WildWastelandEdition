@@ -32,6 +32,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "glnode.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "features/near/cellglzone.h"	// lane VKFLIGHT5: the GL draw count of the Vulkan view's guard
 
 #include "nifskope.h"
 #include "gl/controllers.h"
@@ -789,7 +790,7 @@ void Node::drawVertexSelection( qsizetype numVerts, int i )
 		scene->setGLPointSize( GLView::Settings::vertexPointSizeSelected );
 
 		if ( scene->setupProgram( "selection.prog", GL_POINTS ) )
-			scene->renderer->fn->glDrawArrays( GL_POINTS, GLint( i ), 1 );
+			WwBl::countGl( 1 ), scene->renderer->fn->glDrawArrays( GL_POINTS, GLint( i ), 1 );
 	}
 }
 
@@ -807,7 +808,7 @@ void Node::drawTriangleSelection( const QVector<Triangle> & triangles, int i, in
 
 	n = std::min( n, int( triangles.size() - i ) );
 	if ( endVertex < 0 ) {
-		scene->renderer->fn->glDrawElements( GL_TRIANGLES, GLsizei( n ) * 3,
+		WwBl::countGl( 1 ), scene->renderer->fn->glDrawElements( GL_TRIANGLES, GLsizei( n ) * 3,
 												GL_UNSIGNED_SHORT, (void *) ( qsizetype( i ) * 6 ) );
 		return;
 	}
@@ -824,13 +825,13 @@ void Node::drawTriangleSelection( const QVector<Triangle> & triangles, int i, in
 			qDebug() << "triangle with multiple materials?" << i;
 		}
 		if ( endPos > startPos ) {
-			scene->renderer->fn->glDrawElements( GL_TRIANGLES, GLsizei( endPos - startPos ) * 3,
+			WwBl::countGl( 1 ), scene->renderer->fn->glDrawElements( GL_TRIANGLES, GLsizei( endPos - startPos ) * 3,
 													GL_UNSIGNED_SHORT, (void *) ( qsizetype( startPos ) * 6 ) );
 		}
 		startPos = i + 1;
 	}
 	if ( endPos > startPos ) {
-		scene->renderer->fn->glDrawElements( GL_TRIANGLES, GLsizei( endPos - startPos ) * 3,
+		WwBl::countGl( 1 ), scene->renderer->fn->glDrawElements( GL_TRIANGLES, GLsizei( endPos - startPos ) * 3,
 												GL_UNSIGNED_SHORT, (void *) ( qsizetype( startPos ) * 6 ) );
 	}
 }

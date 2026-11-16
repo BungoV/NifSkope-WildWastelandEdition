@@ -1,5 +1,5 @@
 """Lane VKFLIGHT5 (2026-11-16): site check of the Vulkan view's opaque wiring.
-1. Every GL draw call of the opaque / sorted / obscurance / editor draw functions counts itself (WwBl::glDrawn on the
+1. Every GL draw call of the opaque / sorted / obscurance / editor draw functions counts itself (WwBl::countGl on the
    same line as the call), the sites found by objcensus's own scanner (never a hand list of lines).
 2. vkShadeOn follows the view (WwBl::shadeWanted); nothing else in src reads WW_VKOBJ_SHADE by itself.
 3. The pass brackets set the zones; WwBl::frame() hands the zones to the guard and says `vk opaque:` outside the
@@ -39,8 +39,8 @@ for rel, funcs in FILES.items():
     lines = text.splitlines()
     if red and not dropped and rel == 'src/gl/glshape.cpp':
         for i, ln in enumerate(lines):
-            if 'WwBl::glDrawn( 1 ), ' in ln:
-                lines[i] = ln.replace('WwBl::glDrawn( 1 ), ', '', 1)
+            if 'WwBl::countGl( 1 ), ' in ln:
+                lines[i] = ln.replace('WwBl::countGl( 1 ), ', '', 1)
                 dropped = True
                 break
         text = '\n'.join(lines)
@@ -49,14 +49,14 @@ for rel, funcs in FILES.items():
         if tok in WRAPPERS or key in EXEMPT or (funcs is not None and func not in funcs):
             continue
         sites += 1
-        if 'glDrawn(' not in lines[n - 1]:
+        if 'countGl(' not in lines[n - 1]:
             missing.append('%s:%d %s' % (rel, n, tok))
 check(sites >= 25, 'GL draw calls of the opaque / sorted / obscurance / editor functions: %d (25 on 11-16)' % sites)
 check(not missing, 'each counts itself on its own line (missing %d: %s)' % (len(missing), '; '.join(missing[:4])))
 
 bl = read('src/features/near/cellbindless.cpp')
 check('#include "features/near/cellglzone.h"' in read('src/features/near/cellbindless.h'), 'cellbindless.h includes cellglzone.h')
-m = re.search(r'bool vkShadeOn\(\)\s*\{(.*?)\n\}', bl, re.S)
+m = re.search(r'bool vkShadeOn\(\)[^\n]*\n\{(.*?)\n\}', bl, re.S)
 check(m is not None and 'shadeWanted(' in m.group(1) and '"WW_VKVIEW"' in m.group(1),
       'vkShadeOn follows the view: WwBl::shadeWanted( WW_VKOBJ_SHADE, WW_VKVIEW )')
 readers = []

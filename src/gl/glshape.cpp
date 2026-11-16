@@ -32,6 +32,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "glshape.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "features/near/cellglzone.h"	// lane VKFLIGHT5: the GL draw count of the Vulkan view's guard
 #include "cellsplat.h"	// lane TERRBLEND1: wwCellLandIs
 #include "features/near/cellbindless.h"	// lane BINDLESS2
 #include "gl/wwuploadcap.h"	// lane EMPTY240 R4-1: a mesh left for the next paint
@@ -589,13 +590,13 @@ void Shape::drawVerts( float pointSize, int vertexSelected ) const
 	prog->uni1i( "selectionParam", selectionParam );
 
 	qsizetype	numVerts = verts.size();
-	context->fn->glDrawArrays( GL_POINTS, 0, GLsizei( numVerts ) );
+	WwBl::countGl( 1 ), context->fn->glDrawArrays( GL_POINTS, 0, GLsizei( numVerts ) );
 	if ( !scene->selecting && vertexSelected >= 0 && vertexSelected < numVerts ) {
 		pointSize = GLView::Settings::vertexPointSizeSelected + 0.5f;
 		glPointSize( pointSize );
 		selectionFlags = ( roundFloat( std::min( std::max( pointSize * 8.0f, 0.0f ), 255.0f ) ) << 8 ) | 0x0002;
 		prog->uni1i( "selectionFlags", selectionFlags );
-		context->fn->glDrawArrays( GL_POINTS, GLint( vertexSelected ), 1 );
+		WwBl::countGl( 1 ), context->fn->glDrawArrays( GL_POINTS, GLint( vertexSelected ), 1 );
 	}
 
 	glDisable( GL_POLYGON_OFFSET_POINT );
@@ -624,16 +625,16 @@ void Shape::drawNormals( int btnMask, int vertexSelected, float lineLength ) con
 	context->fn->glBlendFuncSeparate( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA );
 
 	qsizetype	numVerts = verts.size();
-	context->fn->glDrawArrays( GL_POINTS, 0, GLsizei( numVerts ) );
+	WwBl::countGl( 1 ), context->fn->glDrawArrays( GL_POINTS, 0, GLsizei( numVerts ) );
 	if ( vertexSelected >= 0 && vertexSelected < numVerts ) {
 		prog->uni1f( "lineWidth", GLView::Settings::lineWidthHighlight * 1.2f );
 		glDepthFunc( GL_ALWAYS );
-		context->fn->glDrawArrays( GL_POINTS, GLint( vertexSelected ), 1 );
+		WwBl::countGl( 1 ), context->fn->glDrawArrays( GL_POINTS, GLint( vertexSelected ), 1 );
 		if ( ( btnMask & 7 ) == 3 ) {
 			prog->uni1i( "btnSelection", 1 );
 			// yellow -> cyan (2, 1, 0, 3)
 			prog->uni4f( "highlightColor", FloatVector4( scene->highlightColor ).shuffleValues( 0xC6 ) );
-			context->fn->glDrawArrays( GL_POINTS, GLint( vertexSelected ), 1 );
+			WwBl::countGl( 1 ), context->fn->glDrawArrays( GL_POINTS, GLint( vertexSelected ), 1 );
 		}
 		glDepthFunc( GL_LEQUAL );
 	}
@@ -654,7 +655,7 @@ void Shape::drawWireframe( FloatVector4 color, float lineWidth ) const
 	prog->uni1i( "selectionParam", -1 );
 	prog->uni1f( "lineWidth", lineWidth > 0.0f ? lineWidth : GLView::Settings::lineWidthWireframe );
 
-	context->fn->glDrawElements( GL_TRIANGLES, GLsizei( n * 3 ), GL_UNSIGNED_SHORT, (void *) 0 );
+	WwBl::countGl( 1 ), context->fn->glDrawElements( GL_TRIANGLES, GLsizei( n * 3 ), GL_UNSIGNED_SHORT, (void *) 0 );
 }
 
 void Shape::drawTriangles( qsizetype i, qsizetype n, FloatVector4 color ) const
@@ -676,7 +677,7 @@ void Shape::drawTriangles( qsizetype i, qsizetype n, FloatVector4 color ) const
 	prog->uni1i( "selectionFlags", 0 );
 	prog->uni1i( "selectionParam", -1 );
 
-	context->fn->glDrawElements( GL_TRIANGLES, GLsizei( n * 3 ), GL_UNSIGNED_SHORT, (void *) ( i * 6 ) );
+	WwBl::countGl( 1 ), context->fn->glDrawElements( GL_TRIANGLES, GLsizei( n * 3 ), GL_UNSIGNED_SHORT, (void *) ( i * 6 ) );
 }
 
 void Shape::drawWeights( int vertexSelected ) const
@@ -693,7 +694,7 @@ void Shape::drawWeights( int vertexSelected ) const
 	prog->uni1i( "selectionFlags", 0x08 );
 	prog->uni1i( "selectionParam", -1 );
 
-	context->fn->glDrawElements( GL_TRIANGLES, GLsizei( triangles.size() * 3 ), GL_UNSIGNED_SHORT, (void *) 0 );
+	WwBl::countGl( 1 ), context->fn->glDrawElements( GL_TRIANGLES, GLsizei( triangles.size() * 3 ), GL_UNSIGNED_SHORT, (void *) 0 );
 
 	if ( vertexSelected >= 0 && vertexSelected < verts.size() ) {
 		glEnable( GL_POLYGON_OFFSET_POINT );
@@ -705,7 +706,7 @@ void Shape::drawWeights( int vertexSelected ) const
 		prog->uni4f( "highlightColor", scene->highlightColor );
 		prog->uni1i( "selectionFlags", selectionFlags );
 		prog->uni1i( "selectionParam", vertexSelected );
-		context->fn->glDrawArrays( GL_POINTS, GLint( vertexSelected ), 1 );
+		WwBl::countGl( 1 ), context->fn->glDrawArrays( GL_POINTS, GLint( vertexSelected ), 1 );
 
 		glDisable( GL_POLYGON_OFFSET_POINT );
 	}

@@ -1,3 +1,13 @@
+## VKFLIGHT5 (2026-11-16): the opaque shapes reach their Vulkan twins in the Vulkan view; the guard counts GL's own draws
+- The opaque twins (bindless runs, vkCellDraw, vkBlDraw, GPU cull step B, the cell-lit particles) were opt-in by
+  WW_VKOBJ_SHADE=1, which the flight never set: the Vulkan view drew every opaque shape on GL. WwBl::vkShadeOn now follows
+  WW_VKVIEW when the key is unset (as WW_VKOBJ_TEX does); WW_VKOBJ_SHADE=0 still forces them off. The lamp cubes' share
+  (celllamps.cpp) asks vkShadeOn too.
+- The GL draw calls of the opaque, sorted, obscurance and editor overlay brackets count themselves at the GL call
+  (WwBl::countGl, src/features/near/cellglzone.h) and reach `vk view gl:` as "gl opaque" / "gl sorted" / ...
+- New frame line `vk opaque: drawn= (runs, singles) gl= (sorted, obscurance, other, overlays) why=`.
+- Gate: tests/vkframe/opaque.sh (switch truth table, red = the old rule; site check from objcensus's scanner, red = a dropped hook).
+
 ## VKAIR21 (2026-11-16): the near air grid's inject with temporal off runs on Vulkan
 
 Changed, not built, not checked live. Offline: tests/vkframe/airtemporalview.sh passes (GATE OK).

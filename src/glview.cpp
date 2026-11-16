@@ -4682,7 +4682,9 @@ void GLView::paintGL()
 		}
 	}
 	PassTime::begin( PassTime::Obscurance );	// one bracket per pass
+	const int wwGlZone = WwBl::glZoneSet( WwBl::ZoneObscurance );	// lane VKFLIGHT5: the view guard's GL draw zones
 	wwCellAoPass( scene, cellPasses );
+	WwBl::glZoneSet( wwGlZone );
 	PassTime::end( PassTime::Obscurance );
 	{
 		WwWallPart wallPart( wwWall().cur.restir );
@@ -4839,16 +4841,20 @@ void GLView::paintGL()
 		for ( Scene * ws : std::as_const( workspaceDrawScenes ) )
 			ws->drawShapeEffects();
 
+		const int wwGlZoneOv = WwBl::glZoneSet( WwBl::ZoneOverlays );
 		scene->drawOverlays();
 		for ( Scene * ws : std::as_const( workspaceDrawScenes ) )
 			ws->drawOverlays();
+		WwBl::glZoneSet( wwGlZoneOv );
 		glDisable( GL_BLEND );
 	}
 
 	PassTime::begin( PassTime::Overlays );	// everything after the frame (closed by frameEnd)
 	static QElapsedTimer wwOvlClock;	// lane PERFLOAD1 (P5): the overlays zone's cost split, printed for slow frames only
 	wwOvlClock.start();
+	WwBl::glZoneSet( WwBl::ZoneOverlays );
 	paintEditorOverlays( viewTrans );
+	WwBl::glZoneSet( wwGlZone );
 	const qint64 wwOvlEditorNs = wwOvlClock.nsecsElapsed();
 	//	// features/overlays: the editor overlays after the frame
 

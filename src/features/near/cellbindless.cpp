@@ -547,9 +547,10 @@ bool runPoolPeek( const Shape * sh, std::uintptr_t & idxOff, std::int32_t & base
 	return true;
 }
 
-bool vkShadeOn()
+bool vkShadeOn()	// lane VKFLIGHT5: unset follows WW_VKVIEW (as vkTexOn); WW_VKOBJ_SHADE=0 forces off
 {
-	WW_SWITCH_STATIC( bool, want, wwEnv( "WW_VKOBJ_SHADE" ).trimmed() == "1" );
+	WW_SWITCH_STATIC( bool, want, shadeWanted( wwEnv( "WW_VKOBJ_SHADE" ).trimmed().constData(),
+		wwEnv( "WW_VKVIEW" ).trimmed().constData() ) );
 	return want && vkTexOn();
 }
 
@@ -716,7 +717,7 @@ bool runIssue(NifSkopeOpenGLContext::GLFunctions * f, const NifSkopeOpenGLContex
 		c.vkRuns++;
 	} else if ( n > 0 ) {
 		f->glBindBuffer( GL_DRAW_INDIRECT_BUFFER, c.cmdBuf );
-		c.mdi( GL_TRIANGLES, GL_UNSIGNED_SHORT, (const void *) ( std::size_t( run.cmd0 ) * kCmdBytes ), n, GLsizei( kCmdBytes ) );
+		WwBl::countGl( 1 ), c.mdi( GL_TRIANGLES, GL_UNSIGNED_SHORT, (const void *) ( std::size_t( run.cmd0 ) * kCmdBytes ), n, GLsizei( kCmdBytes ) );
 		f->glBindBuffer( GL_DRAW_INDIRECT_BUFFER, 0 );
 		c.mdiCalls++;
 	}
@@ -1315,16 +1316,16 @@ void poolEnd( NifSkopeOpenGLContext::GLFunctions * f )
 void drawElements( NifSkopeOpenGLContext::GLFunctions * f, GLsizei count, std::uintptr_t off, GLenum mode )
 {
 	if ( geo.on )
-		f->glDrawElementsBaseVertex( mode, count, GL_UNSIGNED_SHORT, (const void *) ( off + geo.idxOff ), geo.baseVertex );
+		WwBl::countGl( 1 ), f->glDrawElementsBaseVertex( mode, count, GL_UNSIGNED_SHORT, (const void *) ( off + geo.idxOff ), geo.baseVertex );
 	else
-		f->glDrawElements( mode, count, GL_UNSIGNED_SHORT, (const void *) off );
+		WwBl::countGl( 1 ), f->glDrawElements( mode, count, GL_UNSIGNED_SHORT, (const void *) off );
 }
 
 void multiDrawElements( NifSkopeOpenGLContext::GLFunctions * f, const GLsizei * counts, const void * const * offs, GLsizei n,
 	GLenum mode )
 {
 	if ( !geo.on ) {
-		f->glMultiDrawElements( mode, counts, GL_UNSIGNED_SHORT, offs, n );
+		WwBl::countGl( 1 ), f->glMultiDrawElements( mode, counts, GL_UNSIGNED_SHORT, offs, n );
 		return;
 	}
 	static std::vector<const void *> o;
@@ -1333,7 +1334,7 @@ void multiDrawElements( NifSkopeOpenGLContext::GLFunctions * f, const GLsizei * 
 	b.assign( size_t( n ), geo.baseVertex );
 	for ( GLsizei i = 0; i < n; i++ )
 		o[size_t( i )] = (const void *) ( std::uintptr_t( offs[i] ) + geo.idxOff );
-	f->glMultiDrawElementsBaseVertex( mode, const_cast<GLsizei *>( counts ), GL_UNSIGNED_SHORT,
+	WwBl::countGl( 1 ), f->glMultiDrawElementsBaseVertex( mode, const_cast<GLsizei *>( counts ), GL_UNSIGNED_SHORT,
 		const_cast<const void * const *>( o.data() ), n, b.data() );
 }
 
@@ -1347,6 +1348,15 @@ void unpoolForIndirect( NifSkopeOpenGLContext::GLFunctions * f )
 
 void frame()
 {
+	// lane VKFLIGHT5: the GL draw calls of the brackets with no route of their own, to the view's guard (`vk view gl:`)
+	GlZones & gz = glZones();
+	long long glZ[ZoneCount];
+	for ( int z = 0; z < ZoneCount; z++ ) {
+		glZ[z] = gz.draws[z];
+		if ( gz.draws[z] )
+			WwVkPresent::glGuard( glZoneName( z ), gz.draws[z] );
+		gz.draws[z] = 0;
+	}
 	if ( ctxs().empty() )
 		return;
 	Ctx & c = cx();
@@ -1481,6 +1491,28 @@ void frame()
 			s.loadFlushes, s.batched, s.flushed, s.flushMs, s.flushFails, s.swizzled );
 		if ( s.loadTwins && vkLoadLine != b && wwFrameLog() ) {
 			vkLoadLine = b;
+			std::fprintf( stderr, "%s\n", b );
+		}
+	}
+	/* lane VKFLIGHT5: the opaque shapes in the Vulkan view: the twins' draws this frame (runs + singles) beside GL's draw calls
+	 * in the opaque bracket (sorted / obscurance / other / overlays after), and why GL drew: the first refusal, or the twins off */
+	if ( vkTexOn() ) {
+		static std::string vkOpaqueLine;
+		long long singles = cellDrawn + pbrmDrawn;
+		for ( int kind = 0; kind < kBlKinds; kind++ )
+			singles += blDrawn[kind];
+		const std::string * why = nullptr;
+		for ( const std::string * w : { &blWhy[2], &cellWhy, &blWhy[0], &blWhy[1], &blWhy[3], &pbrmWhy } )
+			if ( !why && !w->empty() )
+				why = w;
+		const char * whyS = !vkShadeOn() ? "WW_VKOBJ_SHADE=0: the opaque twins are off"
+			: why ? why->c_str() : glZ[ZoneOpaque] ? "no twin tried: a program without a twin" : "none";
+		char b[640];
+		std::snprintf( b, sizeof( b ), "vk opaque: drawn=%lld (runs %lld, singles %lld) gl=%lld (sorted %lld, obscurance %lld, "
+			"other %lld, overlays %lld) why=\"%s\"", c.vkRuns + singles, (long long)c.vkRuns, singles, glZ[ZoneOpaque],
+			glZ[ZoneSorted], glZ[ZoneObscurance], glZ[ZoneOther], glZ[ZoneOverlays], whyS );
+		if ( vkOpaqueLine != b && wwFrameLog() ) {
+			vkOpaqueLine = b;
 			std::fprintf( stderr, "%s\n", b );
 		}
 	}

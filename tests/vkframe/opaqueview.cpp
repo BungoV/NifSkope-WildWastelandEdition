@@ -31,15 +31,15 @@ int main( int argc, char ** argv )
 	}
 	// the zone count: a bracket's draws land in its zone, the bracket's end gives the zone before back
 	WwBl::GlZones & z = WwBl::glZones();
-	WwBl::glDrawn( 2 );
+	WwBl::countGl( 2 );
 	const int prev = WwBl::glZoneSet( WwBl::ZoneOpaque );
-	WwBl::glDrawn( 3 );
-	WwBl::glDrawn( 4 );
+	WwBl::countGl( 3 );
+	WwBl::countGl( 4 );
 	const int inner = WwBl::glZoneSet( WwBl::ZoneSorted );
-	WwBl::glDrawn( 5 );
+	WwBl::countGl( 5 );
 	WwBl::glZoneSet( inner );
 	WwBl::glZoneSet( prev );
-	WwBl::glDrawn( 1 );
+	WwBl::countGl( 1 );
 	const bool zOk = z.draws[WwBl::ZoneOther] == 3 && z.draws[WwBl::ZoneOpaque] == 7 && z.draws[WwBl::ZoneSorted] == 5
 		&& z.cur == WwBl::ZoneOther && !std::strcmp( WwBl::glZoneName( WwBl::ZoneOpaque ), "gl opaque" );
 	std::printf( "  %s zones other=%lld (want 3) opaque=%lld (want 7) sorted=%lld (want 5) cur=%d (want 0)\n", zOk ? "ok  " : "FAIL",

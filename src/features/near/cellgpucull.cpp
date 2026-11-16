@@ -1209,7 +1209,7 @@ bool draw( Scene * scene, Shape * sh, qsizetype numTriangles )
 	if ( gp && qsizetype( rec.numTris ) == numTriangles ) {
 		WwBl::unpoolForIndirect( fn );	// lane BINDLESS2: the commands hold the shape's own offsets
 		gp->g->glBindBuffer( GL_DRAW_INDIRECT_BUFFER, gp->cmds );
-		gp->g->glMultiDrawElementsIndirect( mode, GL_UNSIGNED_SHORT,
+		WwBl::countGl( 1 ), gp->g->glMultiDrawElementsIndirect( mode, GL_UNSIGNED_SHORT,
 			(const void *) ( std::size_t( rec.cmdFirst ) * sizeof( GpuDriven::DrawCmd ) ), GLsizei( rec.cmdCount ),
 			GLsizei( sizeof( GpuDriven::DrawCmd ) ) );
 		gp->g->glBindBuffer( GL_DRAW_INDIRECT_BUFFER, 0 );

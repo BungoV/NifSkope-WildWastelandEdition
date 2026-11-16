@@ -16,6 +16,7 @@
  * the reopen teardown before the lane, and a destroyed context's state kept). */
 
 #include "gl/glcontext.hpp"
+#include "features/near/cellglzone.h"	// lane VKFLIGHT5: shadeWanted, the GL draw zones of the view's guard
 
 #include <cstdint>
 
