@@ -8,14 +8,25 @@ OUT="${1:?out dir}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PY="${PY:-$(command -v python)}"	# before the UCRT64 PATH
 if powershell -NoProfile -Command "if (Get-Process NifSkope,Fallout4 -ErrorAction SilentlyContinue) { 'busy' }" | grep -q busy; then echo "FARGNDRTDRAW GATE FAILED (NifSkope or the game runs: no window of ours now)"; exit 1; fi
+# Lane VKGROUND17: mode 2 (fo4_cellcsmfgp, cached pages) too: fgpagesrtdraw.cpp (generated from fgpagesdraw.cpp) in <out dir>/fgp,
+# FGPAGESRTDRAW_SPVSET reuses its build_all set; FARGNDRTDRAW_MODES="1 2" (default) picks the modes. OK only when every key of
+# every mode is OK (4 of 4).
 mkdir -p "$OUT"
-"$PY" -I "$ROOT/tests/vkframe/fargndrtdraw_prep.py" "$OUT" ${FARGNDRTDRAW_SPVSET:-} || { echo "FARGNDRTDRAW GATE FAILED (job)"; exit 1; }
-PATH=/c/msys64/ucrt64/bin:$PATH g++ -O2 -std=c++17 -pthread -I"$ROOT/src" "$ROOT/tests/vkframe/fargndrtdraw.cpp" -o "$OUT/fargndrtdraw.exe" \
-	-lopengl32 -lgdi32 -luser32 || { echo "FARGNDRTDRAW GATE FAILED (g++)"; exit 1; }
+MODES="${FARGNDRTDRAW_MODES:-1 2}"
 ok=0
-for k in rt dg; do
-	PATH=/c/msys64/ucrt64/bin:$PATH "$OUT/fargndrtdraw.exe" "$OUT" "$k" > "$OUT/fargndrtdraw_$k.txt" 2>&1
-	tail -1 "$OUT/fargndrtdraw_$k.txt"
-	tail -1 "$OUT/fargndrtdraw_$k.txt" | grep -q "FARGNDRTDRAW GATE OK" && ok=$((ok + 1))
+want=0
+for m in $MODES; do
+	if [ "$m" = 1 ]; then name=fargndrtdraw; dir="$OUT"; set_="${FARGNDRTDRAW_SPVSET:-}"; word="FARGNDRTDRAW GATE OK"
+	else name=fgpagesrtdraw; dir="$OUT/fgp"; set_="${FGPAGESRTDRAW_SPVSET:-}"; word="FARGNDRTDRAW2 GATE OK"; fi
+	mkdir -p "$dir"
+	"$PY" -I "$ROOT/tests/vkframe/${name}_prep.py" "$dir" $set_ || { echo "FARGNDRTDRAW GATE FAILED (job, mode $m)"; exit 1; }
+	PATH=/c/msys64/ucrt64/bin:$PATH g++ -O2 -std=c++17 -pthread -I"$ROOT/src" "$ROOT/tests/vkframe/$name.cpp" -o "$dir/$name.exe" \
+		-lopengl32 -lgdi32 -luser32 || { echo "FARGNDRTDRAW GATE FAILED (g++, mode $m)"; exit 1; }
+	for k in rt dg; do
+		want=$((want + 1))
+		PATH=/c/msys64/ucrt64/bin:$PATH "$dir/$name.exe" "$dir" "$k" > "$dir/${name}_$k.txt" 2>&1
+		tail -1 "$dir/${name}_$k.txt"
+		tail -1 "$dir/${name}_$k.txt" | grep -q "$word" && ok=$((ok + 1))
+	done
 done
-if [ "$ok" = 2 ]; then echo "FARGNDRTDRAW GATE OK"; else echo "FARGNDRTDRAW GATE FAILED ($ok of 2 keys OK)"; exit 1; fi
+if [ "$ok" = "$want" ] && [ "$want" -gt 0 ]; then echo "FARGNDRTDRAW GATE OK ($ok of $want keys)"; else echo "FARGNDRTDRAW GATE FAILED ($ok of $want keys OK)"; exit 1; fi
