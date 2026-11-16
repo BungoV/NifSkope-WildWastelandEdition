@@ -21,4 +21,8 @@ echo "AIRLAMPVIEW app: airAtlasEnsure calls $n1, wwAirLampAtlasShare( s1Share &&
 g++ -O2 -std=c++17 -pthread -I"$ROOT/src" "$ROOT/tests/vkframe/airlampview.cpp" -o "$OUT/airlampview.exe" -lopengl32 -lgdi32 -luser32 \
 	|| { echo "AIRLAMPVIEW GATE FAILED (g++)"; exit 1; }
 "$OUT/airlampview.exe" "$OUT" 2>&1 | tee "$OUT/airlampview.txt"
+# lane VKAIR18: both air routes ask the RT GI inputs by name (vkrtbuf.h rtBufOf), not by a GL name's texel buffer
+n3=$(cat "$ROOT/src/features/vkframe/vkairlamp.inc" "$ROOT/src/features/vkframe/vkairtemporal.inc" | grep -c 'WwVkPresent::rtBufOf( c.name.c_str()')
+echo "AIRLAMPVIEW app: rtBufOf( c.name ) calls in vkairlamp.inc + vkairtemporal.inc $n3 (want 2)"
+[ "$n3" = 2 ] || { echo "AIRLAMPVIEW GATE FAILED (the air routes do not ask the RT GI inputs by name)"; exit 1; }
 tail -1 "$OUT/airlampview.txt" | grep -q "AIRLAMPVIEW GATE OK"

@@ -43,6 +43,16 @@
 // image copies 0 (the atlas read in place), buffer copies 2 (the light list and the table). Reds, each must FAIL: gate 2048 a
 // GL-owned atlas (the helper's red 1: the share skipped) bound, named "volLampAtlas"; gate 4096 the atlas rewritten after GL's
 // draw; gate 8192 the table rewritten after GL's draw (tile size 32: read each run). Plus every red of the arms above.
+// Lane VKAIR18 (2026-11-16), arm "rt frame 2 atlas all-on" (appended last; the arms above stay byte-equal): the all-on route
+// (main.cpp kAllOn: RTDDGI 1, RT ultra, so RESTIR on) binds the RT GI's texel buffers, cellDdgiAtlas (RGBA32F) and cellRestir
+// (RG32F), shared by name (vkrtbuf.h rtBufShare + rtBufOwner, as rtddgicell.cpp shares them), plus the atlas of the arm above.
+// Bar (set before the first run, never widened): the rt key's program samples cellRestir (a unit), Vulkan vs GL and the stat
+// as the atlas arm; one run asks rtBufOf once a name (rtBufStat lookups: cellDdgiAtlas +1, cellRestir +1). Reds, each must
+// FAIL: gate 16384 WW_VKVIEW_RTBUF_RED=1 (refusal names "WW_VKVIEW_RTBUF_RED"); gate 32768 the owner's fresh() says false
+// (refusal names its why); gate 65536 a GL-owned RG32F buffer with the same bytes on cellRestir while the slot lives (named
+// "cellRestir"); plus every red of the atlas arm (512: a GL-owned buffer on cellDdgiAtlas). Content: cellRestir is read only
+// under volLeakRed & 4 (cell_lights.hlsli), so the shipped uniforms gate the binding and the refusals, not its values; the
+// "RT GI inputs rewritten" probe line is informative, not a bar. airlampview.sh greps both routes for the rtBufOf call.
 // Last line `AIRLAMPVIEW GATE OK` or `AIRLAMPVIEW GATE FAILED`.
 #define FLD_NO_MAIN
 #include "farloddraw.cpp"
@@ -58,6 +68,8 @@ using namespace fld;
 const int kLvCols = 21, kLvRows = 12, kLvSlices = 64, kLvLive = 50, kLvMask = 128, kLvMaskD = 64, kLvLights = 2, kLvTpl = 8;
 const float kLvSentinel = 7.0f;
 const std::uint16_t kLvSentinelH = 0x4700;	// 7.0 in half
+bool gRtOn = false;	// lane VKAIR18: the all-on arm (its RT GI inputs bound; unbound after each draw)
+bool gRtFresh = true;	// lane VKAIR18: the gate owner's fresh() answer (red 32768: false)
 int gAtlasOn = 0;	// lane VKAIR17: 0: stage4 leaves the atlas uniforms alone (the old arms); 1: volLampVis 1; -1: volLampVis 0
 const GLenum kLvRgba = 0x1908, kLv3d = 0x806F, kLv2da = 0x8C1A, kLvUbyte = 0x1401, kLvHalf = 0x140B, kLvTb = 0x8C2A;
 
@@ -355,7 +367,7 @@ std::string stage4( GLuint p, int histOk, int layer, int frame, std::string * ab
 
 struct Units
 {
-	int now = -1, hist = -1, stbn = -1, lights = -1, ddgi = -1, atlas = -1, table = -1;
+	int now = -1, hist = -1, stbn = -1, lights = -1, ddgi = -1, atlas = -1, table = -1, restir = -1;
 };
 
 std::string setupProg( GLuint p, const char * tag, Units & u )
@@ -394,7 +406,8 @@ std::string setupProg( GLuint p, const char * tag, Units & u )
 			x = unit++;
 		const std::string n( nm );
 		int * slot = n == "volLampNow" ? &u.now : n == "volLampHist" ? &u.hist : n == "volStbn" ? &u.stbn : n == "cellLights" ? &u.lights
-			: n == "cellDdgiAtlas" ? &u.ddgi : n == "volLampAtlas" ? &u.atlas : n == "volLampTable" ? &u.table : nullptr;
+			: n == "cellDdgiAtlas" ? &u.ddgi : n == "volLampAtlas" ? &u.atlas : n == "volLampTable" ? &u.table
+			: n == "cellRestir" ? &u.restir : nullptr;
 		if ( slot )
 			*slot = us[0];
 		f.uniform1iv( f.getUniformLocation( p, nm ), GLsizei( us.size() ), us.data() );
@@ -404,6 +417,7 @@ std::string setupProg( GLuint p, const char * tag, Units & u )
 				 "cellLights %d cellDdgiAtlas %d)\n",
 		tag, nb, seeded, samplers, unit - 1, u.now, u.hist, u.stbn, u.lights, u.ddgi );
 	std::printf( "AIRLAMPVIEW %s: volLampAtlas %d volLampTable %d\n", tag, u.atlas, u.table );
+	std::printf( "AIRLAMPVIEW %s: cellRestir %d\n", tag, u.restir );
 	if ( u.now < 0 || u.hist < 0 || u.stbn < 0 || u.lights < 0 )
 		return "no volLampNow / volLampHist / volStbn / cellLights sampler";
 	// WW_AIR_LEAK = WW_CELL_FOGLEAK && WW_CELL_RTDDGI: only the RT GI key samples the atlas; the default key must not
@@ -643,6 +657,7 @@ int main( int argc, char ** argv )
 	{
 		GLuint now, hist, stbn;
 		GLuint atlas = 0;	// lane VKAIR17: the atlas arm only (then the table too)
+		GLuint ddgi = 0, restir = 0;	// lane VKAIR18: the all-on arm's RT GI inputs (the shared buffers' GL views)
 	};
 	auto bindInputs = [&]( const Units & u, const Bound & b ) {
 		bindUnit( u.now, kLv3d, b.now );
@@ -653,6 +668,10 @@ int main( int argc, char ** argv )
 			bindUnit( u.atlas, GL_TEXTURE_2D, b.atlas );
 			bindUnit( u.table, kLvTb, tableTex );
 		}
+		if ( b.ddgi )
+			bindUnit( u.ddgi, kLvTb, b.ddgi );
+		if ( b.restir )
+			bindUnit( u.restir, kLvTb, b.restir );
 	};
 	auto unbindInputs = [&]( const Units & u ) {
 		bindUnit( u.now, kLv3d, 0 );
@@ -662,6 +681,10 @@ int main( int argc, char ** argv )
 		if ( gAtlasOn != 0 && u.atlas >= 0 ) {
 			bindUnit( u.atlas, GL_TEXTURE_2D, 0 );
 			bindUnit( u.table, kLvTb, 0 );
+		}
+		if ( gRtOn ) {
+			bindUnit( u.ddgi, kLvTb, 0 );
+			bindUnit( u.restir, kLvTb, 0 );
 		}
 	};
 	// GL's stage 4 as vaPassInner draws it (64 layers, MRT 2) into outHist / outNow (the sentinel first)
@@ -704,20 +727,71 @@ int main( int argc, char ** argv )
 	if ( !err.empty() )
 		return fatal( "the history: " + err );
 
+	// lane VKAIR18: the all-on arm's RT GI inputs, shared by name as rtddgicell.cpp shares them (slot, format, owner)
+	constexpr int kRtTexels = 4096;	// cellDdgiAtlas 4096 RGBA32F texels, cellRestir 64 x 64 RG32F
+	GLuint rtBuf[2] = {}, rtTex[2] = {};
+	auto rtData = [&]( int s2, int salt ) {
+		std::vector<float> d( static_cast<size_t>( kRtTexels * ( s2 ? 2 : 4 ) ) );
+		for ( size_t i = 0; i < d.size(); i++ )
+			d[i] = 0.05f + 0.9f * float( ( i * 37 + static_cast<size_t>( salt ) * 11 ) % 97 ) / 97.0f;
+		return d;
+	};
+	auto fillRt = [&]( int salt ) {
+		for ( int s2 = 0; s2 < 2; s2++ ) {
+			const std::vector<float> d = rtData( s2, salt );
+			f.bindBuffer( kLvTb, rtBuf[s2] );
+			ex.bufferSubData( kLvTb, 0, std::ptrdiff_t( d.size() * 4 ), d.data() );
+			f.bindBuffer( kLvTb, 0 );
+		}
+	};
+#ifdef WW_VK_AIRLAMP
+	{
+		std::string why;
+		const unsigned fmt[2] = { unsigned( fRgba32f ), unsigned( fRg32f ) };
+		for ( int s2 = 0; s2 < 2; s2++ )
+			if ( !WwVkPresent::rtBufShare( s2, fmt[s2], static_cast<std::size_t>( kRtTexels ) * ( s2 ? 8u : 16u ), rtBuf[s2], rtTex[s2], why ) )
+				return fatal( std::string( "rtBufShare " ) + WwVkPresent::rtBufName( s2 ) + ": " + why );
+		for ( int s2 = 0; s2 < 2; s2++ )
+			WwVkPresent::rtBufOwner( s2, []( std::string & w ) -> bool {
+				if ( gRtFresh )
+					return true;
+				w = "gate: the owner has nothing new";
+				return false;
+			} );
+		fillRt( 0 );
+		std::printf( "AIRLAMPVIEW all-on inputs shared: cellDdgiAtlas buf %u tex %u, cellRestir buf %u tex %u\n", rtBuf[0], rtTex[0], rtBuf[1],
+			rtTex[1] );
+	}
+#endif
 	struct Arm
 	{
 		int key, histOk;
 		bool atlas = false;	// lane VKAIR17: lamps' shadows from the shared atlas (volLampVis 1), its own history
+		bool allOn = false;	// lane VKAIR18: the all-on route's RT GI inputs bound too (cellDdgiAtlas, cellRestir: shared by name)
 	};
-	const Arm arms[4] = { { 0, 0 }, { 0, 1 }, { 1, 1 }, { 1, 1, true } };	// the atlas arm on the RT GI key (the only one that samples it)
+	const Arm arms[5] = { { 0, 0 }, { 0, 1 }, { 1, 1 }, { 1, 1, true }, { 1, 1, true, true } };	// the atlas arm on the RT GI key (the only one that samples it)
 	int fails = 0, probesDead = 0, redsRun = 0, redsFired = 0;
 	for ( const Arm & a : arms ) {
 		const int key = a.key, hk = a.histOk;
-		const std::string arm = std::string( keyName[key] ) + " frame " + ( hk ? "2" : "1" ) + ( a.atlas ? " atlas" : "" );
+		const std::string arm = std::string( keyName[key] ) + " frame " + ( hk ? "2" : "1" ) + ( a.atlas ? " atlas" : "" ) + ( a.allOn ? " all-on" : "" );
 		const char * an = arm.c_str();
 		if ( a.atlas )
 			gAtlasOn = 1;
-		const Bound b0 { in.now[0], in.hist[0], in.stbn, a.atlas ? atlasTex : 0u };
+		gRtOn = a.allOn;
+		const Bound b0 = [&] {
+			Bound x { in.now[0], in.hist[0], in.stbn, a.atlas ? atlasTex : 0u };
+			if ( a.allOn ) {
+				x.ddgi = rtTex[0];
+				x.restir = rtTex[1];
+			}
+			return x;
+		}();
+		if ( a.allOn ) {
+			const bool unitsOk = units[key].ddgi >= 0 && units[key].restir >= 0 && rtTex[0] && rtTex[1];
+			std::printf( "AIRLAMPVIEW %s units: cellDdgiAtlas %d cellRestir %d, shared views %u %u %s\n", an, units[key].ddgi, units[key].restir,
+				rtTex[0], rtTex[1], unitsOk ? "OK" : "FAIL" );
+			fails += !unitsOk;
+		}
 		const Pair g = glDraw( key, hk, 5, glHist, glNow, b0, err );
 		if ( !err.empty() )
 			return fatal( arm + ": " + err );
@@ -766,6 +840,12 @@ int main( int argc, char ** argv )
 			setTable( kAtTile / 2 );
 			probe( "table rewritten", glDraw( key, hk, 5, glHist, glNow, b0, err ) );
 			setTable( kAtTile );
+		}
+		if ( a.allOn ) {	// informative, not a bar: stage 4 reads cellRestir only under volLeakRed & 4
+			fillRt( 1 );
+			const VolV p = judge( g, glDraw( key, hk, 5, glHist, glNow, b0, err ) );
+			std::printf( "AIRLAMPVIEW %s RT GI inputs rewritten: moved %d of %d (informative)\n", an, p.moved, p.texels );
+			fillRt( 0 );
 		}
 		if ( !err.empty() )
 			return fatal( arm + " (probes): " + err );
@@ -826,9 +906,24 @@ int main( int argc, char ** argv )
 				fails += !bc;
 			}
 		}
+		if ( a.allOn ) {	// one run asks the shared buffers by name once a name
+			const WwVkPresent::RtBufStat s0 = WwVkPresent::rtBufStat();
+			std::string lw;
+			WwVkPresent::AirLampStat ls;
+			Pair lv;
+			const bool ran = vkRun( 0, b0, lw, ls, &lv );
+			const WwVkPresent::RtBufStat s1 = WwVkPresent::rtBufStat();
+			const unsigned long long da = s1.lookups[0] - s0.lookups[0], dr = s1.lookups[1] - s0.lookups[1];
+			const bool ok = ran && da == 1 && dr == 1;
+			std::printf( "AIRLAMPVIEW %s rtBufOf lookups a run: cellDdgiAtlas %llu cellRestir %llu (want 1 and 1) %s%s%s\n", an, da, dr,
+				ok ? "OK" : "FAIL", ran ? "" : " refused: ", ran ? "" : lw.c_str() );
+			fails += !ok;
+		}
 		std::vector<int> redList { 1, 2, 4, 1024, 8, 16, 32, 64, 128, 256, 512 };
 		if ( a.atlas )
 			redList.insert( redList.end(), { 2048, 4096, 8192 } );
+		if ( a.allOn )
+			redList.insert( redList.end(), { 16384, 32768, 65536 } );
 		for ( int red : redList ) {
 			if ( ( red == 8 || red == 16 || red == 256 ) && !hk )
 				continue;	// frame 2 only: frame 1 reads no history
@@ -887,6 +982,26 @@ int main( int argc, char ** argv )
 				fillAtlas( atlasFbo, 2 );
 			if ( red == 8192 )
 				setTable( kAtTile / 2 );
+			// lane VKAIR18 reds: 16384 the rt buffer red, 32768 the owner stale, 65536 a GL-owned cellRestir with the same bytes
+			if ( red == 512 )
+				b.ddgi = 0;	// the red's GL-owned buffer stays on the unit
+			if ( red == 16384 )
+				_putenv( "WW_VKVIEW_RTBUF_RED=1" );
+			if ( red == 32768 )
+				gRtFresh = false;
+			GLuint plainRs = 0, plainRsBuf = 0;
+			if ( red == 65536 ) {
+				const std::vector<float> d = rtData( 1, 0 );
+				f.genBuffers( 1, &plainRsBuf );
+				f.bindBuffer( kLvTb, plainRsBuf );
+				f.bufferData( kLvTb, std::ptrdiff_t( d.size() * 4 ), d.data(), fStatic );
+				f.bindBuffer( kLvTb, 0 );
+				glGenTextures( 1, &plainRs );
+				glBindTexture( kLvTb, plainRs );
+				ex.texBuffer( kLvTb, GLenum( fRg32f ), plainRsBuf );
+				glBindTexture( kLvTb, 0 );
+				b.restir = plainRs;
+			}
 			std::string rw;
 			WwVkPresent::AirLampStat rs;
 			Pair rv;
@@ -909,10 +1024,17 @@ int main( int argc, char ** argv )
 				fillAtlas( atlasFbo, 1 );
 			if ( red == 8192 )
 				setTable( kAtTile );
+			if ( red == 16384 )
+				_putenv( "WW_VKVIEW_RTBUF_RED=0" );
+			if ( red == 32768 )
+				gRtFresh = true;
+			if ( plainRs )
+				glDeleteTextures( 1, &plainRs );	// its buffer lives on (the gate's GL table has no glDeleteBuffers)
 			bool fired = false;
 			VolV jv;
 			const char * name = red == 32 ? "key" : red == 64 ? "feedback" : red == 128 ? "volStbn" : red == 256 ? "volLampHist"
-				: red == 512 ? "cellDdgiAtlas" : red == 2048 ? "volLampAtlas" : nullptr;
+				: red == 512 ? "cellDdgiAtlas" : red == 2048 ? "volLampAtlas" : red == 16384 ? "WW_VKVIEW_RTBUF_RED"
+				: red == 32768 ? "gate: the owner has nothing new" : red == 65536 ? "cellRestir" : nullptr;
 			if ( name )
 				fired = !ran && rw.find( name ) != std::string::npos;
 			else if ( ran ) {
@@ -938,6 +1060,12 @@ int main( int argc, char ** argv )
 		if ( !err.empty() )
 			return fatal( arm + " (reds): " + err );
 	}
+#ifdef WW_VK_AIRLAMP
+	for ( int s2 = 0; s2 < 2; s2++ ) {	// lane VKAIR18: the gate's owner gone
+		WwVkPresent::rtBufOwner( s2, nullptr );
+		WwVkPresent::rtBufDrop( s2 );
+	}
+#endif
 	std::printf( "AIRLAMPVIEW GL: %d fails, %d probes TESTS NOTHING\n", fails, probesDead );
 #ifdef WW_VK_AIRLAMP
 	const bool ok = fails == 0 && probesDead == 0 && redsRun > 0 && redsFired == redsRun;

@@ -45,6 +45,15 @@
 // check (shared, FBO complete, farSharedOf == the key); Vulkan vs GL and the stat as the other arms (0 image copies); every red
 // and probe of the arms above; red gate 2048 a GL-owned atlas (the helper's red 1: the share skipped) bound: must REFUSE, named
 // "volLampAtlas".
+// Lane VKAIR18 (2026-11-16), arm "rt strata 6 temporal 1 atlas all-on" (appended last; the arms above stay byte-equal): the
+// all-on route (main.cpp kAllOn: RTDDGI 1, RT ultra, so RESTIR on) binds cellDdgiAtlas (RGBA32F) and cellRestir (RG32F), the
+// RT GI's texel buffers shared by name (vkrtbuf.h rtBufShare + rtBufOwner, as rtddgicell.cpp shares them), with the atlas.
+// Bar (set before the first run, never widened): the rt key's program samples cellRestir (a unit); Vulkan vs GL and the stat
+// as the atlas arm; one run asks rtBufOf once a name (rtBufStat lookups +1 each). Reds, each must FAIL: gate 16384
+// WW_VKVIEW_RTBUF_RED=1 (named "WW_VKVIEW_RTBUF_RED"); gate 32768 the owner's fresh() false (its why named); gate 65536 a GL-owned
+// RG32F buffer with the same bytes on cellRestir while the slot lives (named "cellRestir"); plus every red above (512 included).
+// Content: stage 1 reads cellRestir only under volLeakRed & 4: the shipped uniforms gate the binding and the refusals; the
+// "RT GI inputs rewritten" line is informative, not a bar. airtemporalview.sh greps both routes for the rtBufOf call.
 // Last line `AIRTEMPORALVIEW GATE OK` or `AIRTEMPORALVIEW GATE FAILED`.
 #define FLD_NO_MAIN
 #include "farloddraw.cpp"
@@ -110,6 +119,7 @@ struct GateFn
 	GLenum glCheckFramebufferStatus( GLenum a ) { return f.checkFramebufferStatus( a ); }
 };
 GateFn gfn;
+bool gRtFresh = true;	// lane VKAIR18: the gate owner's fresh() answer (red 32768: false)
 int gAtlasOn = 0;	// lane VKAIR17: 1 = stage1 sets the atlas uniforms (the atlas arm)
 char gAtlasKey, gAtlasPlainKey;
 
@@ -370,7 +380,7 @@ std::string stage1( GLuint p, int temporal, int ns, int layer, std::string * abs
 
 struct Units
 {
-	int hist = -1, lampNow = -1, noise = -1, terr = -1, tile = -1, ddgi = -1, atlas = -1, table = -1;
+	int hist = -1, lampNow = -1, noise = -1, terr = -1, tile = -1, ddgi = -1, atlas = -1, table = -1, restir = -1;
 };
 
 //! blocks bound zero, loose uniforms seeded, samplers on their own units (nothing bound); the stage's units back
@@ -410,7 +420,8 @@ std::string setupProg( GLuint p, const char * tag, Units & u )
 			x = unit++;
 		const std::string n( nm );
 		int * slot = n == "volHist" ? &u.hist : n == "volLampNow" ? &u.lampNow : n == "volNoise" ? &u.noise : n == "airTerr" ? &u.terr
-			: n == "volTile" ? &u.tile : n == "cellDdgiAtlas" ? &u.ddgi : n == "volLampAtlas" ? &u.atlas : n == "volLampTable" ? &u.table : nullptr;
+			: n == "volTile" ? &u.tile : n == "cellDdgiAtlas" ? &u.ddgi : n == "volLampAtlas" ? &u.atlas : n == "volLampTable" ? &u.table
+			: n == "cellRestir" ? &u.restir : nullptr;
 		if ( slot )
 			*slot = us[0];
 		f.uniform1iv( f.getUniformLocation( p, nm ), GLsizei( us.size() ), us.data() );
@@ -423,6 +434,7 @@ std::string setupProg( GLuint p, const char * tag, Units & u )
 		return "no volHist / volLampNow / volNoise / airTerr sampler";
 	// lane VKAIR17: WW_AIR_LEAK = WW_CELL_FOGLEAK && WW_CELL_RTDDGI: only the RT GI key samples the atlas; the default key must not
 	std::printf( "AIRTEMPORALVIEW %s: volLampAtlas %d volLampTable %d\n", tag, u.atlas, u.table );
+	std::printf( "AIRTEMPORALVIEW %s: cellRestir %d\n", tag, u.restir );
 	const bool rtKey = std::string( tag ) == "rt";
 	if ( rtKey && ( u.atlas < 0 || u.table < 0 ) )
 		return "no volLampAtlas / volLampTable sampler";
@@ -545,6 +557,7 @@ int main( int argc, char ** argv )
 		glBindTexture( 0x8C2A, 0 );
 	}
 	GLuint boundAtlas = 0;	// the atlas arm: bound with the table on the program's units
+	GLuint boundDdgi = 0, boundRestir = 0;	// lane VKAIR18: the all-on arm's RT GI inputs (the shared buffers' GL views)
 	GLuint fb = 0;
 	f.genFramebuffers( 1, &fb );
 	GLuint vao = 0, vb = 0, ib = 0;
@@ -590,6 +603,10 @@ int main( int argc, char ** argv )
 			bindUnit( u.atlas, GL_TEXTURE_2D, boundAtlas );
 			bindUnit( u.table, 0x8C2A, tableTex );
 		}
+		if ( boundDdgi )
+			bindUnit( u.ddgi, 0x8C2A, boundDdgi );
+		if ( boundRestir )
+			bindUnit( u.restir, 0x8C2A, boundRestir );
 	};
 	auto unbindInputs = [&]( const Units & u ) {
 		bindUnit( u.hist, kAt3d, 0 );
@@ -601,6 +618,10 @@ int main( int argc, char ** argv )
 		if ( boundAtlas && u.atlas >= 0 ) {
 			bindUnit( u.atlas, GL_TEXTURE_2D, 0 );
 			bindUnit( u.table, 0x8C2A, 0 );
+		}
+		if ( boundDdgi || boundRestir ) {
+			bindUnit( u.ddgi, 0x8C2A, 0 );
+			bindUnit( u.restir, 0x8C2A, 0 );
 		}
 	};
 
@@ -636,19 +657,65 @@ int main( int argc, char ** argv )
 		return Pair { readVol( glInj, kAtSlices ), readVol( out, ns * kAtSlices ) };
 	};
 
+	// lane VKAIR18: the all-on arm's RT GI inputs, shared by name as rtddgicell.cpp shares them (slot, format, owner)
+	constexpr int kRtTexels = 4096;	// cellDdgiAtlas 4096 RGBA32F texels, cellRestir 64 x 64 RG32F
+	GLuint rtBuf[2] = {}, rtTex[2] = {};
+	auto rtData = [&]( int s2, int salt ) {
+		std::vector<float> d( static_cast<size_t>( kRtTexels * ( s2 ? 2 : 4 ) ) );
+		for ( size_t i = 0; i < d.size(); i++ )
+			d[i] = 0.05f + 0.9f * float( ( i * 37 + static_cast<size_t>( salt ) * 11 ) % 97 ) / 97.0f;
+		return d;
+	};
+	auto fillRt = [&]( int salt ) {
+		for ( int s2 = 0; s2 < 2; s2++ ) {
+			const std::vector<float> d = rtData( s2, salt );
+			f.bindBuffer( 0x8C2A, rtBuf[s2] );
+			ex.bufferSubData( 0x8C2A, 0, std::ptrdiff_t( d.size() * 4 ), d.data() );
+			f.bindBuffer( 0x8C2A, 0 );
+		}
+	};
+#ifdef WW_VK_AIRTEMPORAL
+	{
+		std::string why;
+		const unsigned fmt[2] = { unsigned( fRgba32f ), unsigned( fRg32f ) };
+		for ( int s2 = 0; s2 < 2; s2++ )
+			if ( !WwVkPresent::rtBufShare( s2, fmt[s2], static_cast<std::size_t>( kRtTexels ) * ( s2 ? 8u : 16u ), rtBuf[s2], rtTex[s2], why ) )
+				return fatal( std::string( "rtBufShare " ) + WwVkPresent::rtBufName( s2 ) + ": " + why );
+		for ( int s2 = 0; s2 < 2; s2++ )
+			WwVkPresent::rtBufOwner( s2, []( std::string & w ) -> bool {
+				if ( gRtFresh )
+					return true;
+				w = "gate: the owner has nothing new";
+				return false;
+			} );
+		fillRt( 0 );
+		std::printf( "AIRTEMPORALVIEW all-on inputs shared: cellDdgiAtlas buf %u tex %u, cellRestir buf %u tex %u\n", rtBuf[0], rtTex[0],
+			rtBuf[1], rtTex[1] );
+	}
+#endif
 	struct Arm
 	{
 		int key, ns, temporal;
 		bool atlas = false;	// lane VKAIR17: the atlas and its table bound (the RT GI key)
+		bool allOn = false;	// lane VKAIR18: the all-on route's RT GI inputs bound too (cellDdgiAtlas, cellRestir: shared by name)
 	};
-	const Arm arms[4] = { { 0, 6, 1 }, { 1, 6, 1 }, { 0, 4, 2 }, { 1, 6, 1, true } };
+	const Arm arms[5] = { { 0, 6, 1 }, { 1, 6, 1 }, { 0, 4, 2 }, { 1, 6, 1, true }, { 1, 6, 1, true, true } };
 	int fails = 0, probesDead = 0, redsRun = 0, redsFired = 0;
 	for ( const Arm & a : arms ) {
 		const int key = a.key, ns = a.ns, tm = a.temporal;
-		const std::string arm = std::string( keyName[key] ) + " strata " + std::to_string( ns ) + " temporal " + std::to_string( tm ) + ( a.atlas ? " atlas" : "" );
+		const std::string arm = std::string( keyName[key] ) + " strata " + std::to_string( ns ) + " temporal " + std::to_string( tm ) + ( a.atlas ? " atlas" : "" )
+			+ ( a.allOn ? " all-on" : "" );
 		const char * an = arm.c_str();
 		gAtlasOn = a.atlas ? 1 : 0;
 		boundAtlas = a.atlas ? atlasTex : 0;
+		boundDdgi = a.allOn ? rtTex[0] : 0;
+		boundRestir = a.allOn ? rtTex[1] : 0;
+		if ( a.allOn ) {
+			const bool unitsOk = units[key].ddgi >= 0 && units[key].restir >= 0 && rtTex[0] && rtTex[1];
+			std::printf( "AIRTEMPORALVIEW %s units: cellDdgiAtlas %d cellRestir %d, shared views %u %u %s\n", an, units[key].ddgi,
+				units[key].restir, rtTex[0], rtTex[1], unitsOk ? "OK" : "FAIL" );
+			fails += !unitsOk;
+		}
 		ensureInputs( in, ns, true, true );
 		std::printf( "AIRTEMPORALVIEW %s inputs shared: histA %d histB %d lampNow %d noise %d terr %d\n", an, int( in.sA.shared ), int( in.sB.shared ),
 			int( in.sL.shared ), int( in.sN.shared ), int( in.sT.shared ) );
@@ -692,6 +759,12 @@ int main( int argc, char ** argv )
 		fillTerr( in.terr, 2 );
 		probe( "airTerr rewritten", glRun( key, tm, ns, in.histA, err ) );
 		fillTerr( in.terr, 1 );
+		if ( a.allOn ) {	// informative, not a bar: stage 1 reads cellRestir only under volLeakRed & 4
+			fillRt( 1 );
+			const VolV p = judge( g, glRun( key, tm, ns, in.histA, err ) );
+			std::printf( "AIRTEMPORALVIEW %s RT GI inputs rewritten: moved %d of %d (informative)\n", an, p.moved, p.texels );
+			fillRt( 0 );
+		}
 		if ( !err.empty() )
 			return fatal( arm + " (probes): " + err );
 
@@ -747,9 +820,24 @@ int main( int argc, char ** argv )
 				st.draws, st.copies, st.bufCopies, kAtSlices, cp ? "OK" : "FAIL" );
 			fails += !cp;
 		}
+		if ( a.allOn ) {	// one run asks the shared buffers by name once a name
+			const WwVkPresent::RtBufStat s0 = WwVkPresent::rtBufStat();
+			std::string lw;
+			WwVkPresent::AirTemporalStat ls;
+			Pair lv;
+			const bool ran = vkRun( 0, in.histA, lw, ls, &lv );
+			const WwVkPresent::RtBufStat s1 = WwVkPresent::rtBufStat();
+			const unsigned long long da = s1.lookups[0] - s0.lookups[0], dr = s1.lookups[1] - s0.lookups[1];
+			const bool ok = ran && da == 1 && dr == 1;
+			std::printf( "AIRTEMPORALVIEW %s rtBufOf lookups a run: cellDdgiAtlas %llu cellRestir %llu (want 1 and 1) %s%s%s\n", an, da, dr,
+				ok ? "OK" : "FAIL", ran ? "" : " refused: ", ran ? "" : lw.c_str() );
+			fails += !ok;
+		}
 		std::vector<int> redList { 1, 2, 4, 8, 16, 128, 32, 64, 256, 512 };
 		if ( a.atlas )
 			redList.push_back( 2048 );
+		if ( a.allOn )
+			redList.insert( redList.end(), { 16384, 32768, 65536 } );
 		for ( int red : redList ) {
 			if ( red == 512 && ( key != 1 || units[key].ddgi < 0 ) )
 				continue;  // the RT GI arm only (the default program has no cellDdgiAtlas)
@@ -793,6 +881,27 @@ int main( int argc, char ** argv )
 				glBindTexture( 0x8C2A, 0 );
 			}
 			const GLuint hist = red == 4 ? in.histB : red == 256 ? plain : in.histA;
+			// lane VKAIR18 reds: 16384 the rt buffer red, 32768 the owner stale, 65536 a GL-owned cellRestir with the same bytes
+			const GLuint keepDdgi = boundDdgi, keepRestir = boundRestir;
+			if ( red == 512 && boundDdgi )
+				boundDdgi = 0;	// the red's GL-owned buffer stays on the unit
+			if ( red == 16384 )
+				_putenv( "WW_VKVIEW_RTBUF_RED=1" );
+			if ( red == 32768 )
+				gRtFresh = false;
+			GLuint plainRs = 0, plainRsBuf = 0;
+			if ( red == 65536 ) {
+				const std::vector<float> d = rtData( 1, 0 );
+				f.genBuffers( 1, &plainRsBuf );
+				f.bindBuffer( 0x8C2A, plainRsBuf );
+				f.bufferData( 0x8C2A, std::ptrdiff_t( d.size() * 4 ), d.data(), fStatic );
+				f.bindBuffer( 0x8C2A, 0 );
+				glGenTextures( 1, &plainRs );
+				glBindTexture( 0x8C2A, plainRs );
+				ex.texBuffer( 0x8C2A, GLenum( fRg32f ), plainRsBuf );
+				glBindTexture( 0x8C2A, 0 );
+				boundRestir = plainRs;
+			}
 			std::string rw;
 			WwVkPresent::AirTemporalStat rs;
 			Pair rv;
@@ -815,6 +924,14 @@ int main( int argc, char ** argv )
 				boundAtlas = atlasTex;
 				airAtlasRelease( &gfn, plainKey, plainAt, plainFbo, plainSh );
 			}
+			boundDdgi = keepDdgi;
+			boundRestir = keepRestir;
+			if ( red == 16384 )
+				_putenv( "WW_VKVIEW_RTBUF_RED=0" );
+			if ( red == 32768 )
+				gRtFresh = true;
+			if ( plainRs )
+				glDeleteTextures( 1, &plainRs );	// its buffer lives on (no glDeleteBuffers loaded)
 			bool fired = false;
 			VolV jv;
 			if ( red == 2048 )
@@ -827,6 +944,12 @@ int main( int argc, char ** argv )
 				fired = !ran && rw.find( "volHist" ) != std::string::npos;
 			else if ( red == 512 )
 				fired = !ran && rw.find( "cellDdgiAtlas" ) != std::string::npos;
+			else if ( red == 16384 )
+				fired = !ran && rw.find( "WW_VKVIEW_RTBUF_RED" ) != std::string::npos;
+			else if ( red == 32768 )
+				fired = !ran && rw.find( "gate: the owner has nothing new" ) != std::string::npos;
+			else if ( red == 65536 )
+				fired = !ran && rw.find( "cellRestir" ) != std::string::npos;
 			else if ( ran ) {
 				jv = judge( g, rv );
 				fired = !jv.ok();
@@ -861,6 +984,12 @@ int main( int argc, char ** argv )
 		( void )vkOut;
 #endif
 	}
+#ifdef WW_VK_AIRTEMPORAL
+	for ( int s2 = 0; s2 < 2; s2++ ) {	// lane VKAIR18: the gate's owner gone
+		WwVkPresent::rtBufOwner( s2, nullptr );
+		WwVkPresent::rtBufDrop( s2 );
+	}
+#endif
 	std::printf( "AIRTEMPORALVIEW GL: %d fails, %d probes TESTS NOTHING\n", fails, probesDead );
 #ifdef WW_VK_AIRTEMPORAL
 	const bool ok = fails == 0 && probesDead == 0 && redsRun > 0 && redsFired == redsRun;
