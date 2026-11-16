@@ -1912,11 +1912,14 @@ static VaAiSay & vaAlSay()
 static void vaAlSayLine( bool wanted )
 {
 	VaAiSay & A = vaAlSay();
-	const bool red = qEnvironmentVariableIntValue( "WW_VKVIEW_AIRLAMP_RED" ) == 1;
+	const bool redLamp = qEnvironmentVariableIntValue( "WW_VKVIEW_AIRLAMP_RED" ) == 1;
+	const bool redTemporal = qEnvironmentVariableIntValue( "WW_VKVIEW_AIRTEMPORAL_RED" ) == 1;	// s4Share needs stage 1's shares
+	const bool red = redLamp || redTemporal;
 	if ( !wanted ) {
 		const QString line = QStringLiteral( "vk airlamp: on GL (%1)%2" )
 			.arg( red ? QStringLiteral( "red" ) : QStringLiteral( "the view not on Vulkan" ) )
-			.arg( red ? QStringLiteral( " [RED WW_VKVIEW_AIRLAMP_RED=1]" ) : QString() );
+			.arg( redLamp ? QStringLiteral( " [RED WW_VKVIEW_AIRLAMP_RED=1]" )
+				: redTemporal ? QStringLiteral( " [RED WW_VKVIEW_AIRTEMPORAL_RED=1]" ) : QString() );
 		if ( line != A.said ) {
 			A.said = line;
 			qInfo().noquote() << line;
