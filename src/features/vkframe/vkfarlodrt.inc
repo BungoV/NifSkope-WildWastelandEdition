@@ -91,6 +91,22 @@ bool farLodRtRun( const WaterRun & r, int v, std::string & why )
 		why = "no far LOD RT twin " + std::to_string( v ) + " (1 RT, 2 DG)";
 		return false;
 	}
+	/* lane VKFAR27: cellGiHalf / cellGiHalfKey are GL's own (not shared): while GL's program reads them (cellGiHalfOn 1, set per
+	 * mesh by wwCellAoDraw whenever the half-rate screen GI ran) the draw stays on GL, by name */
+	const FxField * fs = v == 2 ? kT_farlodDgPs : kT_farlodRtPs;
+	const int nf = v == 2 ? int( sizeof( kT_farlodDgPs ) / sizeof( kT_farlodDgPs[0] ) ) : int( sizeof( kT_farlodRtPs ) / sizeof( kT_farlodRtPs[0] ) );
+	for ( int i = 0; i < nf; i++ )
+		if ( std::strcmp( fs[i].name, "cellGiHalfOn" ) == 0 ) {
+			std::int32_t on = 0;
+			if ( fs[i].offset + 4 <= r.psBytes )
+				std::memcpy( &on, r.psLoose + fs[i].offset, 4 );
+			if ( on != 0 ) {
+				FxStat & S = farlod::farLodRtOf( v ).st;
+				S.fails++;
+				S.failWhy = why = "cellGiHalfOn 1: cellGiHalf / cellGiHalfKey are not shared (GL's half-rate screen GI)";
+				return false;
+			}
+		}
 	return farlodrun::twinRun( farlod::farLodRtOf( v ), farlod::farLodRtSpecOf( v ), r, why );
 }
 

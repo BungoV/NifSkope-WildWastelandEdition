@@ -1834,12 +1834,29 @@ using farlod::kTwinBatchMax;  // lane VKFAR4: twinRunN's batch cap
 
 /* lane VKFAR26: one texel-buffer input of a rings / far-ground twin (farStream, cellLights, cellRestir, cellDdgiAtlas...): GL's
  * data store copied into the keyed far-card twin every run, or a 16-byte zero one where GL binds none. The one place a shared
- * GL -> Vulkan texel-buffer lookup (lane VKBUF1) replaces the copy. red 32: the copy 64 bytes late. false: why */
-bool twinTexelIn( std::uintptr_t key, const char * nm, const WaterSlot * s, int red, unsigned & tb, std::string & why )
+ * GL -> Vulkan texel-buffer lookup (lane VKBUF1) replaces the copy. red 32: the copy 64 bytes late. false: why
+ * lane VKFAR27: a bound cellRestir / cellDdgiAtlas is read in place (rtBufOf), only when GL binds that shared buffer */
+bool twinTexelIn( std::uintptr_t key, const char * nm, const WaterSlot * s, int red, unsigned & tb, VkBufferView & view, std::string & why )
 {
 	const bool bound = s && s->tex && s->dataBuf && s->bufBytes > 0;
 	unsigned tt = 0;
 	tb = 0;
+	view = VK_NULL_HANDLE;
+	if ( bound && WwVkPresent::rtBufSlotOf( nm ) >= 0 ) {
+		WwVkPresent::RtBuf rb;
+		std::string w;
+		if ( !WwVkPresent::rtBufOf( nm, rb, w ) ) {
+			why = "not on the present device: " + w;
+			return false;
+		}
+		if ( rb.glBuf != s->dataBuf ) {
+			why = "GL binds its own buffer, not the shared one";
+			return false;
+		}
+		tb = rb.glBuf;
+		view = reinterpret_cast<VkBufferView>( rb.view );
+		return true;
+	}
 	const unsigned zeroFmt = std::strcmp( nm, "cellCluster" ) == 0 ? 0x8D82u : 0x8814u;  // Buffer<int4>: RGBA32I
 	if ( !farTexelBuffer( key, bound ? s->glFmt : zeroFmt, bound ? std::size_t( s->bufBytes ) : 16u, tb, tt, why ) )
 		return false;
@@ -1847,6 +1864,7 @@ bool twinTexelIn( std::uintptr_t key, const char * nm, const WaterSlot * s, int 
 		const std::intptr_t skip = ( red & 32 ) && s->bufBytes > 64 ? 64 : 0;
 		gl().copyNamedBufferSubData( s->dataBuf, tb, skip, 0, std::intptr_t( s->bufBytes ) - skip );
 	}
+	view = farCards().bufs[key].view;
 	return true;
 }
 
@@ -2056,10 +2074,9 @@ static bool twinRun( WaterDraw & D, const TwinSpec & P, const WaterRun & r, std:
 			const std::uintptr_t key = r.key + b.binding;
 			if ( b.kind == 2 ) {  // a texel buffer (farStream, cellRestir...): GL's data store into the twin, or a zero one (VKFAR26)
 				unsigned tb = 0;
-				if ( !twinTexelIn( key, nm, s, r.red, tb, w ) )
+				if ( !twinTexelIn( key, nm, s, r.red, tb, tv[i], w ) )
 					return refuse( std::string( nm ) + ": " + w );
 				bufNames.push_back( tb );
-				tv[i] = farCards().bufs[key].view;
 				x.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
 				x.pTexelBufferView = &tv[i];
 				ws.push_back( x );
@@ -2501,10 +2518,9 @@ static bool twinRunN( WaterDraw & D, const TwinSpec & P, const WaterRun * const 
 		const std::uintptr_t key = r0.key + b.binding;
 		if ( b.kind == 2 ) {  // a texel buffer (farStream, cellRestir...): GL's data store into the twin, or a zero one (VKFAR26)
 			unsigned tb = 0;
-			if ( !twinTexelIn( key, nm, s, r0.red, tb, w ) )
+			if ( !twinTexelIn( key, nm, s, r0.red, tb, tv[i], w ) )
 				return refuse( std::string( nm ) + ": " + w );
 			bufNames.push_back( tb );
-			tv[i] = farCards().bufs[key].view;
 			ty[i] = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
 			continue;
 		}
