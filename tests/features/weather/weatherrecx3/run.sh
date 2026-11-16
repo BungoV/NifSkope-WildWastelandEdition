@@ -11,8 +11,10 @@ set -u
 H="$(cd "$(dirname "$0")" && pwd)"
 TREE="$(cd "$H/../../../.." && pwd)"
 WK="$1"
-ORIG="${2:-E:/.trash/2026-11-14/weatherrecx2_ship}"
-REGEN="${3:-E:/.trash/2026-11-14/weatherrecx3_before/Weathers}"
+# BATCH1121: the trash copies are gone; the fixtures were rebuilt (notes/batch1121/fixtures/weatherrecx3: before = 220 of 220
+# files byte-equal to notes/weatherrecx3/before_sha256.txt; ship = weathergen.py @5c5e0e25, value-equal to WEATHERRECX2's diff)
+ORIG="${2:-E:/Projects/Claude/notes/batch1121/fixtures/weatherrecx3/weatherrecx2_ship}"
+REGEN="${3:-E:/Projects/Claude/notes/batch1121/fixtures/weatherrecx3/weatherrecx3_before/Weathers}"
 SHIP="${4:-E:/Projects/Fallout 4 Mods/mods/Fusion Shaders - Assets/Plugins/Fusion Shaders - Assets/Weathers}"
 LIST=E:/Projects/Claude/notes/weatherrecx1/wthr_list.json
 mkdir -p "$WK/old" "$WK/noflat"
