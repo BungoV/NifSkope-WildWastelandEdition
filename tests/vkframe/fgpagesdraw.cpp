@@ -8,8 +8,8 @@
 // fgPagesN / fgPagesF BC1 (0x83F0) 2D arrays (256 / 128 px, 3 layers, mips to 4 px, LINEAR_MIPMAP_LINEAR, CLAMP, anisotropy
 // 8) of one smooth field a layer, its 2x2-box mip chain, each level BC1-encoded (never random blocks). fgGridMap puts the
 // cell corner (5000, 7400) inside the fixture's world square: on screen a near cell, a far cell, a cell with no page (the
-// sheet) and a near cell faded 140 / 255 over the sheet. fgCells is a shared target as on the view (GL on it vs GL on a plain
-// twin must be EXACT; the plain-twin run copies exactly one more image); the pools are copied a run until they are shared.
+// sheet) and a near cell faded 140 / 255 over the sheet. fgCells is a shared target and the pools far twins, as on the view
+// (lane VKGROUND5; GL on them vs GL on plain twins must be EXACT; the plain-twin run copies exactly three more images).
 // GL probes (each must move >= 1 sample, seed 1): the near pool rewritten, the far pool rewritten, the no-page cell given a
 // page, the faded cell at full fade (each part of the fixture is on screen and read).
 // One seeded world with fargrounddraw (two programs, one world): where mode 1's sampler list had fgAtlas, fgDecal, fgGrid,
@@ -601,43 +601,31 @@ int main( int argc, char ** argv )
 			compSub3( 0x8C1A, l, 0, 0, 0, s.w >> l, s.h >> l, s.d, 0x83F0, GLsizei( lv[size_t( l )].size() ), lv[size_t( l )].data() );
 		glBindTexture( 0x8C1A, 0 );
 	};
-	for ( const int ix : { iPagesN, iPagesF } ) {	// the pools as allocPool makes them (BC1, mips to 4 px, clamped, anisotropy 8)
-		Smp & s = smp[size_t( ix )];
-		glGenTextures( 1, &s.tex );
-		glBindTexture( 0x8C1A, s.tex );
-		ex.texStorage3D( 0x8C1A, s.levels, s.fmt, s.w, s.h, s.d );
-		glTexParameteri( 0x8C1A, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
-		glTexParameteri( 0x8C1A, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
-		glTexParameteri( 0x8C1A, GL_TEXTURE_WRAP_S, 0x812F );
-		glTexParameteri( 0x8C1A, GL_TEXTURE_WRAP_T, 0x812F );
-		glTexParameteri( 0x8C1A, fMaxLevel, s.levels - 1 );
-		glTexParameterf( 0x8C1A, 0x84FE /* GL_TEXTURE_MAX_ANISOTROPY */, 8.0f );
-		glBindTexture( 0x8C1A, 0 );
-	}
-	if ( glGetError() != GL_NO_ERROR )
-		return fatal( "the BC1 page pools" );
-
 	static char twinKeys[192];
 	bool gateOk = true;
 	int runs = 0;
-	// fgCells on the present device (sharedTarget: the twin reads it in place, no copy a run); a plain GL twin of the same
-	// contents for the GL-vs-GL check and the copy count. The pools stay plain (copied a run) until they are shared
+	/* lane VKGROUND5: all three of mode 2's inputs on the present device as cellfarground.cpp makes them while the view draws
+	 * mode 2: fgCells by sharedTarget (slot 3), the pools as far twins (slots 4 / 5, allocPoolIn: BC1, mips to 4 px,
+	 * LINEAR_MIPMAP_LINEAR, clamped, anisotropy 8). The twin reads them in place (no copy a run); plain GL twins of the same
+	 * contents give the GL-vs-GL check and the copy count (the plain run copies exactly kSh more) */
 	using CopyImg = void( WINAPI * )( GLuint, GLenum, GLint, GLint, GLint, GLint, GLuint, GLenum, GLint, GLint, GLint, GLint, GLsizei,
 		GLsizei, GLsizei );
 	const auto copyImg = reinterpret_cast<CopyImg>( wglGetProcAddress( "glCopyImageSubData" ) );
 	if ( !copyImg )
 		return fatal( "glCopyImageSubData" );
-	constexpr int kSh = 1;
+	constexpr int kSh = 3;
 	static char sharedKeys[kSh];
-	const int iShared[kSh] = { iCells };
+	const int iShared[kSh] = { iCells, iPagesN, iPagesF };
 	GLuint plain[kSh] = {};
 	for ( int k = 0; k < kSh; k++ ) {
 		Smp & s = smp[size_t( iShared[k] )];
 		const unsigned tg = targetOf( s.kind );
+		const bool pool = k > 0;
+		const std::uintptr_t key = reinterpret_cast<std::uintptr_t>( sharedKeys + k );
 		unsigned t = 0;
-		if ( !WwVkPresent::sharedTarget( reinterpret_cast<std::uintptr_t>( sharedKeys + k ), s.kind == 2 ? 2 : 0, s.w, s.h, s.d, s.fmt, t,
-				why, s.levels ) )
-			return fatal( "sharedTarget " + s.name + ": " + why );
+		if ( pool ? !WwVkPresent::farTwin( key, 2, s.w, s.h, s.d, s.fmt, t, why, s.levels )
+			: !WwVkPresent::sharedTarget( key, s.kind == 2 ? 2 : 0, s.w, s.h, s.d, s.fmt, t, why, s.levels ) )
+			return fatal( std::string( pool ? "farTwin " : "sharedTarget " ) + s.name + ": " + why );
 		s.tex = t;
 		glGenTextures( 1, &plain[k] );
 		for ( const GLuint x : { GLuint( t ), plain[k] } ) {
@@ -648,14 +636,19 @@ int main( int argc, char ** argv )
 				else
 					ex.texStorage3D( tg, s.levels, s.fmt, s.w, s.h, s.d );
 			}
-			glTexParameteri( tg, GL_TEXTURE_MIN_FILTER, GL_NEAREST );	// the cells: nearest, clamped (tex2D's)
-			glTexParameteri( tg, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+			glTexParameteri( tg, GL_TEXTURE_MIN_FILTER, pool ? GL_LINEAR_MIPMAP_LINEAR : GL_NEAREST );	// cells: tex2D's nearest
+			glTexParameteri( tg, GL_TEXTURE_MAG_FILTER, pool ? GL_LINEAR : GL_NEAREST );
 			glTexParameteri( tg, GL_TEXTURE_WRAP_S, 0x812F );
 			glTexParameteri( tg, GL_TEXTURE_WRAP_T, 0x812F );
 			glTexParameteri( tg, fMaxLevel, s.levels - 1 );
+			if ( pool )
+				glTexParameterf( tg, 0x84FE /* GL_TEXTURE_MAX_ANISOTROPY */, 8.0f );
 		}
 		glBindTexture( tg, 0 );
 	}
+	if ( glGetError() != GL_NO_ERROR )
+		return fatal( "the shared cell table / BC1 page pools" );
+	std::printf( "FGPAGESDRAW shared %d inputs on the present device: fgCells (sharedTarget), fgPagesN, fgPagesF (far twins)\n", kSh );
 	auto toPlain = [&]() {	// the shared contents into the plain twins, every level
 		for ( int k = 0; k < kSh; k++ ) {
 			const Smp & s = smp[size_t( iShared[k] )];
@@ -950,10 +943,11 @@ int main( int argc, char ** argv )
 				std::printf( "; in no mask %zu (GL covered %zu)\n", rest, cov );
 			}
 		}
-		if ( seed == 1 ) {	// the shared input never copied: exactly one copy fewer a run than on the plain twin
-			const bool fewer = copiesShared >= 0 && copiesPlain - copiesShared == 1;
-			std::printf( "FGPAGESDRAW seed 1 copies a run: %d on the shared inputs, %d on plain ones (%s)\n", copiesShared, copiesPlain,
-				fewer ? "fgCells read in place" : "NOT one fewer" );
+		if ( seed == 1 ) {	// the shared inputs never copied: exactly kSh copies fewer a run than on the plain twins
+			const bool fewer = copiesShared >= 0 && copiesPlain - copiesShared == kSh;
+			std::printf( "FGPAGESDRAW seed 1 copies a run: %d on the shared inputs, %d on plain ones, %d fewer of %d shared (%s)\n",
+				copiesShared, copiesPlain, copiesPlain - copiesShared, kSh,
+				fewer ? "fgCells, fgPagesN, fgPagesF read in place" : "NOT the shared count fewer" );
 			gateOk = gateOk && fewer;
 		}
 	}
