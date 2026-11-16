@@ -433,6 +433,7 @@ bool airTemporalRunState( const AirTemporalRun & r, WaterRun & s, std::string & 
 			+ std::to_string( r.strata * r.slices ) );
 	const GLuint injTex = inj->tex, outTex = out->tex;
 	// the inputs refused by name, before any device work
+	std::vector<std::pair<GLuint, WwVkPresent::RtBuf>> rtIn;  // lane VKAIR18: the RT GI inputs found by name, read in place below
 	const WaterSlot * hist = nullptr;
 	for ( const WaterSlot & c : s.census.inputs ) {
 		if ( c.name == "volHist" )
@@ -441,8 +442,15 @@ bool airTemporalRunState( const AirTemporalRun & r, WaterRun & s, std::string & 
 			continue;
 		if ( c.tex == injTex || c.tex == outTex )
 			return refuse( c.name + ": feedback (samples a target the pass draws into)" );
-		if ( ( c.name == "cellDdgiAtlas" || c.name == "cellRestir" ) && !texelOnDevice( c.tex ) )
-			return refuse( c.name + ": a GL-owned texel buffer (not the present device's; the RT GI inputs are never copied a run)" );
+		if ( c.name == "cellDdgiAtlas" || c.name == "cellRestir" ) {  // lane VKAIR18: the owner's shared buffer by name (vkrtbuf.h)
+			WwVkPresent::RtBuf rb;
+			std::string why;
+			if ( !WwVkPresent::rtBufOf( c.name.c_str(), rb, why ) )
+				return refuse( c.name + ": " + why );
+			if ( rb.glBuf != c.dataBuf )
+				return refuse( c.name + ": GL's program reads another buffer than the shared one (a GL-owned texel buffer, never copied a run)" );
+			rtIn.push_back( { c.tex, rb } );
+		}
 		if ( c.name == "volLampAtlas" && !( c.kind == 5 ? texelOnDevice( c.tex ) != nullptr : farSharedOf( c.tex ) != 0 ) )
 			return refuse( "volLampAtlas: bound and not shared" );
 	}
@@ -548,7 +556,13 @@ bool airTemporalRunState( const AirTemporalRun & r, WaterRun & s, std::string & 
 		const std::uintptr_t key = keyBase + b.binding;
 		if ( b.kind == 2 ) {
 			ty[i] = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
-			if ( const FcBuf * fb = c ? texelOnDevice( c->tex ) : nullptr ) {  // the present device's (the DDGI cascades' buffer)
+			const auto rt = c ? std::find_if( rtIn.begin(), rtIn.end(), [&]( const auto & p ) { return p.first == c->tex; } ) : rtIn.end();
+			if ( rt != rtIn.end() ) {  // lane VKAIR18: an RT GI input, its shared buffer read in place
+				tv[i] = reinterpret_cast<VkBufferView>( static_cast<std::uintptr_t>( rt->second.view ) );
+				bufNames.push_back( rt->second.glBuf );
+				continue;
+			}
+			if ( const FcBuf * fb = c ? texelOnDevice( c->tex ) : nullptr ) {  // the present device's texel buffer (volLampAtlas kind 5)
 				tv[i] = fb->view;
 				bufNames.push_back( fb->glBuf );
 				continue;
