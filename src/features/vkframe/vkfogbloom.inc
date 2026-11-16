@@ -370,6 +370,7 @@ bool fogBloomRun( const FogBloomRun & t, unsigned & target, std::string & why )
 
 void fogBloomOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "fogBloom", 1 );  // lane VKFLIGHT4: the view GL guard
 	FxStat & S = fogBloom().st;
 	S.gl++;
 	S.glWhy = why ? why : "";

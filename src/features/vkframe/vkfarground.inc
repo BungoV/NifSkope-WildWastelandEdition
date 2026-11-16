@@ -100,6 +100,7 @@ static QString takeFarGroundGlWhys( int mode )
 
 void farGroundOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "farGround", 1 );  // lane VKFLIGHT4: the view GL guard
 	WaterStat & s = farGroundGlS();
 	s.gl++;
 	s.glWhy = why ? why : "";
@@ -222,6 +223,7 @@ static WaterStat & farGroundLiveGlS()
 
 void farGroundLiveOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "farGroundLive", 1 );  // lane VKFLIGHT4: the view GL guard
 	WaterStat & s = farGroundLiveGlS();
 	s.gl++;
 	s.glWhy = why ? why : "";

@@ -1016,6 +1016,11 @@ void drain()
 	W.idle.wait( lk, [&W]() { return W.q.empty() && !W.busy; } );
 }
 
+// lane VKFLIGHT4 item 1: the view's QPainter overlay on Vulkan (vkoverlay.inc)
+void ovPresent( int k, VkImage img, bool view );
+bool ovOn( int k );
+void ovRecord( VkCommandBuffer cmd, int k, VkImage img );
+
 bool takeRebuild()
 {
 	Worker & W = wk();
@@ -4745,6 +4750,7 @@ int toneMeasureTake( const float *& px, int & qw, int & qh, unsigned & tex )
 
 void toneOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "tone", 1 );  // lane VKFLIGHT4: the view GL guard
 	Tone & T = tone();
 	T.st.gl++;
 	T.st.glWhy = why ? why : "";
@@ -4996,6 +5002,7 @@ bool taaRun( const TaaRun & t, std::string & why )
 
 void taaOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "taa", 1 );  // lane VKFLIGHT4: the view GL guard
 	Taa & A = taa();
 	A.st.gl++;
 	A.st.glWhy = why ? why : "";
@@ -5088,6 +5095,7 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 	View & V = view();
 	const int vs = V.cur >= 0 && V.w == w && V.h == h ? V.cur : -1;
 	V.cur = -1;
+	ovPresent( k, s.img, vs >= 0 );  // lane VKFLIGHT4: the frame's QPainter overlay into the free slot (the worker blends it)
 	GLuint sigTex = s.tex;
 	if ( vs >= 0 ) {
 		V.slot[vs].reader = k;
@@ -5691,6 +5699,7 @@ bool skyRun( const SkyRun & t, std::string & why )
 
 void skyOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "sky", 1 );  // lane VKFLIGHT4: the view GL guard
 	Sky & S = sky();
 	S.st.gl++;
 	S.st.glWhy = why ? why : "";
@@ -6600,6 +6609,7 @@ bool volSkyRun( const VolSkyRun & t, std::string & why )
 
 void volSkyOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "volSky", 1 );  // lane VKFLIGHT4: the view GL guard
 	FxStat & S = fx().st[0];
 	S.gl++;
 	S.glWhy = why ? why : "";
@@ -6723,6 +6733,7 @@ bool cloudRun( const CloudRun & t, std::string & why )
 
 void cloudOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "cloud", 1 );  // lane VKFLIGHT4: the view GL guard
 	FxStat & S = fx().st[1];
 	S.gl++;
 	S.glWhy = why ? why : "";
@@ -8023,6 +8034,7 @@ bool ssrRun( const SsrRun & t, std::string & why )
 
 void ssrOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "ssr", 1 );  // lane VKFLIGHT4: the view GL guard
 	Ssr & S = ssrS();
 	S.st.gl++;
 	S.st.glWhy = why ? why : "";
@@ -9128,6 +9140,7 @@ bool csmAtTexOk( unsigned name, std::string & why )
 
 void csmOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "csm", 1 );  // lane VKFLIGHT4: the view GL guard
 	Csm & S = csmS();
 	S.st.gl++;
 	S.st.glWhy = why ? why : "";
@@ -9580,6 +9593,7 @@ bool objRun( const ObjRun & t, std::string & why )
 
 void objOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "obj", 1 );  // lane VKFLIGHT4: the view GL guard
 	Obj & S = objS();
 	S.st.gl++;
 	S.st.glWhy = why ? why : "";
@@ -9607,6 +9621,8 @@ ObjStat takeObjStat()
 #include "features/vkframe/vkobjpipe.inc"  // lane VKOBJ4: the bl twins' shaded pipelines (row G4 slice 4)
 #include "features/vkframe/vkddgi.inc"  // lane VKFAR3: the DDGI probe atlas imported from bakert's device
 #include "features/vkframe/vkrtbuf.inc"  // lane VKBUF1: cellDdgiAtlas / cellRestir on the present device by name
+#include "features/vkframe/vkoverlay.inc"  // lane VKFLIGHT4: the view's QPainter overlay blended on Vulkan
+#include "features/vkframe/vkglguard.inc"  // lane VKFLIGHT4: the Vulkan view's GL guard
 
 namespace
 {
@@ -9730,7 +9746,10 @@ bool vkPart( int k, int w, int h, int vs, std::string & why, bool & rebuild, WwV
 	b[0].image = s.img;
 	b[0].subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 	VkImage src = s.img;
-	if ( vw && vSamples > 1 ) {
+	// lane VKFLIGHT4: the view's QPainter overlay is blended in the slot (a single-sample view is copied there first)
+	const bool ovBlend = vw && ovOn( k );
+	VkPipelineStageFlags srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+	if ( vw && ( vSamples > 1 || ovBlend ) ) {
 		/* round 10: GL's multisample view resolved here into the slot (GL's blit before): the view's GL writes before
 		 * the transfer read, the slot's last read (the blit of kSlots frames back) before the resolve's write */
 		VkImageMemoryBarrier r2[2] = { b[0], b[0] };
@@ -9738,12 +9757,25 @@ bool vkPart( int k, int w, int h, int vs, std::string & why, bool & rebuild, WwV
 		r2[1].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
 		r2[1].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 		v.vkCmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 2, r2 );
-		VkImageResolve rs {};
-		rs.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-		rs.dstSubresource = rs.srcSubresource;
-		rs.extent = { std::uint32_t( w ), std::uint32_t( h ), 1 };
-		v.vkCmdResolveImage( cmd, vw->color, VK_IMAGE_LAYOUT_GENERAL, s.img, VK_IMAGE_LAYOUT_GENERAL, 1, &rs );
+		if ( vSamples > 1 ) {
+			VkImageResolve rs {};
+			rs.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+			rs.dstSubresource = rs.srcSubresource;
+			rs.extent = { std::uint32_t( w ), std::uint32_t( h ), 1 };
+			v.vkCmdResolveImage( cmd, vw->color, VK_IMAGE_LAYOUT_GENERAL, s.img, VK_IMAGE_LAYOUT_GENERAL, 1, &rs );
+		} else {
+			VkImageCopy cp {};
+			cp.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+			cp.dstSubresource = cp.srcSubresource;
+			cp.extent = { std::uint32_t( w ), std::uint32_t( h ), 1 };
+			v.vkCmdCopyImage( cmd, vw->color, VK_IMAGE_LAYOUT_GENERAL, s.img, VK_IMAGE_LAYOUT_GENERAL, 1, &cp );
+		}
 		b[0].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		if ( ovBlend ) {
+			ovRecord( cmd, k, s.img );
+			b[0].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			srcStage |= VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+		}
 	} else if ( vw ) {
 		src = vw->color;  // a single-sample view: the flipped blit reads it as it is
 		b[0].image = src;
@@ -9754,7 +9786,7 @@ bool vkPart( int k, int w, int h, int vs, std::string & why, bool & rebuild, WwV
 	b[1].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	b[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 	b[1].image = c.images[idx];
-	v.vkCmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 2, b );
+	v.vkCmdPipelineBarrier( cmd, srcStage, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 2, b );
 	const int bw = std::min( w, int( c.extent.width ) ), bh = std::min( h, int( c.extent.height ) );
 	VkImageBlit r {};
 	r.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
@@ -9869,6 +9901,7 @@ bool vkPart( int k, int w, int h, int vs, std::string & why, bool & rebuild, WwV
 #include "wwswitch.h"
 
 #include <QDebug>
+#include <QImage>
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
 #include <QOpenGLPaintDevice>
@@ -9941,7 +9974,57 @@ public:
 			q->functions()->glBindFramebuffer( GL_FRAMEBUFFER, viewFbo() );
 	}
 };
+
+/* lane VKFLIGHT4: the QPainter overlay into a CPU image (top row first, premultiplied: what vkoverlay.inc's blend reads),
+ * cleared only where the last frame left ink. nullptr = GL paints it into the view, counted (overlayGl) with its reason.
+ * WW_VKOVERLAY_RED: 8 = GL paints it (the old route); bits 1 / 2 / 4 go to the blend (no flip, R and B swapped,
+ * straight alpha) */
+QImage & overlayImage()
+{
+	static QImage img;
+	return img;
+}
+
+QImage * overlayTarget( QOpenGLWindow * w, const QSize & size )
+{
+	const int red = wwEnvInt( "WW_VKOVERLAY_RED" );
+	if ( red == 8 ) {
+		overlayGl( "red WW_VKOVERLAY_RED=8" );
+		return nullptr;
+	}
+	std::string why;
+	if ( !overlayReady( why ) ) {
+		overlayGl( why );
+		return nullptr;
+	}
+	QImage & img = overlayImage();
+	if ( img.size() != size ) {
+		img = QImage( size, QImage::Format_ARGB32_Premultiplied );
+		if ( img.isNull() ) {
+			overlayGl( "the overlay image failed" );
+			return nullptr;
+		}
+		img.fill( Qt::transparent );
+	} else {
+		int x = 0, y = 0, bw = 0, bh = 0;
+		overlayLastBox( x, y, bw, bh );
+		for ( int r = y; bw > 0 && r < y + bh && r < img.height(); r++ )
+			std::memset( reinterpret_cast<std::uint32_t *>( img.scanLine( r ) ) + x, 0, size_t( std::min( bw, img.width() - x ) ) * 4 );
+	}
+	img.setDevicePixelRatio( w->devicePixelRatio() );
+	return &img;
+}
 }  // namespace
+
+void painterDone( QPaintDevice * pd )
+{
+	QImage & img = overlayImage();
+	if ( pd != &img )
+		return;
+	const int red = wwEnvInt( "WW_VKOVERLAY_RED" );
+	overlaySet( reinterpret_cast<const std::uint32_t *>( img.constBits() ), img.width(), img.height(), int( img.bytesPerLine() / 4 ),
+		std::uint32_t( red > 0 && red < 8 ? red : 0 ) );
+}
 
 QPaintDevice * painterTarget( QOpenGLWindow * w )
 {
@@ -9950,6 +10033,8 @@ QPaintDevice * painterTarget( QOpenGLWindow * w )
 	if ( !viewFbo() )
 		return w;
 	const QSize size( view().w, view().h );
+	if ( QImage * img = overlayTarget( w, size ) )
+		return img;
 	if ( !dev || dev->size() != size || devCtx != QOpenGLContext::currentContext() ) {
 		dev = std::make_unique<ViewPaintDevice>( size );
 		devCtx = QOpenGLContext::currentContext();
@@ -10380,16 +10465,42 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 						: as.gl > 0 ? QString::fromStdString( as.glWhy ) : QStringLiteral( "the Modern TAA did not run" ) )
 					.arg( as.gl > 0 ? QStringLiteral( ", %1 frames" ).arg( as.gl ) : QString() );
 			}
+			/* lane VKFLIGHT4: the QPainter overlay (F3 line, pass timers, labels, gizmo) painted into a CPU image and
+			 * blended on Vulkan over the view (vkoverlay.inc); gl counts the frames painterTarget handed GL the view */
+			const OverlayStat os = takeOverlayStat();
+			QString ovRoute = QStringLiteral( "vk overlay: drawn %1, gl %2" ).arg( os.drawn ).arg( os.gl );
+			if ( os.gl > 0 )
+				ovRoute += QStringLiteral( " (last: %1)" ).arg( QString::fromStdString( os.glWhy ) );
+			ovRoute += QStringLiteral( ", lost %1" ).arg( os.lost );
+			if ( os.lost > 0 )
+				ovRoute += QStringLiteral( " (last: %1)" ).arg( QString::fromStdString( os.lostWhy ) );
+			ovRoute += QStringLiteral( ", refused %1" ).arg( os.refused );
+			if ( os.refused > 0 )
+				ovRoute += QStringLiteral( " (last: %1)" ).arg( QString::fromStdString( os.refusedWhy ) );
+			ovRoute += QStringLiteral( ", empty %1, box %2x%3 max, scan %4 ms" ).arg( os.empty ).arg( os.boxW ).arg( os.boxH )
+				.arg( os.scanMs, 0, 'f', 3 );
+			if ( winView > 0 || os.drawn > 0 || os.gl > 0 )
+				qInfo().noquote() << ovRoute;
+			/* lane VKFLIGHT4: the GL guard, taken every window (empties it), said while the view ran on Vulkan; ready =
+			 * 0 draws, 0 passes. It counts the routes' OnGl calls, not PassTime zones (countDraw also counts Vulkan draws) */
+			{
+				long long gN = 0;
+				int gM = 0;
+				const std::string gLine = glGuardTake( &gN, &gM );
+				if ( winView > 0 )
+					qInfo().noquote() << QString::fromStdString( gLine );
+			}
 			if ( winView > 0 ) {
 				routeSaid.clear();  // one a window while it runs
 				sayRoute( QStringLiteral( "vk view, %1 of %2 frames: GL draws the view into the present device's images (%3x%4 "
 					"MS%5 RGBA8 + D24S8, %6 views, %7 MB, made in %8 ms), the worker resolves on Vulkan (no GL blit: drawing "
 					"thread present %9 ms); %10 views still read when GL wanted them (wait %11 ms); bakert hop none (the view is "
 					"made on the present device); %12; still on GL into the view: the tone when the fog bloom drew on GL (and the Fusion "
-					"Shaders bloom's mode 3 under WW_VKVIEW_BLOOM_RED=1), clouds in front (%13), P7, lens flare, overlays + QPainter (the overlay target is the view); %14" )
+					"Shaders bloom's mode 3 under WW_VKVIEW_BLOOM_RED=1), clouds in front (%13), P7, lens flare, the editor overlays "
+					"(paintEditorOverlays, drawOverlays); the QPainter overlay: %14; %15" )
 					.arg( winView ).arg( winN ).arg( vs.w ).arg( vs.h ).arg( vs.samples ).arg( vs.views ).arg( vs.mb, 0, 'f', 1 )
 					.arg( vs.makeMs, 0, 'f', 1 ).arg( winSum / winN, 0, 'f', 3 ).arg( vs.busy ).arg( vs.waitMs, 0, 'f', 3 )
-					.arg( tone ).arg( shared ).arg( taa ) );
+					.arg( tone ).arg( shared ).arg( ovRoute ).arg( taa ) );
 			} else {
 				sayRoute( QStringLiteral( "vk present (old route: GL draws its back buffer, GL blits it into the slot; view on "
 					"Vulkan off: %1)" ).arg( viewWhy ) );

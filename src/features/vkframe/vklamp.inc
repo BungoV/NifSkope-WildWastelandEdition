@@ -648,6 +648,7 @@ bool lampRun( const LampRun & t, std::string & why )
 
 void lampOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "lamp", 1 );  // lane VKFLIGHT4: the view GL guard
 	Lamp & S = lampS();
 	S.st.gl++;
 	S.st.glWhy = why ? why : "";

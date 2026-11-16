@@ -212,6 +212,30 @@ struct SharedStat
 };
 SharedStat takeSharedStat();
 
+/* Lane VKFLIGHT4 item 1: the view's QPainter overlay (F3 line, pass timers, labels, gizmo) blended on Vulkan
+ * (vkoverlay.inc). overlayReady: its pipeline (drawing thread, the present device up). overlaySet: the frame's overlay
+ * (QImage ARGB32 premultiplied, the top row first; null: nothing drawn), the box holding ink goes to the next present.
+ * overlayLastBox: that box (the QImage clears only it). overlayGl: the QPainter went to GL this frame (counted, why).
+ * overlayBlendTest: the harness's run of the same stage and blend over a backdrop (RGBA8, GL's rows, the bottom first) */
+struct OverlayStat
+{
+	int drawn = 0, gl = 0, lost = 0, empty = 0, refused = 0;
+	int boxW = 0, boxH = 0;
+	double scanMs = 0.0;
+	std::string glWhy, lostWhy, refusedWhy;
+};
+bool overlayReady( std::string & why );
+void overlaySet( const std::uint32_t * bits, int w, int h, int strideWords, std::uint32_t red );
+void overlayLastBox( int & x, int & y, int & w, int & h );
+void overlayGl( const std::string & why );
+OverlayStat takeOverlayStat();
+/* lane VKFLIGHT4: the Vulkan view's GL guard (vkglguard.inc): every route's OnGl adds (zone = the route); take returns
+ * `vk view gl: N draws, M passes (top: <zone> n, ...)` and empties the tally */
+void glGuard( const char * zone, long long draws );
+std::string glGuardTake( long long * draws, int * passes );
+bool overlayBlendTest( const std::vector<std::uint8_t> & backdrop, int w, int h, const std::uint32_t * bits, int strideWords,
+	std::uint32_t red, std::vector<std::uint8_t> & out, std::string & why );
+
 /* Lane VKOBJ4 item 2: the bloom chain (vkframe.cpp) on the present device. shareDevice (GL current): the present device,
  * made on GL's GPU if it is not yet (the view off too), and its handles for wwVkFrameSetDevice. onWorker: fn( arg ) runs
  * on the present worker (the queue is the worker's alone), the caller waits for it; false: fn's false (why). borrowTarget:
@@ -1531,6 +1555,9 @@ namespace WwVkPresent
 /* round 10: what the view's QPainter draws through: the window (its back buffer) or, while the view is on Vulkan, a
  * paint device that binds the view's FBO */
 QPaintDevice * painterTarget( QOpenGLWindow * w );
+/* lane VKFLIGHT4: after painter.end(): when pd is the overlay image (the view on Vulkan), its ink goes to the present's
+ * blend (overlaySet); any other device: nothing */
+void painterDone( QPaintDevice * pd );
 /* GLView::event's UpdateRequest: false = not taken (the red, the row off, a new size: QOpenGLWindow's own paint runs,
  * which also sizes its paint device for QPainter). true = painted (paint()) and on the screen, through the swapchain
  * or, when the present failed, GL's swap; the caller emits frameSwapped. */

@@ -377,6 +377,7 @@ bool vrsRun( const VrsRun & r, unsigned tex[2], std::string & why )
 
 void vrsOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "vrs", 1 );  // lane VKFLIGHT4: the view GL guard
 	FxStat & S = vrsVk().st;
 	S.gl++;
 	S.glWhy = why ? why : "";

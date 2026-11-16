@@ -696,6 +696,7 @@ bool airLampRunState( const AirLampRun & r, WaterRun & s, std::string & why )
 
 void airLampOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "airLamp", 1 );  // lane VKFLIGHT4: the view GL guard
 	airlamp::Al & S = airlamp::alS();
 	S.st.gl++;
 	S.st.glWhy = why ? why : "";

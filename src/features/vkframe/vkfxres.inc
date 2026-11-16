@@ -729,6 +729,7 @@ bool fxresCompRun( const FxresComp & r, std::string & why )
 
 void fxresOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "fxres", 1 );  // lane VKFLIGHT4: the view GL guard
 	FxStat & S = fxresVk().st;
 	S.gl++;
 	S.glWhy = why ? why : "";

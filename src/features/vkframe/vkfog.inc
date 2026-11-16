@@ -344,6 +344,7 @@ bool fogIntegRun( const FogIntegRun & t, std::string & why )
 
 void fogOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "fog", 1 );  // lane VKFLIGHT4: the view GL guard
 	Fog & F = fogS();
 	F.st.gl++;
 	F.st.glWhy = why ? why : "";

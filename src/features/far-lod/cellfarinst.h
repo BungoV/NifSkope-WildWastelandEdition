@@ -57,6 +57,11 @@ bool tileBounds( const CellMeshInst & d, const float clipFromModel[16], const fl
  * (ww_bindless.glsl wwBlUniformRow: wwDrawIdx = wwDrawBase, the shape's own committed row, for every command). Off
  * by default (the old rule: own program); the red wins over it. */
 bool bindlessTwinAllowed();
+/* lane VKFLIGHT4: while the far LOD rings draw on the Vulkan view (WW_VKVIEW=1, the view up, no WW_VKVIEW_FARLOD_RED) a
+ * ring keeps its own program (fo4_cellcsm.prog), whose key the rings' twins carry (farLodTwinOf: base / RT / DG); the
+ * bindless twin fo4_cellcsmbl.prog has no rings twin (the 11-16 flight: 10143 rings on GL). Red WW_VKVIEW_FARLOD_BL_RED=1:
+ * the bindless twin again. */
+bool vkRingsKeepBase();
 bool bindlessUniformRow();
 /*! MODULES1 10b-2: far draws whose baked AO sits in the vertex colour (fo4_default.vert farVcAo). vcAoType: 0 none,
  *  1 the flat far copy ("FarLOD r<i> ..."), 2 the far ground ("FarLOD terrain r<i> ..."), from the shape's name; 0

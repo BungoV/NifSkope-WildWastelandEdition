@@ -4916,7 +4916,8 @@ void GLView::paintGL()
 		}
 		glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 		// lane VKFRAME1 round 10: into the view on Vulkan when it is on (WW_VKVIEW=1), else the back buffer
-		QPainter painter( WwVkPresent::painterTarget( this ) );
+		QPaintDevice * painterDevice = WwVkPresent::painterTarget( this );
+		QPainter painter( painterDevice );
 		if ( !volLabels.empty() ) {	// each room's name (and its group) and each threshold's two rooms
 			painter.setRenderHint( QPainter::TextAntialiasing, true );
 			QFont f = painter.font();
@@ -5272,6 +5273,7 @@ void GLView::paintGL()
 			painter.drawEllipse( segmentPaintPos, qreal( segmentPaintRadius ), qreal( segmentPaintRadius ) );
 		}
 		painter.end();
+		WwVkPresent::painterDone( painterDevice );  // lane VKFLIGHT4: the view on Vulkan blends this overlay (no GL)
 
 		// QPainter changes GL state behind the renderer's back (bound program, blending, scissor); reset
 		// everything that would corrupt the next selection/picking render, which reuses this context.

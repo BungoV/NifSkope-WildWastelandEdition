@@ -722,6 +722,7 @@ bool fgPaintRunState( const FgPaintRun & r, WaterRun & s, std::string & why )
 
 void fgPaintOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "fgPaint", 1 );  // lane VKFLIGHT4: the view GL guard
 	fgpaint::Fp & S = fgpaint::fpS();
 	S.st.gl++;
 	S.st.glWhy = why ? why : "";

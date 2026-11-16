@@ -590,6 +590,7 @@ bool reflRelightRunState( const ReflRelightRun & r, WaterRun & s, std::string & 
 
 void reflRelightOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "reflRelight", 1 );  // lane VKFLIGHT4: the view GL guard
 	reflrelight::Rr & S = reflrelight::rrS();
 	S.st.gl++;
 	S.st.glWhy = why ? why : "";

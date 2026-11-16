@@ -369,6 +369,7 @@ bool cloudFrontRun( const CloudFrontRun & t, std::string & why )
 
 void cloudFrontOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "cloudFront", 1 );  // lane VKFLIGHT4: the view GL guard
 	FxStat & S = cloudFront().st;
 	S.gl++;
 	S.glWhy = why ? why : "";

@@ -57,15 +57,40 @@ def check(text, label):
     return ok
 
 
+RING_BL = 'if ( mesh->wwFarInstData() && ( !CellFarInst::bindlessTwinAllowed() || CellFarInst::vkRingsKeepBase() ) )'
+
+
+def check_keep(rend, inst, label):
+    """Lane VKFLIGHT4 check 4: the 11-16 flight drew its rings with fo4_cellcsmbl.prog (the bindless twin, key
+    WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO = farLodTwinOf 1, the RT twin) and
+    farLodVkArm refused all 10143 by name. renderer.cpp's bindless ask must refuse a far ring while vkRingsKeepBase()
+    (the ring keeps fo4_cellcsm.prog), vkRingsKeepBase must read the rings' red and the view, and the refusal names
+    the program."""
+    n_ring = rend.count(RING_BL)
+    n_def = inst.count('bool vkRingsKeepBase()')
+    n_red = inst.count('WwVkPresent::shareWanted( "WW_VKVIEW_FARLOD_RED" )')
+    n_name = inst.count('std::string( "far program " ) + std::string( prog->name )')
+    n_rt = inst.count('"WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO"')
+    ok = n_ring == 1 and n_def == 1 and n_red >= 2 and n_name == 1 and n_rt == 1
+    print('FARLODSITE %s keep-base: renderer ring ask %d (want 1), vkRingsKeepBase %d, shareWanted(FARLOD_RED) %d (want >= 2), '
+          'named refusal %d, flight key -> RT twin %d: %s' % (label, n_ring, n_def, n_red, n_name, n_rt, 'OK' if ok else 'FAIL'))
+    return ok
+
+
 def main():
     tree = sys.argv[1]
     path = os.path.join(tree, 'src', 'features', 'far-lod', 'cellfarinst.cpp')
     with open(path, 'r', encoding='utf-8', errors='replace', newline='') as fh:
         text = fh.read()
+    with open(os.path.join(tree, 'src', 'gl', 'renderer.cpp'), 'r', encoding='utf-8', errors='replace', newline='') as fh:
+        rend = fh.read()
     base = check(text, 'base')
     red = check(text.replace(GUARD, 'farLodVkDraw( *k, cmds );'), 'red gl-left-drawing')
     print('FARLODSITE red gl-left-drawing: %s' % ('FAIL (fired)' if not red else 'PASS (dead)'))
-    ok = base and not red
+    keep = check_keep(rend, text, 'base')
+    keepRed = check_keep(rend.replace(' || CellFarInst::vkRingsKeepBase()', ''), text, 'red bindless-ring')
+    print('FARLODSITE red bindless-ring: %s' % ('FAIL (fired)' if not keepRed else 'PASS (dead)'))
+    ok = base and not red and keep and not keepRed
     print('FARLODSITE %s' % ('OK' if ok else 'FAILED'))
     return 0 if ok else 1
 

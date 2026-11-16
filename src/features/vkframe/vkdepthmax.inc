@@ -315,6 +315,7 @@ bool depthMaxRun( const DepthMaxRun & r, unsigned & tex, std::string & why )
 
 void depthMaxOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "depthMax", 1 );  // lane VKFLIGHT4: the view GL guard
 	FxStat & S = depthMax().st;
 	S.gl++;
 	S.glWhy = why ? why : "";

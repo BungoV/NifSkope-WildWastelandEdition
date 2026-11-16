@@ -703,6 +703,7 @@ bool reflCaptureRun( const ReflCaptureRun & r, std::string & why )
 
 void reflCaptureOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "reflCapture", 1 );  // lane VKFLIGHT4: the view GL guard
 	reflcapture::Rc & S = reflcapture::rcS();
 	S.st.gl++;
 	S.st.glWhy = why ? why : "";

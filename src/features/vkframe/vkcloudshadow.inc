@@ -342,6 +342,7 @@ bool cloudShadowRun( const CloudShadowRun & t, std::string & why )
 
 void cloudShadowOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "cloudShadow", 1 );  // lane VKFLIGHT4: the view GL guard
 	FxStat & S = cloudShadow().st;
 	S.gl++;
 	S.glWhy = why ? why : "";

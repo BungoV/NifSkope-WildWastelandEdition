@@ -453,6 +453,7 @@ bool camVelRun( const CamVelRun & r, std::string & why )
 
 void camVelOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "camVel", 1 );  // lane VKFLIGHT4: the view GL guard
 	camvel::CvState & S = camvel::cvState();
 	std::lock_guard<std::mutex> lk( S.mx );
 	S.st.gl++;

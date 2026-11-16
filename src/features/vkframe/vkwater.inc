@@ -1800,6 +1800,7 @@ static WaterStat & farLodGlS()
 
 void farLodOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "farLod", 1 );  // lane VKFLIGHT4: the view GL guard
 	WaterStat & s = farLodGlS();
 	s.gl++;
 	s.glWhy = why ? why : "";

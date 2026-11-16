@@ -408,6 +408,7 @@ bool cloudMapRun( const CloudMapRun & t, std::string & why )
 
 void cloudMapOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "cloudMap", 1 );  // lane VKFLIGHT4: the view GL guard
 	FxStat & S = cloudMapDev().st;
 	S.gl++;
 	S.glWhy = why ? why : "";

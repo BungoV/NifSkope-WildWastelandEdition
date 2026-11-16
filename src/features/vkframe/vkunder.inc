@@ -289,6 +289,7 @@ std::string underRefusal()
 
 void underOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "under", 1 );  // lane VKFLIGHT4: the view GL guard
 	FxStat & S = underD().st;
 	S.gl++;
 	S.glWhy = why ? why : "";

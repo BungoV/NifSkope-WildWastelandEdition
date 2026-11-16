@@ -225,6 +225,9 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 # the cell frame's per-sample readback (the script's objbl_samples_cs line: cs_6_0, no shift)
 HLSL_SPECS += [('src/features/vkframe', 'objbl_samples_cs', 'vulkan1.2', 'vkframe_objbl_samples_cs_spv')]
 HLSL_SRC['objbl_samples_cs'] = 'res/shaders/hlsl/near'
+# lane VKFLIGHT4: the view's QPainter overlay blend (the script's overlay_blend_cs line: cs_6_0, no shift)
+HLSL_SPECS += [('src/features/vkframe', 'overlay_blend_cs', 'vulkan1.2', 'vkframe_overlay_blend_cs_spv')]
+HLSL_SRC['overlay_blend_cs'] = 'res/shaders/hlsl/overlays'
 # lane VKWATER3 (G4 by draws): the script's `fxc <name> <core file> <profile> "$PS_SHIFT|$VS_SHIFT"` lines, the non-bindless
 # fallbacks on the app's base variant, the frozen FragCoord.w fixup's flag
 VKFRAME_FXCELL_ARGS = ['-HV', '2021', '-D', 'WW_CELL_FOGLEAK=1', '-D', 'WW_FRAME_UBO=1']

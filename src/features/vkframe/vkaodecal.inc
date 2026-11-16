@@ -710,6 +710,7 @@ bool aoDecalRun( const AoDecalRun & r, std::string & why )
 
 void aoDecalOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "aoDecal", 1 );  // lane VKFLIGHT4: the view GL guard
 	aodecal::AdState & S = aodecal::adState();
 	S.st.gl++;
 	S.st.glWhy = why ? why : "";

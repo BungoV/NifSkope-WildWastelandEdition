@@ -1,0 +1,33 @@
+GL on NVIDIA GeForce RTX 5070 Ti/PCIe/SSE2
+OVERLAYVIEW present-device-up OK
+OVERLAYVIEW overlay-pipeline OK
+OVERLAYVIEW dpr1-gl-fbo OK
+OVERLAYVIEW dpr1 gl device: logical dpi 96 x 96, dpr 1, 320 x 200 px
+OVERLAYVIEW dpr1 image: logical dpi 96 x 96, dpr 1
+OVERLAYVIEW dpr1-blend-ran OK
+OVERLAYVIEW dpr1-vulkan-vs-cpu OK: ink 9024 px, compared 9024 px, over 1 level 0, max 1, ink-free changed 0 (bars: compared > 0, over 1 = 0, ink-free = 0)
+OVERLAYVIEW dpr1-vulkan-vs-gl-qpainter FAIL: changed vk 9024 px box 8,19-305,193 / gl 12071 px box 8,19-304,193; edge 1 (bar 2), IoU 0.7434 (bar 0.80); over the union 12100 px: mean 17.274, max 99 levels (reported)
+OVERLAYVIEW dpr1 zone f3-panel: changed vk 6539, gl 6539, both 6539; gl only: 0 within 2 levels of B, max 0 levels
+OVERLAYVIEW dpr1 zone label: changed vk 1638, gl 1620, both 1620; gl only: 0 within 2 levels of B, max 0 levels
+OVERLAYVIEW dpr1 zone gizmo: changed vk 800, gl 3865, both 789; gl only: 0 within 2 levels of B, max 90 levels
+OVERLAYVIEW dpr1-red-no-flip OK: ran 1, over 1 level 14732, max 231, ink-free changed 5746: fails the bar
+OVERLAYVIEW dpr1-red-rb-swapped OK: ran 1, over 1 level 3789, max 215, ink-free changed 0: fails the bar
+OVERLAYVIEW dpr1-red-straight-alpha OK: ran 1, over 1 level 4128, max 64, ink-free changed 0: fails the bar
+OVERLAYVIEW dpr1-red-dropped OK: ran 1, over 1 level 9008, max 208, ink-free changed 0: fails the bar
+OVERLAYVIEW dpr1 stat: drawn 0, empty 1, lost 0, refused 0, box 298x175, scan 0.071 ms
+OVERLAYVIEW dpr2-gl-fbo OK
+OVERLAYVIEW dpr2 gl device: logical dpi 96 x 96, dpr 2, 640 x 400 px
+OVERLAYVIEW dpr2 image: logical dpi 96 x 96, dpr 2
+OVERLAYVIEW dpr2-blend-ran OK
+OVERLAYVIEW dpr2-vulkan-vs-cpu OK: ink 35298 px, compared 35297 px, over 1 level 0, max 1, ink-free changed 0 (bars: compared > 0, over 1 = 0, ink-free = 0)
+OVERLAYVIEW dpr2-vulkan-vs-gl-qpainter FAIL: changed vk 35297 px box 16,38-610,387 / gl 47927 px box 16,38-609,387; edge 1 (bar 2), IoU 0.7345 (bar 0.80); over the union 47981 px: mean 16.774, max 117 levels (reported)
+OVERLAYVIEW dpr2 zone f3-panel: changed vk 26094, gl 26094, both 26094; gl only: 0 within 2 levels of B, max 0 levels
+OVERLAYVIEW dpr2 zone label: changed vk 6480, gl 6480, both 6480; gl only: 0 within 2 levels of B, max 0 levels
+OVERLAYVIEW dpr2 zone gizmo: changed vk 2588, gl 15218, both 2534; gl only: 0 within 2 levels of B, max 90 levels
+OVERLAYVIEW dpr2-red-no-flip OK: ran 1, over 1 level 57438, max 231, ink-free changed 22325: fails the bar
+OVERLAYVIEW dpr2-red-rb-swapped OK: ran 1, over 1 level 12624, max 215, ink-free changed 1: fails the bar
+OVERLAYVIEW dpr2-red-straight-alpha OK: ran 1, over 1 level 12763, max 64, ink-free changed 1: fails the bar
+OVERLAYVIEW dpr2-red-dropped OK: ran 1, over 1 level 35210, max 209, ink-free changed 0: fails the bar
+OVERLAYVIEW dpr2 stat: drawn 0, empty 1, lost 0, refused 0, box 595x350, scan 0.323 ms
+OVERLAYVIEW 2 checks failed
+OVERLAYVIEW GATE FAILED

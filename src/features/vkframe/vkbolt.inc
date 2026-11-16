@@ -438,6 +438,7 @@ bool boltRun( const BoltRun & t, std::string & why )
 
 void boltOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "bolt", 1 );  // lane VKFLIGHT4: the view GL guard
 	FxStat & S = bolt().st;
 	S.gl++;
 	S.glWhy = why ? why : "";

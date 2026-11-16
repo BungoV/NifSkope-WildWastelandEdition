@@ -691,6 +691,7 @@ bool farCardsRun( const FarCardsRun & t, std::string & why )
 
 void farCardsOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "farCards", 1 );  // lane VKFLIGHT4: the view GL guard
 	FxStat & S = fcDraw().st;
 	S.gl++;
 	S.glWhy = why ? why : "";

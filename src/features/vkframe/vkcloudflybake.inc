@@ -501,6 +501,7 @@ bool flyBakeRunN( const FlyBakeRun * t, int n, std::string & why )
 
 void flyBakeOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "flyBake", 1 );  // lane VKFLIGHT4: the view GL guard
 	FxStat & S = flyBakeJob().st;
 	S.gl++;
 	S.glWhy = why ? why : "";

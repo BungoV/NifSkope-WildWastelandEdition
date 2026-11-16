@@ -1231,6 +1231,7 @@ bool precipRun( const PrecipRun & t, std::string & why )
 
 void precipOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "precip", 1 );  // lane VKFLIGHT4: the view GL guard
 	FxStat & S = precip().st;
 	S.gl++;
 	S.glWhy = why ? why : "";

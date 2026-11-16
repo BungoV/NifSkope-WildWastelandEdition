@@ -2528,6 +2528,7 @@ bool objBlRun( const std::vector<unsigned> & glBufs, int mode, std::string & why
 
 void objBlOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "objBl", 1 );  // lane VKFLIGHT4: the view GL guard
 	opS().st.gl++;
 	opS().st.glWhy = why ? why : "";
 }

@@ -1363,8 +1363,8 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		if ( !WwBl::on() )
 			return WwHw::RouteBlOff;
 		// lane SKYSHARDS3: an instanced far ring's base instance is a placement row, not the row offset the twin reads
-		if ( mesh->wwFarInstData() && !CellFarInst::bindlessTwinAllowed() )
-			return WwHw::RouteFarRing;
+		if ( mesh->wwFarInstData() && ( !CellFarInst::bindlessTwinAllowed() || CellFarInst::vkRingsKeepBase() ) )
+			return WwHw::RouteFarRing;	// lane VKFLIGHT4: + the rings on the Vulkan view keep fo4_cellcsm (its twins)
 		const Scene * scene = mesh->scene;
 		const auto v = scene->nifModel->getBSVersion();
 		if ( v < 130 || v >= 151 )

@@ -438,6 +438,7 @@ bool toneFlareQueue( const FlareRun & f, std::string & why )
 
 void toneFlareOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "toneFlare", 1 );  // lane VKFLIGHT4: the view GL guard
 	FxStat & S = flare().st;
 	S.gl++;
 	S.glWhy = why ? why : "";

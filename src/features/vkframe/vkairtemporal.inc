@@ -738,6 +738,7 @@ bool airTemporalRunState( const AirTemporalRun & r, WaterRun & s, std::string & 
 
 void airTemporalOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "airTemporal", 1 );  // lane VKFLIGHT4: the view GL guard
 	airtemporal::At & S = airtemporal::atS( 0 );
 	S.st.gl++;
 	S.st.glWhy = why ? why : "";
@@ -769,6 +770,7 @@ AirTemporalStat takeAirFarStat()
 
 void airFarOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "airFar", 1 );  // lane VKFLIGHT4: the view GL guard
 	airtemporal::At & S = airtemporal::atS( 1 );
 	S.st.gl++;
 	S.st.glWhy = why ? why : "";
@@ -782,6 +784,7 @@ AirTemporalStat takeAirPlainStat()
 
 void airPlainOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "airPlain", 1 );  // lane VKFLIGHT4: the view GL guard
 	airtemporal::At & S = airtemporal::atS( 2 );
 	S.st.gl++;
 	S.st.glWhy = why ? why : "";

@@ -748,6 +748,7 @@ bool objVelRun( const ObjVelRun & r, std::string & why )
 
 void objVelOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "objVel", 1 );  // lane VKFLIGHT4: the view GL guard
 	objvel::OvState & S = objvel::ovState();
 	S.st.gl++;
 	S.st.glWhy = why ? why : "";

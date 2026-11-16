@@ -443,6 +443,7 @@ bool farDotsRun( const FarDotsRun & t, std::string & why )
 
 void farDotsOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "farDots", 1 );  // lane VKFLIGHT4: the view GL guard
 	FxStat & S = farDots().st;
 	S.gl++;
 	S.glWhy = why ? why : "";

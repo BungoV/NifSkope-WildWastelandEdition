@@ -820,6 +820,7 @@ bool tonePostQueue( const PostRun & p, std::string & why )
 
 void tonePostOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "tonePost", 1 );  // lane VKFLIGHT4: the view GL guard
 	FxStat & S = post7().st;
 	S.gl++;
 	S.glWhy = why ? why : "";

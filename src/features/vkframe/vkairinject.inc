@@ -585,6 +585,7 @@ bool airInjectRunState( const AirInjectRun & r, WaterRun & s, std::string & why 
 
 void airInjectOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "airInject", 1 );  // lane VKFLIGHT4: the view GL guard
 	airinject::Ai & S = airinject::aiS();
 	S.st.gl++;
 	S.st.glWhy = why ? why : "";

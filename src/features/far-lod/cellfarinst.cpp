@@ -409,8 +409,11 @@ void farLodVkArm( GLFunctions * fn, NifSkopeOpenGLContext::Program * prog, int s
 	const int v = farLodTwinOf( prog->wwDefs );
 	if ( splatPass > 0 )
 		no = "a splat pass (blended twin, no Vulkan twin yet)";
-	else if ( std::string( prog->name ) != "fo4_cellcsm.prog" )
-		no = "this far program has no Vulkan twin (fo4_cellcsm.prog only)";
+	else if ( std::string( prog->name ) != "fo4_cellcsm.prog" ) {
+		static std::string said;	// lane VKFLIGHT4: the line names the program (the flight's was fo4_cellcsmbl.prog)
+		said = std::string( "far program " ) + std::string( prog->name ) + " has no Vulkan twin (fo4_cellcsm.prog only)";
+		no = said.c_str();
+	}
 	else if ( prog->wwBindless )
 		no = "a bindless far program (no Vulkan twin)";
 	else if ( !wwFogLeakShaderDefine() )
@@ -733,6 +736,11 @@ bool bindlessUniformRow()
 		return v == QLatin1String( "1" ) || v == QLatin1String( "on" );
 	}() );
 	return on && !redBlRow();
+}
+
+bool vkRingsKeepBase()
+{
+	return wwEnvInt( "WW_VKVIEW_FARLOD_BL_RED" ) != 1 && WwVkPresent::shareWanted( "WW_VKVIEW_FARLOD_RED" );
 }
 
 bool bindlessTwinAllowed()

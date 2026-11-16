@@ -310,6 +310,10 @@ fxc objcell_effectdecal_rt_ps fo4_effectdecal_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_
 "$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main -Fo objbl_samples_cs.spv "$(cygpath -m "$ROOT/res/shaders/hlsl/near/objbl_samples_cs.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/near/objbl_samples_cs.hlsl")"
 python -I "$ROOT/tools/spv_header.py" objbl_samples_cs.spv vkframe_objbl_samples_cs_spv objbl_samples_cs.spv.h < /dev/null
 rm -f objbl_samples_cs.spv
+# lane VKFLIGHT4: the view's QPainter overlay blended on Vulkan (vkoverlay.inc): its own bindings, no shift
+"$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main -Fo overlay_blend_cs.spv "$(cygpath -m "$ROOT/res/shaders/hlsl/overlays/overlay_blend_cs.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/overlays/overlay_blend_cs.hlsl")"
+python -I "$ROOT/tools/spv_header.py" overlay_blend_cs.spv vkframe_overlay_blend_cs_spv overlay_blend_cs.spv.h < /dev/null
+rm -f overlay_blend_cs.spv
 # lane VKFAR3 (G3): the far ground's ring-0 terrain (vkfarground.inc). The pixel stage is fo4_cellcsmfgl's readable source under
 # the app's variant (FOGLEAK + FRAME_UBO) on fxk()'s shifts: images 64..126, samplers 128..190. Its vertex stage is
 # water_view_vs's source with t at 200 and s at 216, past both (every declared binding is in the merged set, used or not)

@@ -532,6 +532,7 @@ bool volMaskRun( const VolMaskRun & r, std::string & why )
 
 void volMaskOnGl( const char * why )
 {
+	WwVkPresent::glGuard( "volMask", 1 );  // lane VKFLIGHT4: the view GL guard
 	volmask::VmState & S = volmask::vmState();
 	S.st.gl++;
 	S.st.glWhy = why ? why : "";
