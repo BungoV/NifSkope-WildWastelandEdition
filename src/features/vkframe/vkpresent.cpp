@@ -6594,6 +6594,11 @@ bool cloudRun( const CloudRun & t, std::string & why )
 			if ( !fxSlot( x, views[k], names, S.copies, w ) )
 				return refuse( "the march's input t" + std::to_string( k ) + ": " + w );
 			smp[k] = x.sampler;
+			if ( x.shared ) {  // lane VKCLOUD10: which inputs were read in place (the "vk clouds:" line names them)
+				const int s0 = t.fly ? 0 : 1, mapAt = t.fly ? 2 : 0;
+				S.inPlace |= k == s0 ? kInShape : k == s0 + 1 ? kInDetail : k == mapAt ? kInMap
+					: t.fly && k == WwVkPresent::kFlyTex - 1 ? kInField : 0u;
+			}
 		}
 		const int sh = t.fly ? 0 : 1;  // cvShape's slot (the fly: shape detail map ..., the march: map shape detail ...)
 		if ( t.red & 2 ) {  // red: the shape and the detail swapped

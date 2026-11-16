@@ -13,6 +13,7 @@
 #include "cloudrecx14math.h"	// lane CLOUDRECX1
 #include "cloudsheetmath.h"	// SKYLIGHT1 round 3: the layer's zenith-cap fit (uv = J world / altitude + c)
 #include "harnesswindow.h"
+#include "cloudinshare.h"	// lane VKCLOUD10: the map on the present device
 
 #include <QElapsedTimer>
 #include <QHash>
@@ -99,7 +100,20 @@ struct CmState
 	bool bindTried = false;
 	QString refusedShape;
 	int refusedSkips = 0;
+	WwCloudInShare::Vol tgt;	// lane VKCLOUD10: the map's texture (map.tex), a shared target while the view is on Vulkan
 };
+
+//! lane VKCLOUD10: the map target's sharedTarget key (one map a process: a static byte) and whether it is asked
+std::uintptr_t mapKey()
+{
+	static char k;
+	return reinterpret_cast<std::uintptr_t>( &k );
+}
+
+bool mapShareWanted()
+{
+	return WwVkPresent::shareWanted( "WW_VKVIEW_CLOUDIN_RED" );
+}
 
 CmState & cs()
 {
@@ -144,11 +158,15 @@ void drop( Scene * scene, CmState & s )
 {
 	if ( scene && scene->renderer ) {
 		auto fn = scene->renderer->fn;
-		if ( s.map.tex )
-			fn->glDeleteTextures( 1, &s.map.tex );
+		if ( s.tgt.shared )
+			WwVkPresent::sharedTargetDrop( mapKey() );	// lane VKCLOUD10: never glDeleteTextures on a shared name
+		else if ( s.tgt.tex )
+			fn->glDeleteTextures( 1, &s.tgt.tex );
 		if ( s.fbo )
 			fn->glDeleteFramebuffers( 1, &s.fbo );
 	}
+	s.tgt.tex = 0;
+	s.tgt.shared = false;
 	s.fbo = 0;
 	s.texSize = 0;
 	const quint64 g = s.map.generation;
@@ -277,26 +295,18 @@ void paramsOf( const QVector<Draw> & ds, BandParams out[3], bool redMax,
 
 bool ensureTarget( NifSkopeOpenGLContext::GLFunctions * fn, CmState & s, int n )
 {
-	if ( s.map.tex && s.texSize == n )
-		return true;
 	if ( !s.fbo )
 		fn->glGenFramebuffers( 1, &s.fbo );
-	if ( s.map.tex )
-		fn->glDeleteTextures( 1, &s.map.tex );
-	fn->glGenTextures( 1, &s.map.tex );
-	fn->glBindTexture( GL_TEXTURE_2D, s.map.tex );
-	fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, n, n, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr );
-	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
-	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
-	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
-	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
-	fn->glBindTexture( GL_TEXTURE_2D, 0 );
-	fn->glBindFramebuffer( GL_FRAMEBUFFER, s.fbo );
-	fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s.map.tex, 0 );
+	/* lane VKCLOUD10: the target (cloudinshare.h ensureMap): a shared target while the view is on Vulkan, so the march and
+	 * the fly bake read it in place; red WW_VKVIEW_CLOUDIN_RED=1 (or the view on GL): the old texture calls */
+	bool remade = false;
+	const bool made = WwCloudInShare::ensureMap( fn, s.tgt, s.texSize, s.fbo, mapKey(), n, GL_RGBA8, mapShareWanted(), remade );
+	s.map.tex = s.tgt.tex;
+	if ( !remade )
+		return made;
 	const GLenum one = GL_COLOR_ATTACHMENT0;
 	fn->glDrawBuffers( 1, &one );
-	s.texSize = n;
-	return fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
+	return made && fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
 }
 
 void timeRead( NifSkopeOpenGLContext::GLFunctions * fn, CmState & s, int slot, bool wait )
@@ -828,6 +838,8 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 		s.refusedSkips++;
 		return s.map;
 	}
+	if ( WwCloudInShare::mapStale( s.tgt, mapKey(), mapShareWanted() ) )
+		s.key.clear();	// lane VKCLOUD10: the target's share state moved or a shutdown took it: its texels are gone, build again
 	if ( key != s.key || !m.valid ) {
 		slow.how = "built";
 		const double buildAt = slow.now();

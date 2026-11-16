@@ -6,6 +6,7 @@
 #include "cloudvolmath.h"
 #include "features/sky/atmomath.h"
 #include "features/vkframe/vkpresent.h"	// lane VKCLOUD6: the box volumes on the present device
+#include "cloudinshare.h"	// lane VKCLOUD10: the "vk cloudflybake:" line's in-place names
 #include "recx.h"
 #include "wwswitch.h"
 #include "wwsyncred.h"	// lane PERFFIX6: ^WW_SYNC_RED
@@ -161,6 +162,7 @@ void flyBakeSay()
 	sum.cpuMs += st.cpuMs;
 	sum.maxMs = std::max( sum.maxMs, st.maxMs );
 	sum.copies += st.copies;
+	sum.inPlace |= st.inPlace;
 	sum.pipelines = st.pipelines;
 	sum.buildMs = st.buildMs;
 	if ( !st.glWhy.empty() )
@@ -174,9 +176,10 @@ void flyBakeSay()
 		char line[512];
 		// lane VKCLOUD9: crossings and runs (passes) apart, copies per crossing and per run
 		std::snprintf( line, sizeof( line ), "vk cloudflybake: on Vulkan %d runs in %d crossings (one render pass a slice; %d pipelines "
-			"built in %.1f ms; %d input copies, %.2f a crossing, %.2f a run; drawing thread %.3f ms a crossing, max %.3f)", sum.runs,
-			sum.crossings, sum.pipelines, sum.buildMs, sum.copies, sum.crossings > 0 ? double( sum.copies ) / sum.crossings : 0.0,
-			sum.runs > 0 ? double( sum.copies ) / sum.runs : 0.0, sum.crossings > 0 ? sum.cpuMs / sum.crossings : 0.0, sum.maxMs );
+			"built in %.1f ms; %d input copies, %.2f a crossing, %.2f a run, read in place: %s; drawing thread %.3f ms a crossing, "
+			"max %.3f)", sum.runs, sum.crossings, sum.pipelines, sum.buildMs, sum.copies,
+			sum.crossings > 0 ? double( sum.copies ) / sum.crossings : 0.0, sum.runs > 0 ? double( sum.copies ) / sum.runs : 0.0,
+			WwCloudInShare::inPlaceNames( sum.inPlace ).c_str(), sum.crossings > 0 ? sum.cpuMs / sum.crossings : 0.0, sum.maxMs );
 		std::string s = line;
 		if ( sum.gl > 0 )
 			s += ", on GL " + std::to_string( sum.gl ) + " (last: " + sum.glWhy + ")";

@@ -414,6 +414,8 @@ bool flyBakeRunN( const FlyBakeRun * t, int n, std::string & why )
 			if ( !fxSlot( x, views[k], names, S.copies, w ) )
 				return refuse( "the fly bake's input " + std::to_string( k ) + ": " + w );
 			smp[k] = x.sampler;
+			if ( x.shared )  // lane VKCLOUD10: shape, detail, map = kInShape, kInDetail, kInMap
+				S.inPlace |= 1u << k;
 		}
 	} else {
 		views[0] = src->view;

@@ -13,6 +13,7 @@
 #include "features/exposure/cellhdr.h"
 #include "features/water/cellunderwater.h"	// lane WATERUNDER3: no clouds over a camera under water
 #include "features/vkframe/vkpresent.h"	// lane VKSHARE1: the march + history targets on the present device
+#include "cloudinshare.h"	// lane VKCLOUD10: the noise volumes on the present device
 #include "wwswitch.h"
 #include "wwsyncred.h"	// lane PERFFIX6: ^WW_SYNC_RED
 #include "gl/glscene.h"
@@ -30,6 +31,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <thread>
 #include <vector>
 
@@ -198,7 +200,8 @@ struct Tgt	// a colour (RGBA16F) + depth (R32F) pair in one FBO
 
 struct CvGpu
 {
-	GLuint shape = 0, detail = 0;
+	WwCloudInShare::Vol shape, detail;	// lane VKCLOUD10: shared targets while the view is on Vulkan
+	std::shared_ptr<char> inKeys{ new char[2], std::default_delete<char[]>() };	// their keys: heap bytes (a QHash value moves)
 	Tgt march, hist[2];
 	int cur = 0;
 	bool histOk = false;
@@ -239,23 +242,6 @@ const std::vector<std::uint8_t> & noise( bool detail )
 	static const std::vector<std::uint8_t> s = WwCloudNoise::shapeVolume();
 	static const std::vector<std::uint8_t> d = WwCloudNoise::detailVolume();
 	return detail ? d : s;
-}
-
-GLuint upload3d( NifSkopeOpenGLContext::GLFunctions * fn, const std::vector<std::uint8_t> & v, int n )
-{
-	GLuint t = 0;
-	fn->glGenTextures( 1, &t );
-	fn->glBindTexture( GL_TEXTURE_3D, t );
-	fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
-	fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_R8, n, n, n, 0, GL_RED, GL_UNSIGNED_BYTE, v.data() );
-	fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
-	fn->glGenerateMipmap( GL_TEXTURE_3D );
-	fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
-	fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
-	for ( GLenum w : { GL_TEXTURE_WRAP_S, GL_TEXTURE_WRAP_T, GL_TEXTURE_WRAP_R } )
-		fn->glTexParameteri( GL_TEXTURE_3D, w, GL_REPEAT );
-	fn->glBindTexture( GL_TEXTURE_3D, 0 );
-	return t;
 }
 
 /* lane VKSHARE1: while the view is on Vulkan (WW_VKVIEW=1, its size settled) the march and history targets live on the
@@ -543,10 +529,10 @@ void densityUniforms( Renderer * r, NifSkopeOpenGLContext::Program * p, CvGpu & 
 	}
 	p->uni1fv( "cvCal", cal, 2 * V::kCalN );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
-	fn->glBindTexture( GL_TEXTURE_3D, g.shape );
+	fn->glBindTexture( GL_TEXTURE_3D, g.shape.tex );
 	p->uni1i( "cvShape", unit );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit + 1 ) );
-	fn->glBindTexture( GL_TEXTURE_3D, g.detail );
+	fn->glBindTexture( GL_TEXTURE_3D, g.detail.tex );
 	p->uni1i( "cvDetail", unit + 1 );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit + 2 ) );
 	fn->glBindTexture( GL_TEXTURE_2D, b.mapBound ? m.tex : 0 );
@@ -555,11 +541,13 @@ void densityUniforms( Renderer * r, NifSkopeOpenGLContext::Program * p, CvGpu & 
 
 bool ensureNoise( Renderer * r, CvGpu & g )
 {
-	if ( !g.shape )
-		g.shape = upload3d( r->fn, noise( false ), WwCloudNoise::kShapeN );
-	if ( !g.detail )
-		g.detail = upload3d( r->fn, noise( true ), WwCloudNoise::kDetailN );
-	return g.shape && g.detail;
+	// lane VKCLOUD10: shared targets while the view is on Vulkan (the march and the fly bake read them in place); red
+	// WW_VKVIEW_CLOUDIN_RED=1 (or the view on GL): GL's own textures, the old upload
+	const bool want = WwVkPresent::shareWanted( "WW_VKVIEW_CLOUDIN_RED" );
+	const std::uintptr_t k = reinterpret_cast<std::uintptr_t>( g.inKeys.get() );
+	const bool s = WwCloudInShare::ensureVol( r->fn, g.shape, k, noise( false ).data(), WwCloudNoise::kShapeN, want, "cvShape" );
+	const bool d = WwCloudInShare::ensureVol( r->fn, g.detail, k + 1, noise( true ).data(), WwCloudNoise::kDetailN, want, "cvDetail" );
+	return s && d;
 }
 
 /* lane CLOUD5 round 2: EA's FAST spatiotemporal blue noise (res/ssgi, BSD-3; cellssgi.cpp loads the same sheet), 64 slices
@@ -936,6 +924,7 @@ bool cvOnVulkan( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & 
 		sum.cpuMs += st.cpuMs;
 		sum.maxMs = std::max( sum.maxMs, st.maxMs );
 		sum.copies += st.copies;
+		sum.inPlace |= st.inPlace;
 		sum.pipelines = st.pipelines;
 		sum.buildMs = st.buildMs;
 		if ( !st.glWhy.empty() )
@@ -948,7 +937,8 @@ bool cvOnVulkan( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & 
 		char line[512];
 		if ( sum.runs > 0 )
 			std::snprintf( line, sizeof( line ), "vk clouds: on Vulkan %d frames (march + resolve, one crossing; %d pipelines built in %.1f ms; "
-				"%d input copies; drawing thread %.3f ms, max %.3f)", sum.runs, sum.pipelines, sum.buildMs, sum.copies, sum.cpuMs / sum.runs, sum.maxMs );
+				"%d input copies, read in place: %s; drawing thread %.3f ms, max %.3f)", sum.runs, sum.pipelines, sum.buildMs, sum.copies,
+				WwCloudInShare::inPlaceNames( sum.inPlace ).c_str(), sum.cpuMs / sum.runs, sum.maxMs );
 		else
 			std::snprintf( line, sizeof( line ), "vk clouds: on Vulkan wanted, 0 frames drawn" );
 		std::string s = line;
