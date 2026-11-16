@@ -8596,6 +8596,7 @@ void csmDrop()
 	csmSemsDrop( gl().ok && S.semCtx == gl().ctx );
 }
 bool csmAtTex( unsigned name, VkImageView & view, VkSampler & smp, std::string & why );  // lane VKSHADOW8 (after vkflare.inc)
+bool csmAtTexCheck( unsigned name, std::string & why );  // lane VKSHADOW9 (after vkflare.inc)
 }  // namespace
 
 namespace WwVkPresent
@@ -8854,6 +8855,11 @@ bool csmRun( const CsmRun & t, std::string & why )
 	S.st.cpuMs += ms;
 	S.st.maxMs = std::max( S.st.maxMs, ms );
 	return true;
+}
+
+bool csmAtTexOk( unsigned name, std::string & why )
+{
+	return csmAtTexCheck( name, why );
 }
 
 void csmOnGl( const char * why )
@@ -9377,6 +9383,25 @@ bool csmAtTex( unsigned name, VkImageView & view, VkSampler & smp, std::string &
 	view = s->view;
 	return true;
 }
+// lane VKSHADOW9: csmAtTex's refusals without its sampler work, asked when the app records an alpha caster (a map no twin
+// takes keeps that caster on GL instead of refusing the whole run)
+bool csmAtTexCheck( unsigned name, std::string & why )
+{
+	auto it = ot().twins.find( GLuint( name ) );
+	const Shared * s = it == ot().twins.end() ? nullptr : farTwinFind( it->second.key );
+	if ( !s || !s->view || s->type != 0 ) {
+		why = "no Vulkan twin (not block-compressed)";
+		return false;
+	}
+	WwVkPresent::BlSampler bs;
+	if ( !WwVkPresent::blSamplerRead( name, bs, csmGlProc, why ) )
+		return false;
+	if ( blIsSrgb( s->fmt ) && bs.srgbDecode == 0x8A4A ) {
+		why = "an sRGB map with its decode skipped";
+		return false;
+	}
+	return true;
+}
 }  // namespace
 
 namespace
@@ -9790,6 +9815,8 @@ void csmSay( bool wanted, const char * glWhy )
 		line += QStringLiteral( ", %1 refused to GL (last: %2)" ).arg( st.fails ).arg( QString::fromStdString( st.failWhy ) );
 	if ( st.remaps > 0 )  // lane VKSHADOW6: the cache's Scroll remaps drawn in the crossing
 		line += QStringLiteral( ", %1 cache remaps" ).arg( st.remaps );
+	if ( st.alphaDraws > 0 )  // lane VKSHADOW9: alpha-tested casters drawn in the crossing, their base maps
+		line += QStringLiteral( ", %1 alpha draws (%2 base maps)" ).arg( st.alphaDraws ).arg( st.alphaTex );
 	line += pool;
 	said = line;
 	qInfo().noquote() << line;

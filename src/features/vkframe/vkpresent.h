@@ -459,7 +459,8 @@ struct CsmDraw
 	float zScale = 1.0f, zBias = 0.0f;
 	/* lane VKSHADOW7: atTex != 0 (mesh draws only): alpha-tested (lookdev_csmdepth_at.frag), a fragment is discarded where
 	 * texture( atTex, uv * uvScale + uvOffset ).a * atAlpha < atRef. atTex = a texture cache BC twin's GL name (objTexMake),
-	 * sampled with the GL texture's own sampler state (read at csmRun); every mesh the draws use needs CsmMesh::uv */
+	 * sampled with the GL texture's own wrap and filters at anisotropy 1 (lane VKSHADOW9, ruling R1: GL's alpha test binds the
+	 * same through features/shadows/shadowatsampler.h); every mesh the draws use needs CsmMesh::uv */
 	unsigned atTex = 0;
 	float uvScale[2] = { 1.0f, 1.0f }, uvOffset[2] = { 0.0f, 0.0f }, atAlpha = 1.0f, atRef = 0.0f;
 };
@@ -497,6 +498,8 @@ struct CsmRun
 };
 //! GL current, its own cascade draws issued: the queued draws run on Vulkan into the shared targets. false: why (GL draws them)
 bool csmRun( const CsmRun & t, std::string & why );
+//! lane VKSHADOW9: csmRun would take this alpha map (a BC twin, not sRGB with its decode skipped); false: the caster stays on GL
+bool csmAtTexOk( unsigned name, std::string & why );
 void csmOnGl( const char * why );
 struct CsmStat
 {

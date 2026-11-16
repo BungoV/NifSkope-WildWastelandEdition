@@ -1742,7 +1742,7 @@ static void sunShadowPassImpl( Scene * scene )
 		vkWhy = "the view is not on Vulkan, or WW_VKVIEW_CSM_RED=1";
 	}
 	// lane VKSHADOW4: mFirst / mN = the job's mesh draws in vkMDraw, [0] back faces culled, [1] two-sided
-	struct VkRec { std::size_t jb; int target, layer; std::uint32_t mFirst[2] = { 0, 0 }, mN[2] = { 0, 0 }; };
+	struct VkRec { std::size_t jb; int target, layer; std::uint32_t mFirst[2] = { 0, 0 }, mN[2] = { 0, 0 }, atFirst = 0, atN = 0; };
 	std::vector<VkRec> vkRec;
 	std::vector<int> vkRemap;	// lane VKSHADOW6: the cascades whose Scroll remap the crossing draws (static and live layer)
 	int curTarget = -1, curLayer = 0;	// the attached layer: 0 the live map, 1 the static layers, -1 another
@@ -1754,15 +1754,21 @@ static void sunShadowPassImpl( Scene * scene )
 	std::vector<std::int32_t> vkMeshOf( casters.size(), -1 );	// caster -> its mesh in vkMesh
 	std::vector<Matrix4> vkMeshMv;	// one model-view a recorded caster
 	std::vector<std::uint32_t> vkMDraw;	// 4 words a draw: mesh, matrix (in vkMeshMv), first index, index count
-	auto vkMeshFor = [&]( std::size_t kn ) {
+	// lane VKSHADOW9: the per-draw pass's alpha casters (pass 1), one record a caster: its mesh draws [mFirst, mFirst + mN) in
+	// vkMDraw, culled or two-sided, and its base map's GL name as the GL draw bound it (TexCache::wwBound); VkRec atFirst / atN
+	struct VkAt { std::size_t kn; bool cull; unsigned tex; std::uint32_t mFirst, mN; };
+	std::vector<VkAt> vkAt;
+	auto vkMeshFor = [&]( std::size_t kn, bool uv = false ) {
 		if ( vkMeshOf[kn] >= 0 )
 			return std::uint32_t( vkMeshOf[kn] );
 		static_assert( sizeof( Vector3 ) == 12 && sizeof( Triangle ) == 6, "the pool reads verts / triangles as packed arrays" );
 		const Caster & k = casters[kn];
 		const float * attrv[8] = { k.skinned.empty() ? &( k.sh->verts.constFirst()[0] ) : &( k.skinned.front()[0] ), nullptr, nullptr,
 			nullptr, nullptr, nullptr, nullptr, nullptr };
-		const NifSkopeOpenGLContext::ShapeDataHash h( std::uint32_t( k.sh->verts.size() ), 3, std::size_t( k.sh->triangles.size() ) * 6,
-			attrv, k.sh->triangles.constData() );
+		if ( uv )	// lane VKSHADOW9: an alpha caster's first uv set, as pass 1 draws it (the gen covers it)
+			attrv[1] = &( k.sh->coords.constFirst().constFirst()[0] );
+		const NifSkopeOpenGLContext::ShapeDataHash h( std::uint32_t( k.sh->verts.size() ), uv ? 0x23 : 3,
+			std::size_t( k.sh->triangles.size() ) * 6, attrv, k.sh->triangles.constData() );
 		WwVkPresent::CsmMesh m;
 		m.key = reinterpret_cast<std::uintptr_t>( k.sh );
 		m.gen = h.h[0] ^ ( h.h[1] * 0x9E3779B97F4A7C15ULL ) ^ ( std::uint64_t( h.numVerts ) << 32 | h.elementBytes );
@@ -1770,6 +1776,7 @@ static void sunShadowPassImpl( Scene * scene )
 		m.verts = std::uint32_t( k.sh->verts.size() );
 		m.idx = reinterpret_cast<const std::uint16_t *>( k.sh->triangles.constData() );
 		m.indices = std::uint32_t( k.sh->triangles.size() * 3 );
+		m.uv = attrv[1];
 		vkMeshOf[kn] = std::int32_t( vkMesh.size() );
 		vkMesh.push_back( m );
 		return std::uint32_t( vkMeshOf[kn] );
@@ -1807,6 +1814,7 @@ static void sunShadowPassImpl( Scene * scene )
 		const Cascade & c = s.c[J.i];
 		const bool vkThis = vkCsm && curTarget >= 0;	// lane VKSHADOW1
 		std::vector<std::uint32_t> vkJob[2];	// lane VKSHADOW4: this job's mesh draws, culled / two-sided
+		const std::uint32_t vkAtStart = std::uint32_t( vkAt.size() );	// lane VKSHADOW9: this job's alpha casters from here
 		fn->glViewport( 0, 0, c.vw, c.vh );
 		if ( J.scissor ) {
 			fn->glEnable( GL_SCISSOR_TEST );
@@ -1901,6 +1909,7 @@ static void sunShadowPassImpl( Scene * scene )
 				attrv[1] = &( k.sh->colors.constFirst()[0] );
 				mask |= 0x40;
 			}
+			GLuint atName = 0;	// lane VKSHADOW9: the base map GL bound (0: none, the caster stays on GL)
 			if ( pass ) {
 				int texunit = 0;
 				const BSLightingShaderProperty * lsp = k.sh->wwLightingShader();
@@ -1908,6 +1917,7 @@ static void sunShadowPassImpl( Scene * scene )
 				k.sh->wwLeafCovArm( "sun" );	// lane TREELEAF2: the colour pass's coverage copy
 				ShadowAt::bindState[2] = 0;
 				p->uniSampler( bsp, "BaseMap", 0, texunit, QString(), bsp->clampMode, QString() );
+				atName = ShadowAt::bindState[2] ? scene->textures->wwBound : 0;	// 0: uniSampler bound nothing this call
 				atSampler( fn );
 				k.sh->wwLeafCovDisarm();
 				p->uni2f( "uvScale", bsp->uvScale.x, bsp->uvScale.y );
@@ -1941,6 +1951,26 @@ static void sunShadowPassImpl( Scene * scene )
 					p->uni1i( "lodTreeAnim", 1 );
 					CellFarInst::drawCascade( r, *k.sh->wwFarInstData(), p, m, b, &slices[J.i], WwFarSwaySlice::Sway );
 				}
+				continue;
+			}
+			std::string atWhy;
+			if ( vkThis && pass && atName && !k.sway && !k.sh->triangles.isEmpty() && !k.sh->coords.isEmpty()
+				&& k.sh->coords.constFirst().size() >= k.sh->verts.size() && WwVkPresent::csmAtTexOk( atName, atWhy ) ) {
+				// lane VKSHADOW9: an alpha caster recorded for the crossing (one CsmDraw); GL draws it there on a refusal
+				const std::uint32_t mi = vkMeshFor( kn, true ), mx = std::uint32_t( vkMeshMv.size() );
+				vkMeshMv.push_back( k.sh->viewTrans().toMatrix4() );
+				VkAt a { kn, !k.twoSided, atName, std::uint32_t( vkMDraw.size() / 4 ), 0 };
+				if ( runs ) {
+					for ( size_t q = 0; q + 1 < cullRanges.size(); q += 2 )
+						if ( cullRanges[q + 1] > 0 )
+							vkMDraw.insert( vkMDraw.end(),
+								{ mi, mx, std::uint32_t( cullRanges[q] ) * 3, std::uint32_t( cullRanges[q + 1] ) * 3 } );
+				} else {
+					vkMDraw.insert( vkMDraw.end(), { mi, mx, 0u, std::uint32_t( k.sh->triangles.size() * 3 ) } );
+				}
+				a.mN = std::uint32_t( vkMDraw.size() / 4 ) - a.mFirst;
+				if ( a.mN )
+					vkAt.push_back( a );
 				continue;
 			}
 			if ( vkThis && !pass && !k.sway && !k.sh->triangles.isEmpty() ) {
@@ -1990,7 +2020,9 @@ static void sunShadowPassImpl( Scene * scene )
 				v.mN[q] = std::uint32_t( vkJob[q].size() / 4 );
 				vkMDraw.insert( vkMDraw.end(), vkJob[q].begin(), vkJob[q].end() );
 			}
-			if ( ( progQ && ( span[jb][QSolid].n || span[jb][QTwoSided].n ) ) || v.mN[0] || v.mN[1] )
+			v.atFirst = vkAtStart;
+			v.atN = std::uint32_t( vkAt.size() ) - vkAtStart;
+			if ( ( progQ && ( span[jb][QSolid].n || span[jb][QTwoSided].n ) ) || v.mN[0] || v.mN[1] || v.atN )
 				vkRec.push_back( v );
 		}
 		if ( progAt ) {
@@ -2303,6 +2335,21 @@ static void sunShadowPassImpl( Scene * scene )
 			}
 		}
 		const bool noBias = red( "nobias" );
+		auto baseDraw = [&]( const VkRec & v, const Job & J, const Cascade & c ) {
+			WwVkPresent::CsmDraw d;
+			d.target = v.target;
+			d.layer = v.layer;
+			d.vw = c.vw;
+			d.vh = c.vh;
+			if ( J.scissor )
+				std::memcpy( d.sc, J.rc, sizeof( d.sc ) );
+			std::memcpy( d.clip, c.clipFromView, sizeof( d.clip ) );
+			d.unit = noBias ? 0.0f : s.unitBias;
+			d.slope = noBias ? 0.0f : s.slopeBias;
+			d.clamp = ( offsetClamp && !cslopeZero )
+				? float( s.unitBias / 65536.0 + s.slopeBias * c.texel * 4.0 / std::max( c.far - kNear, 1e-6 ) ) : 0.0f;
+			return d;
+		};
 		for ( const VkRec & v : vkRec ) {
 			const Job & J = jobs[v.jb];
 			const Cascade & c = s.c[J.i];
@@ -2311,18 +2358,7 @@ static void sunShadowPassImpl( Scene * scene )
 			for ( int q : { int( QSolid ), int( QTwoSided ) } ) {
 				if ( !span[v.jb][q].n && !v.mN[q] )
 					continue;
-				WwVkPresent::CsmDraw d;
-				d.target = v.target;
-				d.layer = v.layer;
-				d.vw = c.vw;
-				d.vh = c.vh;
-				if ( J.scissor )
-					std::memcpy( d.sc, J.rc, sizeof( d.sc ) );
-				std::memcpy( d.clip, c.clipFromView, sizeof( d.clip ) );
-				d.unit = noBias ? 0.0f : s.unitBias;
-				d.slope = noBias ? 0.0f : s.slopeBias;
-				d.clamp = ( offsetClamp && !cslopeZero )
-					? float( s.unitBias / 65536.0 + s.slopeBias * c.texel * 4.0 / std::max( c.far - kNear, 1e-6 ) ) : 0.0f;
+				WwVkPresent::CsmDraw d = baseDraw( v, J, c );
 				d.cull = q == QSolid;
 				d.first = std::uint32_t( span[v.jb][q].first );
 				d.n = std::uint32_t( span[v.jb][q].n );
@@ -2334,6 +2370,26 @@ static void sunShadowPassImpl( Scene * scene )
 					d.n = v.mN[q];
 					run.d.push_back( d );
 				}
+			}
+			// lane VKSHADOW9: the job's alpha casters, one draw each (its base map's twin at anisotropy 1, ruling R1)
+			for ( std::uint32_t ai = v.atFirst; ai < v.atFirst + v.atN; ai++ ) {
+				const VkAt & a = vkAt[ai];
+				const Caster & k = casters[a.kn];
+				const BSLightingShaderProperty * lsp = k.sh->wwLightingShader();
+				const BSShaderLightingProperty * bsp = k.sh->wwShaderLighting();
+				WwVkPresent::CsmDraw d = baseDraw( v, J, c );
+				d.cull = a.cull;
+				d.mesh = true;
+				d.first = a.mFirst;
+				d.n = a.mN;
+				d.atTex = a.tex;
+				d.uvScale[0] = bsp->uvScale.x;
+				d.uvScale[1] = bsp->uvScale.y;
+				d.uvOffset[0] = bsp->uvOffset.x;
+				d.uvOffset[1] = bsp->uvOffset.y;
+				d.atAlpha = lsp ? lsp->alpha : 1.0f;
+				d.atRef = k.atRef;
+				run.d.push_back( d );
 			}
 		}
 		bool anyQueue = false;	// lane VKSHADOW4: a run of mesh draws only needs no pool
@@ -2399,6 +2455,39 @@ static void sunShadowPassImpl( Scene * scene )
 						r->drawShape( me.verts, 3, m[3], GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, me.idx + m[2] );
 						PassTime::countDraw( 1 );
 					}
+				}
+				if ( v.atN && progAt ) {	// lane VKSHADOW9: the recorded alpha casters, as pass 1 draws them
+					r->useProgram( "lookdev_csmdepth_at.prog" );
+					if ( const int l = progAt->uniLocation( "csmClipFromView" ); l >= 0 )
+						fn->glUniformMatrix4fv( l, 1, GL_FALSE, c.clipFromView );
+					progAt->uni1i( "lodTreeAnim", 0 );
+					for ( std::uint32_t ai = v.atFirst; ai < v.atFirst + v.atN; ai++ ) {
+						const VkAt & a = vkAt[ai];
+						const Caster & k = casters[a.kn];
+						a.cull ? fn->glEnable( GL_CULL_FACE ) : fn->glDisable( GL_CULL_FACE );
+						int texunit = 0;
+						const BSLightingShaderProperty * lsp = k.sh->wwLightingShader();
+						BSShaderLightingProperty * bsp = k.sh->wwShaderLighting();
+						k.sh->wwLeafCovArm( "sun" );
+						ShadowAt::bindState[2] = 0;
+						progAt->uniSampler( bsp, "BaseMap", 0, texunit, QString(), bsp->clampMode, QString() );
+						atSampler( fn );
+						k.sh->wwLeafCovDisarm();
+						progAt->uni2f( "uvScale", bsp->uvScale.x, bsp->uvScale.y );
+						progAt->uni2f( "uvOffset", bsp->uvOffset.x, bsp->uvOffset.y );
+						progAt->uni1f( "alpha", lsp ? lsp->alpha : 1.0f );
+						progAt->uni1f( "alphaThreshold", k.atRef );
+						for ( std::uint32_t q = a.mFirst; q < a.mFirst + a.mN; q++ ) {
+							const std::uint32_t * m = &vkMDraw[4 * std::size_t( q )];
+							const WwVkPresent::CsmMesh & me = vkMesh[m[0]];
+							progAt->uni4m( "modelViewMatrix", vkMeshMv[m[1]] );
+							const float * attrs[8] = { me.pos, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, me.uv };
+							r->drawShape( me.verts, 0x20000003ULL, m[3], GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs, me.idx + m[2] );
+							PassTime::countDraw( 1 );
+						}
+					}
+					fn->glBindSampler( 0, 0 );
+					r->useProgram( "lookdev_csmdepth.prog" );
 				}
 				if ( J.scissor )
 					fn->glDisable( GL_SCISSOR_TEST );
