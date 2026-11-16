@@ -55,6 +55,8 @@
 // pipeline GL_ALWAYS (it then overwrites GL's casters): a remap frame1 layer FAILs past 1 unit with remapRed >= 1.
 // Lane VKSHADOW7 (2026-11-16, item 1 bar), lines `SHADOWVIEW alpha ...` after the remap ones: the alpha-tested per-draw
 // casters on the cache's BC twins; the case, its BOUND and its reds: shadowview_alpha.inc.
+// Lane VKSHADOW10 (2026-11-16, item 3 bar), lines `SHADOWVIEW sway ...` after the alpha ones: the swaying per-draw casters
+// (lookdev_csmdepth.vert's far wind); the case, its BOUND and its reds: shadowview_sway.inc.
 #define WW_VKPRESENT_NO_QT
 #include "../../src/features/vkframe/vkpresent.cpp"
 #include "../../src/features/shadows/shadowatsampler.h"  // lane VKSHADOW9 (R1): the app's alpha-test sampler
@@ -1625,7 +1627,8 @@ int main( int argc, char ** argv )
 	}
 	std::printf( "SHADOWVIEW remap %s\n", rmOk ? "OK" : "FAILED" );
 #include "shadowview_alpha.inc"
-	ok = ok && meshOk && ilOk && rmOk && atOk;
+#include "shadowview_sway.inc"
+	ok = ok && meshOk && ilOk && rmOk && atOk && swOk;
 	f.bindFramebuffer( kFb, 0 );
 	for ( int t = 0; t < 2; t++ )
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &keyHome[t] ) );
