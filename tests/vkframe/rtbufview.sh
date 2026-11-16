@@ -15,9 +15,12 @@ nRestir=$(grep -c "rtBufShare( WwVkPresent::kRtBufRestir" "$APP")
 nCopy=$(grep -c "rtBufCopy( WwVkPresent::kRtBufRestir" "$APP")
 nOwner=$(grep -c "rtBufOwner( WwVkPresent::kRtBuf" "$APP")
 nAddr=$(grep -c "uintptr_t>( &K )" "$APP")
-echo "RTBUF app: rtBufShare atlas $nAtlas (want >= 1), restir $nRestir (want >= 1), rtBufCopy restir $nCopy (want >= 1), rtBufOwner $nOwner (want >= 2), keys by &K $nAddr (want 0)"
+# GL binds the shared cellRestir on its unit while the view is on Vulkan, so a route matching the bound buffer finds it
+nBind=$(grep -c "u.bind( WwCellUnit::Restir, GL_TEXTURE_BUFFER, tex )" "$APP")
+nVkTex=$(grep -c "tex = G.vkTex" "$APP")
+echo "RTBUF app: rtBufShare atlas $nAtlas (want >= 1), restir $nRestir (want >= 1), rtBufCopy restir $nCopy (want >= 1), rtBufOwner $nOwner (want >= 2), keys by &K $nAddr (want 0), restir unit binds the shared copy $nBind / $nVkTex (want >= 1 / >= 1)"
 appOk=1
-[ "$nAtlas" -ge 1 ] && [ "$nRestir" -ge 1 ] && [ "$nCopy" -ge 1 ] && [ "$nOwner" -ge 2 ] && [ "$nAddr" -eq 0 ] || appOk=0
+[ "$nAtlas" -ge 1 ] && [ "$nRestir" -ge 1 ] && [ "$nCopy" -ge 1 ] && [ "$nOwner" -ge 2 ] && [ "$nAddr" -eq 0 ] && [ "$nBind" -ge 1 ] && [ "$nVkTex" -ge 1 ] || appOk=0
 g++ -O2 -std=c++17 -pthread -I"$ROOT/src" "$ROOT/tests/vkframe/rtbufview.cpp" -o "$OUT/rtbufview.exe" -lopengl32 -lgdi32 -luser32 \
 	|| { echo "RTBUF GATE FAILED (g++)"; exit 1; }
 "$OUT/rtbufview.exe" 2>&1 | tee "$OUT/rtbufview.txt"
