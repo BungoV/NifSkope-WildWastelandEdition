@@ -78,6 +78,9 @@
 #include "features/vkframe/fogbloom_view_ps.spv.h"  // lane VKFAR2 (row P4b): the fog bloom's own pass (vkfogbloom.inc)
 #include "features/vkframe/cloud_shadowmap_view_ps.spv.h"  // lane VKCLOUD3: the cloud shadow map's build (vkcloudshadow.inc)
 #include "features/vkframe/vkcloudshadow.h"
+#include "features/vkframe/cloudmap_view_vs.spv.h"  // lane VKCLOUD4: the cloud map's build (vkcloudmap.inc)
+#include "features/vkframe/cloudmap_view_ps.spv.h"
+#include "features/vkframe/vkcloudmap.h"
 #include "features/vkframe/cloud_composite_view_ps.spv.h"  // lane VKFAR2 (row P8): the clouds in front (vkcloudfront.inc)
 // lane VKFAR2 (row L8 slice 1): rain / snow as a record pass + instanced quads (vkprecip.inc)
 #include "features/vkframe/precip_view_cs.spv.h"
@@ -782,6 +785,7 @@ bool precipRecord( std::string & why );  // lane VKFAR2 (vkprecip.inc): fxWork's
 bool underRecord( std::string & why );  // lane VKWATER4 (vkunder.inc): fxWork's kind 10, the underwater fog
 bool taRecord( std::string & why );  // lane VKFAR7 (vktaareactive.inc): fxWork's kind 11, the TAA mask's reactive pass
 bool csRecord( std::string & why );  // lane VKCLOUD3 (vkcloudshadow.inc): fxWork's kind 12, the cloud shadow map's build
+bool cmRecord( std::string & why );  // lane VKCLOUD4 (vkcloudmap.inc): fxWork's kind 13, the cloud map's build
 void waterDrop();
 void underDrop();  // lane VKWATER4 (vkunder.inc)
 void objDrop();  // lane VKOBJ1
@@ -6119,6 +6123,11 @@ bool fxWork( std::string & why )
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
 		}
+	} else if ( F.kind == 13 ) {  // lane VKCLOUD4: the cloud map's build
+		if ( !cmRecord( why ) ) {
+			v.vkEndCommandBuffer( F.cmd );
+			return false;
+		}
 	} else {
 		if ( !F.fbR || ( !F.skipMarch && !F.fbM ) ) {
 			v.vkEndCommandBuffer( F.cmd );
@@ -9928,3 +9937,4 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 #include "features/vkframe/vktaareactive.inc"  // lane VKFAR7: the TAA mask's reactive pass (taainputs.cpp pass 4)
 #include "features/vkframe/vklamp.inc"  // lane VKLAMP1: the lamps' plain shadow cubes (celllamps.cpp)
 #include "features/vkframe/vkcloudshadow.inc"  // lane VKCLOUD3: the cloud shadow map's build (cloudshadow.cpp)
+#include "features/vkframe/vkcloudmap.inc"  // lane VKCLOUD4: the cloud map's build (cloudmap.cpp)
