@@ -61,7 +61,7 @@ static_assert( kWaterPsLooseAt + WwVkPresent::kT_fargndpPsBytes <= kFargndConstA
 const TwinSpec kFargndpSpec { "far ground pages", vkframe_fargnd_view_vs_spv, sizeof( vkframe_fargnd_view_vs_spv ),
 	vkframe_fargndp_view_ps_spv, sizeof( vkframe_fargndp_view_ps_spv ), kFargndpImg, sizeof( kFargndpImg ) / sizeof( kFargndpImg[0] ),
 	kFargndpInts, sizeof( kFargndpInts ) / sizeof( kFargndpInts[0] ), WwVkPresent::kT_fargndpPsBytes, kFargndConstAt, kFargndHostBytes,
-	true, 12, true };
+	true, 18, true };  // fxWork kind 18 (VKMERGE1: 12 is vkcloud1's cloud shadow; 0-17 taken, 19 VKCLOUD5, 20 VKAIR12)
 
 WaterDraw & farGroundPD()
 {
