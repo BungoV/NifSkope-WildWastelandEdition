@@ -276,6 +276,17 @@ const Shared * farTwinFind( std::uintptr_t key )
 	return it == m.end() ? nullptr : &it->second;
 }
 
+// lane VKGROUND5: a GL name that is a twin of this context (the far ground's page pools), read in place as farSharedOf's are
+const Shared * farTwinOfTex( unsigned tex )
+{
+	if ( !tex )
+		return nullptr;
+	for ( const auto & s : farCards().twins )
+		if ( s.second.tex == tex && s.second.glCtx == gl().ctx && s.second.view )
+			return &s.second;
+	return nullptr;
+}
+
 constexpr GLenum kFcTexBuffer = 0x8C2A, kFcBindingTexBuffer = 0x8C2C, kFcRgba32f = 0x8814, kFcRgba32i = 0x8D82, kFcRgba32ui = 0x8D70,
 	kFcR32i = 0x8235, kFcRg8 = 0x822B;
 
@@ -544,6 +555,12 @@ void farTwinDrop( std::uintptr_t key )
 	sharedFree( it->second, gl().ok && it->second.glCtx == gl().ctx );
 	C.twins.erase( it );
 	sharedGen()++;
+}
+
+bool farTwinIs( std::uintptr_t key, unsigned tex )
+{
+	const Shared * s = farTwinFind( key );
+	return s && tex && s->tex == tex;
 }
 
 // one level of one layer as the present device sees it (the gates compare it with what GL wrote; GL finished first)

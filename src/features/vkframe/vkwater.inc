@@ -2081,6 +2081,9 @@ static bool twinRun( WaterDraw & D, const TwinSpec & P, const WaterRun & r, std:
 			} else if ( const std::uintptr_t sk = farSharedOf( s->tex ) ) {
 				view = sharedFind( sk )->view;  // already on the present device (another pass's target)
 				texNames.push_back( s->tex );
+			} else if ( const Shared * ft = farTwinOfTex( s->tex ) ) {
+				view = ft->view;  // lane VKGROUND5: a far twin the owner made (the far ground's page pools)
+				texNames.push_back( s->tex );
 			} else {
 				unsigned twin = 0;
 				if ( !waterTwin( key, *s, twin, w ) )
@@ -2529,6 +2532,9 @@ static bool twinRunN( WaterDraw & D, const TwinSpec & P, const WaterRun * const 
 			return refuse( std::string( nm ) + ": a base level above 0" );
 		} else if ( const std::uintptr_t sk = farSharedOf( s->tex ) ) {
 			view = sharedFind( sk )->view;  // already on the present device (another pass's target)
+			texNames.push_back( s->tex );
+		} else if ( const Shared * ft = farTwinOfTex( s->tex ) ) {
+			view = ft->view;  // lane VKGROUND5: a far twin the owner made (the far ground's page pools)
 			texNames.push_back( s->tex );
 		} else {
 			unsigned twin = 0;

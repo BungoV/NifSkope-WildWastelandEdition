@@ -20,6 +20,7 @@ BSD License - see nifskope.h
 #include "features/far-lod/loddecal.h"
 #include "features/exposure/cellhdr.h"	// lane VKFAR3: the shared tone frame
 #include "features/vkframe/vkpresent.h"	// lane VKFAR3: ring 0 on the Vulkan view (row G3)
+#include "features/vkframe/vkfarcards.h"	// lane VKGROUND5: the BC1 page pools as far twins
 #include "features/vkframe/vkwater.h"
 
 #include <QElapsedTimer>
@@ -165,11 +166,23 @@ std::uintptr_t vkKeyOf( const Gpu & g, int slot )
 	return reinterpret_cast<std::uintptr_t>( g_vkKeys + kVkKeysPer * g.vkSlot + slot );
 }
 
+// lane VKGROUND5: slots 4, 5 (the page pools, BC1) are far twins; the others sharedTarget's
+constexpr int kVkFirstTwin = 4;
+
+bool vkIs( const Gpu & g, int slot, GLuint t )
+{
+	return slot >= kVkFirstTwin ? WwVkPresent::farTwinIs( vkKeyOf( g, slot ), t ) : WwVkPresent::sharedTargetIs( vkKeyOf( g, slot ), t );
+}
+
 //! a shared input goes with its target (its GL name too); one a present shutdown already took is only forgotten
 void delShared( Gpu & g, int slot, GLuint & t, qint64 & bytes )
 {
-	if ( WwVkPresent::sharedTargetIs( vkKeyOf( g, slot ), t ) )
-		WwVkPresent::sharedTargetDrop( vkKeyOf( g, slot ) );
+	if ( vkIs( g, slot, t ) ) {
+		if ( slot >= kVkFirstTwin )
+			WwVkPresent::farTwinDrop( vkKeyOf( g, slot ) );
+		else
+			WwVkPresent::sharedTargetDrop( vkKeyOf( g, slot ) );
+	}
 	t = 0;
 	bytes = 0;
 	g.vkShared &= ~( 1 << slot );
@@ -202,7 +215,9 @@ bool sharedIn( Gpu & g, int slot, int type, int w, int h, int d, GLenum fmt, int
 	}
 	unsigned tex = 0;
 	std::string why;
-	if ( !WwVkPresent::sharedTarget( vkKeyOf( g, slot ), type, w, h, d, fmt, tex, why, levels ) ) {
+	const bool made = slot >= kVkFirstTwin ? WwVkPresent::farTwin( vkKeyOf( g, slot ), type, w, h, d, fmt, tex, why, levels )
+		: WwVkPresent::sharedTarget( vkKeyOf( g, slot ), type, w, h, d, fmt, tex, why, levels );
+	if ( !made ) {
 		g.vkWhy = why;
 		g.vkFailed |= 1 << slot;
 		if ( !g.vkShared ) {
@@ -252,9 +267,9 @@ void freeKit( NifSkopeOpenGLContext::GLFunctions * fn, Gpu & g )
 
 void freePools( NifSkopeOpenGLContext::GLFunctions * fn, Gpu & g )
 {
-	delTex( fn, g.pagesN, g.bPagesN );
-	delTex( fn, g.pagesF, g.bPagesF );
-	delTex( fn, g.cellTex, g.bCells );
+	delIn( fn, g, 4, g.pagesN, g.bPagesN );
+	delIn( fn, g, 5, g.pagesF, g.bPagesF );
+	delIn( fn, g, 3, g.cellTex, g.bCells );
 	qint64 none = 0;
 	delTex( fn, g.scratchN, none );
 	delTex( fn, g.scratchF, none );
@@ -944,6 +959,29 @@ GLuint allocPool( NifSkopeOpenGLContext::GLFunctions * fn, int side, int layers,
 	return t;
 }
 
+/* lane VKGROUND5: a pool on the present device (far twin slot 4 / 5, the same levels and filters) while mode 2 draws there
+ * (share); GL's own otherwise or when the twin failed (its slot bit in vkFailed, not tried again until the view goes off) */
+GLuint allocPoolIn( NifSkopeOpenGLContext::GLFunctions * fn, Gpu & g, int slot, int side, int layers, bool compressed, qint64 & bytes,
+	bool share )
+{
+	GLuint t = 0;
+	const int nl = FgSched::levels( side );
+	if ( !share || ( g.vkFailed & ( 1 << slot ) ) || !sharedIn( g, slot, 2, side, side, layers, compressed ? kBc1 : GL_RGBA8, nl, t ) )
+		return allocPool( fn, side, layers, compressed, bytes );
+	fn->glBindBuffer( GL_PIXEL_UNPACK_BUFFER, 0 );
+	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, t );
+	fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BASE_LEVEL, 0 );
+	fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, nl - 1 );
+	fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
+	fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+	fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+	fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+	fn->glTexParameterf( GL_TEXTURE_2D_ARRAY, 0x84FE /* GL_TEXTURE_MAX_ANISOTROPY */, 8.0f );
+	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, 0 );
+	bytes = FgSched::pageBytes( side, compressed ) * layers;
+	return t;
+}
+
 //! Paints this frame's pages: the cell's layers + decals into a scratch page, its mips, then BC1 blocks (GPU) through
 //! a pixel buffer into the pool's layer, or (red nocompress) the levels copied as they are.
 bool paintJobs( Renderer * r, Doc & d, const std::vector<FgSched::Job> & jobs, QString * why )
@@ -1079,7 +1117,7 @@ bool paintJobs( Renderer * r, Doc & d, const std::vector<FgSched::Job> & jobs, Q
 }
 
 //! The cell table the draw reads: per ring cell pool, layer, fade (RGBA16UI; uploaded when it changes).
-void uploadCells( NifSkopeOpenGLContext::GLFunctions * fn, Doc & d )
+void uploadCells( NifSkopeOpenGLContext::GLFunctions * fn, Doc & d, bool share )
 {
 	Gpu & g = d.gpu;
 	std::vector<quint16> t( size_t( d.ncx ) * size_t( d.ncy ) * 4, 0 );
@@ -1092,7 +1130,10 @@ void uploadCells( NifSkopeOpenGLContext::GLFunctions * fn, Doc & d )
 	if ( g.cellTex && t == g.cellTab )
 		return;
 	if ( !g.cellTex ) {
-		g.cellTex = tex2D( fn, GL_RGBA16UI, d.ncx, d.ncy, GL_RGBA_INTEGER, GL_UNSIGNED_SHORT, t.data(), false, false );
+		GLuint have = 0;	// lane VKGROUND5: on the present device (slot 3) while mode 2 draws there
+		if ( share && !( g.vkFailed & 8 ) )
+			sharedIn( g, 3, 0, d.ncx, d.ncy, 1, GL_RGBA16UI, 1, have );
+		g.cellTex = tex2D( fn, GL_RGBA16UI, d.ncx, d.ncy, GL_RGBA_INTEGER, GL_UNSIGNED_SHORT, t.data(), false, false, have );
 		g.bCells = qint64( t.size() ) * 2;
 	} else {
 		fn->glBindTexture( GL_TEXTURE_2D, g.cellTex );
@@ -1150,10 +1191,31 @@ bool cachedPass( Scene * scene, Doc & d, const State & s, QString * extra )
 	const float ccx = d.cut.centreX( kCell ), ccy = d.cut.centreY( kCell );
 	const int nNear = FgSched::nearCount( g.sched.cells, ccx, ccy, v.nearDist );
 	const bool comp = !s.redNoCompress;
-	if ( !g.pagesN || g.sideN != v.sideN || g.nNear != nNear || g.compressed != comp ) {
+	/* lane VKGROUND5: the cell table and pools (slots 3..5) follow the view as reshare's inputs do: on the present device
+	 * while mode 2 draws there, GL's own once the view is off by its switch or the red (!keep), unchanged on a frame with
+	 * no view (keep). A pool that moves is made again (its pages painted again); the view off leaves GL's calls as before */
+	const bool share = WwVkPresent::shareWanted( "WW_VKVIEW_FARGROUNDLIVE_RED" ),
+		keep = WwVkPresent::shareKept( "WW_VKVIEW_FARGROUNDLIVE_RED" );
+	if ( !keep )
+		g.vkFailed &= ~( 8 | 16 | 32 );
+	bool moved[3] = { false, false, false };
+	{
+		GLuint * const t[3] = { &g.cellTex, &g.pagesN, &g.pagesF };
+		for ( int i = 0; i < 3; i++ ) {
+			const int slot = 3 + i;
+			const bool on = g.vkShared & ( 1 << slot );
+			if ( *t[i] )
+				moved[i] = on ? !vkIs( g, slot, *t[i] ) || ( !share && !keep ) : share && !( g.vkFailed & ( 1 << slot ) );
+		}
+	}
+	if ( moved[0] ) {
+		delIn( fn, g, 3, g.cellTex, g.bCells );
+		g.cellTab.clear();
+	}
+	if ( moved[1] || moved[2] || !g.pagesN || g.sideN != v.sideN || g.nNear != nNear || g.compressed != comp ) {
 		qint64 none = 0;
-		delTex( fn, g.pagesN, g.bPagesN );
-		delTex( fn, g.pagesF, g.bPagesF );
+		delIn( fn, g, 4, g.pagesN, g.bPagesN );
+		delIn( fn, g, 5, g.pagesF, g.bPagesF );
 		delTex( fn, g.scratchN, none );
 		delTex( fn, g.scratchF, none );
 		delTex( fn, g.blocks, none );
@@ -1168,8 +1230,8 @@ bool cachedPass( Scene * scene, Doc & d, const State & s, QString * extra )
 		g.sideF = v.sideF;
 		g.nNear = nNear;
 		g.compressed = comp;
-		g.pagesN = allocPool( fn, g.sideN, capN, comp, g.bPagesN );
-		g.pagesF = allocPool( fn, g.sideF, capF, comp, g.bPagesF );
+		g.pagesN = allocPoolIn( fn, g, 4, g.sideN, capN, comp, g.bPagesN, share );
+		g.pagesF = allocPoolIn( fn, g, 5, g.sideF, capF, comp, g.bPagesF, share );
 		g.sched.reset( capN, capF );
 		g.fillFrames = 0;
 		g.painted = 0;
@@ -1208,7 +1270,7 @@ bool cachedPass( Scene * scene, Doc & d, const State & s, QString * extra )
 			.arg( g.fillFrames ).arg( g.painted ).arg( v.budget );
 	}
 	g.busy = fading || g.idle < kSettleFrames;
-	uploadCells( fn, d );
+	uploadCells( fn, d, share );
 	*extra = QStringLiteral( "; pages near %1 x %2 px + far %3 x %4 px = %5 MB %6 (cell table %7 KB); pixel %8 mrad (fovy %9, %10 px), "
 		"near under %11 units: %12 cells for the camera at the cut centre; budget %13 texels a frame" )
 		.arg( g.sched.capN ).arg( g.sideN ).arg( g.sched.capF ).arg( g.sideF ).arg( mb( g.bPagesN + g.bPagesF ) )
