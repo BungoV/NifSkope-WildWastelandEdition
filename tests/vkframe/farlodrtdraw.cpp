@@ -29,6 +29,10 @@
 // the DG program (FAIL or REFUSE both count).
 // Refusal check (seed 1 of each key, counted): cellGiHalfOn 1 must REFUSE with the "cellGiHalfOn 1" reason.
 // Last line `FARLODRTDRAW GATE OK` or `FARLODRTDRAW GATE FAILED`.
+// Seeding fix after run frt1 (bar and reds unchanged): the run refused every Vulkan arm with "no owner" on cellDdgiAtlas
+// (rtBufOf answers only for a slot with an owner: the gate now registers one per slot, always fresh, as the app's owners
+// do) and with "an image at b65 no census name maps" (a twin fix, its own commit); DG seed 1 drew 500 distinct colours
+// (flat: the wrong-key red came out BOUND), so both keys now seed from the same rng seed per arm, not one per key.
 #define FLD_NO_MAIN
 #include "farloddraw.cpp"
 #undef FLD_NO_MAIN
@@ -151,6 +155,9 @@ int main( int argc, char ** argv )
 		return fatal( "rtBufShare cellDdgiAtlas: " + why );
 	std::printf( "FARLODRTDRAW shared: cellRestir %zu bytes (GL buffer %u, texture %u), cellDdgiAtlas %zu bytes (GL buffer %u, texture %u)\n",
 		rsBytes, rsBuf, rsTex, atBytes, atBuf, atTex );
+	// the owners (as rtddgicell.cpp / the ReSTIR step register them): the gate writes the buffers itself, always fresh
+	WwVkPresent::rtBufOwner( WwVkPresent::kRtBufRestir, []( std::string & ) { return true; } );
+	WwVkPresent::rtBufOwner( WwVkPresent::kRtBufDdgiAtlas, []( std::string & ) { return true; } );
 
 	// ---- each key's samplers: one unit each; cellRestir / cellDdgiAtlas are the shared names
 	for ( KeyArm & k : keys ) {
@@ -571,7 +578,7 @@ int main( int argc, char ** argv )
 	for ( int ki = 0; ki < 2; ki++ )
 		for ( int seed = 1; seed <= 2; seed++ ) {
 			KeyArm & k = keys[ki];
-			std::mt19937 rng( 20261116u + std::uint32_t( seed ) * 7919u + std::uint32_t( ki ) * 104729u );
+			std::mt19937 rng( 20261116u + std::uint32_t( seed ) * 7919u );	// the same seed for both keys (frt1: DG's own gave a flat seed 1)
 			for ( Smp & s : k.smp )
 				if ( !fill( s, rng ) )
 					return fatal( std::string( k.tag ) + " texture " + s.name );
