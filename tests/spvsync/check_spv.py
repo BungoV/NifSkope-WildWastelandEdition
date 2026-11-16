@@ -50,7 +50,10 @@ VKFRAME_LIGHT = {'ao_gbuf': ('ao_vk', 'AO_STAGE=5'), 'ao_mip': ('ao_vk', 'AO_STA
 	'ocean_spec': ('ocean_vk', 'OCEAN_STAGE=1'), 'ocean_fft': ('ocean_vk', 'OCEAN_STAGE=2'), 'ocean_finbc': ('ocean_vk', 'OCEAN_STAGE=3'),
 	'ocean_find': ('ocean_vk', 'OCEAN_STAGE=4'), 'ocean_mipbc': ('ocean_vk', 'OCEAN_STAGE=5'), 'ocean_mipd': ('ocean_vk', 'OCEAN_STAGE=6'),
 	'ocean_finbca': ('ocean_vk', 'OCEAN_STAGE=7'), 'ocean_finda': ('ocean_vk', 'OCEAN_STAGE=8'),
-	'ocean_mipbca': ('ocean_vk', 'OCEAN_STAGE=9'), 'ocean_mipda': ('ocean_vk', 'OCEAN_STAGE=10')}
+	'ocean_mipbca': ('ocean_vk', 'OCEAN_STAGE=9'), 'ocean_mipda': ('ocean_vk', 'OCEAN_STAGE=10'),
+	# lane VKSHADOW3: the far contact tier, contactfar_vk.hlsl stages 1-3
+	'cfar_min': ('contactfar_vk', 'CFAR_STAGE=1'), 'cfar_march': ('contactfar_vk', 'CFAR_STAGE=2'),
+	'cfar_comp': ('contactfar_vk', 'CFAR_STAGE=3')}
 HLSL_SPECS += [('src/features/vkframe', 'light_' + k, 'vulkan1.2', 'vkframe_light_%s_spv' % k) for k in VKFRAME_LIGHT]
 # lane VKFAR3 (A1 b): the screen GI's DDGI read, its own line after the light loop (four defines, -O0)
 VKFRAME_GIHALF_ARGS = ['-O0', '-D', 'WW_CELL_FOGLEAK=1', '-D', 'WW_CELL_RTDDGI=1', '-D', 'WW_CELL_RTDDGI_CASCADES=1', '-D', 'WW_FRAME_UBO=1']
@@ -62,7 +65,9 @@ VKFRAME_SSR = {'ssr_view_s1': '-DSSR_STAGE=1', 'ssr_view_s1w': '-DSSR_STAGE=1 -D
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_SSR]
 # lane VKSHADOW1: the sun cascades' queued casters, the script's csm loop (res/shaders/hlsl/near/<k>.hlsl, vs_6_0)
 VKFRAME_CSM = {'csm_view_vs': ('res/shaders/hlsl/near', 'csm_view_vs'),
-	'obj_depth_vs': ('res/shaders/hlsl/near', 'obj_depth_vs')}  # lane VKOBJ1: the objects' prepass
+	'obj_depth_vs': ('res/shaders/hlsl/near', 'obj_depth_vs'),  # lane VKOBJ1: the objects' prepass
+	'csm_remap_view_vs': ('res/shaders/hlsl/near', 'csm_remap_view_vs'),  # lane VKSHADOW6: the Scroll remap (the loop's
+	'csm_remap_view_ps': ('res/shaders/hlsl/near', 'csm_remap_view_ps')}  # profile is the name's suffix)
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_CSM]
 # lane VKAIR1: the air's sky pass and the clouds, the script's `fx <name> <dir/file>` lines (sky's register shifts, ps_6_0)
 # lane HLSLSRC2: the views' frozen spirv-cross twins under the view's name (the readable sources took the programs' names;
@@ -77,6 +82,12 @@ VKFRAME_FX = {'volsky_view_ps': 'air/volsky_view_ps', 'cloud_march_view_ps': 'cl
 	'precip_look_view_ps': 'weather/precip_look_view_ps',	# lane VKFAR2: L8 slice 3, the look over that copy
 	'taareactive_view_ps': 'post/taa_reactive_ps'}	# lane VKFAR7: the TAA mask's reactive pass
 VKFRAME_FX['lamp_view_ps'] = 'lights/lamp_view_ps'	# lane VKLAMP1: the lamps' plain shadow cube faces
+VKFRAME_FX['cloud_shadowmap_view_ps'] = 'clouds/cloud_shadowmap_ps'	# lane VKCLOUD1: the cloud shadow map
+VKFRAME_FX['cloudmap_view_ps'] = 'clouds/cloudmap_ps'	# lane VKCLOUD4: the cloud map (the readable source itself)
+VKFRAME_FX['depthmax_view_ps'] = 'exposure/cell_depthmax_ps'	# lane VKSMALL2: the frame's farthest depth (row 40)
+VKFRAME_FX['vrs_rate_view_ps'] = 'near/cell_vrs_rate_ps'	# lane VKSMALL3: the shading rate images (row 76)
+VKFRAME_FX['fxres_down_view_ps'] = 'particles/cell_fxres_down_ps'	# lane VKSMALL4: the soft-effect layer's depth (row 77)
+VKFRAME_FX['fxres_comp_view_ps'] = 'particles/fxres_comp_view_ps'	# lane VKSMALL4: its composite, dual-source twin (row 77)
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FX]
 # lane VKFAR1: the far dots' vertex stage, the script's `fxv <name> <dir/file>` lines (fx()'s shifts, vs_6_0)
 VKFRAME_FXV = {'fardots_view_vs': 'far-lod/cell_fardots_view_vs',
@@ -131,6 +142,7 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 VKFRAME_FXB_ARGS = ['-fvk-bind-register', 'b0', '0', '0', '0', '-fvk-bind-register', 'b31', '0', '32', '0', '-fspv-preserve-bindings']
 VKFRAME_FXB = {'skystars_view_vs': 'clouds/lookdev_clouds_vs', 'skymoon_view_vs': 'core/lookdev_bill_vs',
 	'taareactive_view_vs': 'post/taa_reactive_vs'}	# lane VKFAR7: the TAA mask's reactive pass
+VKFRAME_FXB['cloudmap_view_vs'] = 'clouds/cloudmap_vs'	# lane VKCLOUD4: the cloud map's vertex stage (its b31 at 32)
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXB]
 # lane VKFAR3 G3: the far ground's pixel stages, the script's `fxg <name> <dir/file>` lines (fxk()'s shifts + the app's variant)
 VKFRAME_FXG_ARGS = VKFRAME_SKY_ARGS + ['-fspv-preserve-bindings', '-D', 'WW_CELL_FOGLEAK=1', '-D', 'WW_FRAME_UBO=1']
@@ -161,7 +173,7 @@ VKFRAME_PFX = {
 	'p7_ob_vec': ('post/objblur_vec', 'cs_6_0', ''), 'p7_ob_tile': ('post/objblur_tile', 'cs_6_0', ''),
 	'p7_ob': ('post/objblur', 'cs_6_0', '')}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_PFX]
-# lane VKOBJ4: the bl twins, the script's `fxb <name> <near file> <profile> "$PS_SHIFT|$VS_SHIFT"` lines (-D WW_VK_BINDLESS, every
+# lane VKOBJ4: the bl twins, the script's `fxn <name> <near file> <profile> "$PS_SHIFT|$VS_SHIFT"` lines (-D WW_VK_BINDLESS, every
 # binding kept); the vertex stage on its own shifts (VS_SHIFT), the pixel stages on fx()'s
 VKFRAME_PS_SHIFT = VKFRAME_SKY_ARGS
 VKFRAME_VS_SHIFT = ['-fvk-b-shift', '256', '0', '-fvk-t-shift', '320', '0', '-fvk-s-shift', '384', '0', '-fvk-u-shift', '448', '0']
@@ -291,7 +303,7 @@ def script_ok(tree):
 	rlines = dict(re.findall(r'^ssr ([a-z0-9_]+) "([^"]*)"$', vf, re.M))
 	if rlines != VKFRAME_SSR:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its ssr lines (%s) are not this checker\'s reflections' % ' '.join(sorted(rlines)))
-	m = re.search(r'^for c in ([a-z_ ]+); do\n\t"\$DXC" -spirv -fspv-target-env=vulkan1\.2 -T vs_6_0 -E main -Fo "\$\{c\}\.spv" "\$\(cygpath -m "\$ROOT/res/shaders/hlsl/near/', vf, re.M)
+	m = re.search(r'^for c in ([a-z_ ]+); do\n\t"\$DXC" -spirv -fspv-target-env=vulkan1\.2 -T \$\{c##\*_\}_6_0 -E main -Fo "\$\{c\}\.spv" "\$\(cygpath -m "\$ROOT/res/shaders/hlsl/near/', vf, re.M)
 	cloop = m.group(1).split() if m else []
 	if sorted(cloop) != sorted(VKFRAME_CSM):
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its csm loop (%s) is not this checker\'s cascade shaders' % ' '.join(cloop))
@@ -376,11 +388,11 @@ def script_ok(tree):
 		if '\n%s="%s"\n' % (n, ' '.join(a)) not in vf:
 			bad.append('src/features/vkframe/vkframe_spirv.sh: its %s changed' % n)
 	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main -D WW_VK_BINDLESS $4 ${5:-} -fspv-preserve-bindings -Fo "$1.spv" ' not in vf:
-		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxb() compile line changed')
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxn() compile line changed')
 	blines = dict((k, (f, p, s, x)) for k, f, p, s, x in
-	              re.findall(r'^fxb ([a-z0-9_]+) ([a-z0-9_]+) ([vp]s_6_0) "\$([A-Z_]+)"(?: "([^"]*)")?$', vf, re.M))
+	              re.findall(r'^fxn ([a-z0-9_]+) ([a-z0-9_]+) ([vp]s_6_0) "\$([A-Z_]+)"(?: "([^"]*)")?$', vf, re.M))
 	if blines != VKFRAME_FXBL:
-		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxb lines (%s) are not this checker\'s bl twins' % ' '.join(sorted(blines)))
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxn lines (%s) are not this checker\'s bl twins' % ' '.join(sorted(blines)))
 	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main -D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 $4 ${5:-} -fspv-preserve-bindings ' \
 			'-fvk-use-dx-position-w -Fo "$1.spv" ' not in vf:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxc() compile line changed')

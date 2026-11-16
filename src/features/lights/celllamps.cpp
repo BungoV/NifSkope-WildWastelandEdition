@@ -595,6 +595,23 @@ static std::uintptr_t shadowShareKey( Renderer * r )
 	return reinterpret_cast<std::uintptr_t>( r ) + 1;
 }
 
+//! lane VKLAMP4: the lamp tier's store (a D16 2D array) is shared too while the cubes are wanted shared; its own odd key
+static std::uintptr_t lsShareKey( Renderer * r )
+{
+	return reinterpret_cast<std::uintptr_t>( r ) + 3;
+}
+
+//! the store's memory goes back (the present device's when shared, else GL's own)
+static void lsDrop( Renderer * r, Gpu & g )
+{
+	if ( g.lsShared )
+		WwVkPresent::sharedTargetDrop( lsShareKey( r ) );
+	else if ( g.lsTex )
+		r->fn->glDeleteTextures( 1, &g.lsTex );
+	g.lsTex = 0;
+	g.lsShared = false;
+}
+
 //! the depth cube array (kShadowSlots cubes of face x face) and its framebuffer, once
 static void shadowAlloc( Renderer * r, Gpu & g, int face )
 {
@@ -643,10 +660,6 @@ static void shadowAlloc( Renderer * r, Gpu & g, int face )
  * (depth blits, exact), then the movers drawn over it (LEQUAL keeps the nearest: the same depths as one pass). */
 namespace {
 
-constexpr float kLsM[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
-constexpr float kLsU[6][3] = { { 0, 0, -1 }, { 0, 0, 1 }, { 1, 0, 0 }, { 1, 0, 0 }, { 1, 0, 0 }, { -1, 0, 0 } };
-constexpr float kLsV[6][3] = { { 0, -1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 }, { 0, -1, 0 }, { 0, -1, 0 } };
-
 struct LsCaster
 {
 	const Shape * sh;
@@ -655,10 +668,7 @@ struct LsCaster
 	float rad;
 };
 
-struct LsRect
-{
-	int x = 0, y = 0, w = 0, h = 0;
-};
+using LsRect = WwVkPresent::LampRect;	// lane VKLAMP4: the layout's helpers are vklamp.h's (lampview gates them)
 
 //! one face draw: the layer of tex, the viewport's origin (a packed half shifts it), the scissor, clear first or not
 struct LsTarget
@@ -698,45 +708,6 @@ Gpu::LsSig lsSigOf( const Shape * sh, const Vector3 & c, float rad )
 	s.c = c;
 	s.rad = rad;
 	return s;
-}
-
-//! side face f of a lamp whose back looks into a wall: the room half and the wall half of it
-void lsSideHalves( int f, int back, int S, LsRect & room, LsRect & wall )
-{
-	const float * fr = kLsM[back ^ 1];
-	const float cu = kLsU[f][0] * fr[0] + kLsU[f][1] * fr[1] + kLsU[f][2] * fr[2];
-	const float cv = kLsV[f][0] * fr[0] + kLsV[f][1] * fr[1] + kLsV[f][2] * fr[2];
-	const int h = S / 2;
-	if ( cu != 0.0f ) {
-		room = { cu > 0.0f ? h : 0, 0, h, S };
-		wall = { cu > 0.0f ? 0 : h, 0, h, S };
-	} else {
-		room = { 0, cv > 0.0f ? h : 0, S, h };
-		wall = { 0, cv > 0.0f ? 0 : h, S, h };
-	}
-}
-
-//! a wall lamp's side faces (the four off its back axis) with their packed place: layer 1 + pair, member 0/1
-void lsSides( int back, int sides[4], int layer[4], int member[4] )
-{
-	int n = 0, pair = 0;
-	for ( int ax = 0; ax < 3; ax++ ) {
-		if ( ax == back / 2 )
-			continue;
-		for ( int j = 0; j < 2; j++ ) {
-			sides[n] = 2 * ax + j;
-			layer[n] = 1 + pair;
-			member[n] = j;
-			n++;
-		}
-		pair++;
-	}
-}
-
-LsRect lsPacked( const LsRect & room, int member, int S )
-{
-	const int h = S / 2;
-	return room.w == h ? LsRect { member * h, 0, h, S } : LsRect { 0, member * h, S, h };
 }
 
 }	// namespace
@@ -872,6 +843,40 @@ static void cubeDrawCaster( Renderer * r, NifSkopeOpenGLContext::Program * prog,
 	r->fn->glDrawElementsInstanced( GL_TRIANGLES, GLsizei( n ), GL_UNSIGNED_SHORT, nullptr, GLsizei( instances ) );
 }
 
+/* lane VKLAMP2 (a helper since VKLAMP4: both lamp routes take it): sh's pool mesh in this run's list, added once. gen = the
+ * hash GL's own draw of the shape takes (cubeDrawCaster, solid: mask 3), and its sizes */
+static std::uint32_t lampPoolMesh( const Shape * sh, std::vector<WwVkPresent::LampMesh> & meshes,
+	std::map<const Shape *, std::uint32_t> & meshOf )
+{
+	static_assert( sizeof( Vector3 ) == 12 && sizeof( Triangle ) == 6, "the pool reads verts / triangles as packed arrays" );
+	const auto it = meshOf.find( sh );
+	if ( it != meshOf.end() )
+		return it->second;
+	const float * attrv[8] = { reinterpret_cast<const float *>( sh->verts.constData() ), nullptr, nullptr, nullptr, nullptr, nullptr,
+		nullptr, nullptr };
+	const NifSkopeOpenGLContext::ShapeDataHash h( std::uint32_t( sh->verts.size() ), 3, std::size_t( sh->triangles.size() ) * 6, attrv,
+		sh->triangles.constData() );
+	WwVkPresent::LampMesh m;
+	m.key = reinterpret_cast<std::uintptr_t>( sh );
+	m.gen = h.h[0] ^ ( h.h[1] * 0x9E3779B97F4A7C15ULL ) ^ ( std::uint64_t( h.numVerts ) << 32 | h.elementBytes );
+	m.pos = attrv[0];
+	m.verts = std::uint32_t( sh->verts.size() );
+	m.idx = reinterpret_cast<const std::uint16_t *>( sh->triangles.constData() );
+	m.indices = std::uint32_t( sh->triangles.size() * 3 );
+	meshOf.emplace( sh, std::uint32_t( meshes.size() ) );
+	meshes.push_back( m );
+	return std::uint32_t( meshes.size() - 1 );
+}
+
+//! lane VKLAMP4: the pool's counts since the last line (takeLampStat resets them)
+static QString lampPoolLine()
+{
+	const WwVkPresent::LampStat ls = WwVkPresent::takeLampStat();
+	return QStringLiteral( " pool runs=%1 gl=%2 fails=%3 copies=%4 hits=%5 regen=%6 repacks=%7 redSkips=%8 copyKb=%9" )
+		.arg( ls.runs ).arg( ls.gl ).arg( ls.fails ).arg( ls.copies ).arg( ls.hits ).arg( ls.regen ).arg( ls.repacks ).arg( ls.redSkips )
+		.arg( ls.copyKb, 0, 'f', 1 );
+}
+
 // lane MODULES1 route (a): the light cubes' casters (wwCellShadowPass's filter) and draw, for the air's lamp atlas
 void wwCellCubeCasters( Scene * scene, std::vector<WwCubeCaster> & out )
 {
@@ -923,10 +928,8 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 			lamps += l.shadow ? 1 : 0;
 		const int budget = int( std::uint64_t( wwCellLampShadowBudgetMB() ) * 1048576u / blockBytes );
 		const int want = std::max( 2, std::min( budget, 2 * lamps ) );
-		if ( g.lsTex && ( g.lsFace != S || g.lsBlocks != want ) ) {
-			fn->glDeleteTextures( 1, &g.lsTex );
-			g.lsTex = 0;
-		}
+		if ( g.lsTex && ( g.lsFace != S || g.lsBlocks != want ) )
+			lsDrop( r, g );	// lane VKLAMP4
 		g.lsBlocks = want;
 		g.lsBlockUsed.assign( size_t( want ), char( 0 ) );
 		g.lsDoc = scene->nifModel;
@@ -1052,16 +1055,37 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 	}
 
 	shadowAlloc( r, g, S );
+	if ( g.lsTex && g.lsShared && !WwVkPresent::sharedTargetIs( lsShareKey( r ), g.lsTex ) ) {
+		g.lsTex = 0;	// lane VKLAMP4: the present device dropped it (its GL name went with it): every map is stored again
+		g.lsShared = false;
+		g.lsStore.clear();
+		std::fill( g.lsBlockUsed.begin(), g.lsBlockUsed.end(), char( 0 ) );
+	}
+	if ( g.lsTex && g.lsAsked != shadowShareWanted() ) {
+		lsDrop( r, g );	// lane VKLAMP4: the view joined / left Vulkan (as the cubes' shAsked): remade, every map stored again
+		g.lsStore.clear();
+		std::fill( g.lsBlockUsed.begin(), g.lsBlockUsed.end(), char( 0 ) );
+	}
 	if ( !g.lsTex ) {
-		fn->glGenTextures( 1, &g.lsTex );
+		// lane VKLAMP4: shared (type 2) while the cubes are wanted shared: the present device draws the stores
+		unsigned shared = 0;
+		std::string why;
+		g.lsAsked = shadowShareWanted();
+		g.lsShared = g.lsAsked && WwVkPresent::sharedTarget( lsShareKey( r ), 2, S, S, 3 * g.lsBlocks, GL_DEPTH_COMPONENT16,
+			shared, why ) && shared;
+		if ( g.lsShared )
+			g.lsTex = shared;
+		else
+			fn->glGenTextures( 1, &g.lsTex );
 		GLint prevActive = 0;
 		fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kShadowUnit ) );
 		GLint prevArray = 0;
 		fn->glGetIntegerv( GL_TEXTURE_BINDING_2D_ARRAY, &prevArray );
 		fn->glBindTexture( GL_TEXTURE_2D_ARRAY, g.lsTex );
-		fn->glTexImage3D( GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT16, S, S, 3 * g.lsBlocks, 0, GL_DEPTH_COMPONENT,
-			GL_UNSIGNED_SHORT, nullptr );
+		if ( !g.lsShared )
+			fn->glTexImage3D( GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT16, S, S, 3 * g.lsBlocks, 0, GL_DEPTH_COMPONENT,
+				GL_UNSIGNED_SHORT, nullptr );
 		fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
 		fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
 		fn->glBindTexture( GL_TEXTURE_2D_ARRAY, GLuint( prevArray ) );
@@ -1121,67 +1145,58 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 		if ( lRn >= 0 )
 			fn->glUniform2f( lRn, l.radius, l.nearClip );
 	};
-	// one face: target, the face's projection, the casters (and the wall's plane when given)
+	/* lane VKLAMP4: the loop below PLANS the pass (its bookkeeping as before; every face draw and blit a step in GL's order,
+	 * the cone and face culls and the counters taken here, once a caster and face, whichever device draws it). The steps
+	 * run after the loop */
+	struct LsStep
+	{
+		bool blit = false;
+		const WwCellLight * l = nullptr;
+		int face = 0;
+		LsTarget t;
+		std::vector<const LsCaster *> list;	// the casters the culls keep
+		bool wall = false;	// the wall's plane (quad) drawn after the casters
+		float quad[12] = {};
+		int src = 0;	// a blit: the store's layer, its rect a, the cube layer's rect b
+		LsRect a, b;
+	};
+	std::vector<LsStep> plan;
+	// one face: target, the face's projection, the casters (and the wall's plane when given); the draws it will make
 	auto drawFace = [&]( const WwCellLight & l, int face, const LsTarget & t, const std::vector<const LsCaster *> & list,
 		const float * quad ) -> qint64 {
-		fn->glFramebufferTextureLayer( GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, t.tex, 0, t.layer );
-		if ( fn->glCheckFramebufferStatus( GL_DRAW_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
-			complete = false;
-			return 0;
-		}
+		LsStep st;
+		st.l = &l;
+		st.face = face;
+		st.t = t;
 		if ( t.tex == g.shTex )
 			g.shWrites++;	// lane PERFFIX2 a: wwCellLightsStateKey
-		fn->glViewport( t.vx, t.vy, S, S );
-		fn->glEnable( GL_SCISSOR_TEST );
-		fn->glScissor( t.cut.x, t.cut.y, t.cut.w, t.cut.h );
-		if ( t.clear )
-			fn->glClear( GL_DEPTH_BUFFER_BIT );
-		const float n = 1.0f, f = l.radius * 1.01f + 2.0f;
-		const float A = ( f + n ) / ( f - n ), B = -2.0f * f * n / ( f - n );
-		float clip[16];
-		for ( int c = 0; c < 3; c++ ) {
-			clip[c * 4 + 0] = kLsU[face][c];
-			clip[c * 4 + 1] = kLsV[face][c];
-			clip[c * 4 + 2] = A * kLsM[face][c];
-			clip[c * 4 + 3] = kLsM[face][c];
-		}
-		clip[12] = clip[13] = clip[15] = 0.0f;
-		clip[14] = B;
-		if ( lClip >= 0 )
-			fn->glUniformMatrix4fv( lClip, 1, GL_FALSE, clip );
-		qint64 drawn = 0;
 		const bool coneOff = !( cubeConeFaces( l, S ) >> face & 1 );	// lane PERFFIX2 b: off the spot's cone
 		if ( coneOff )
 			g_cubeConeSkip += qint64( list.size() );
 		for ( const LsCaster * c : list ) {
 			if ( coneOff )
 				break;	// lane PERFFIX2 b: no lit pixel reads this face
-			if ( !cubeFaceKeeps( face, l.pos, c->c, c->rad ) )
-				continue;	// lane PERFFIX2 b: no fragment of it lands in this face
-			prog->uni4m( "modelViewMatrix", c->sh->viewTrans().toMatrix4() );
-			cubeDrawCaster( r, prog, c->sh );
-			drawn++;
+			if ( cubeFaceKeeps( face, l.pos, c->c, c->rad ) )	// lane PERFFIX2 b: else no fragment of it lands in this face
+				st.list.push_back( c );
 		}
 		if ( quad ) {
-			static const quint16 idx[6] = { 0, 1, 2, 0, 2, 3 };
-			prog->uni1i( "shAlphaTest", 0 );
-			prog->uni4m( "modelViewMatrix", viewM );
-			r->drawShape( 4u, 3, 6u, GL_TRIANGLES, GL_UNSIGNED_SHORT, &quad, idx );
-			drawn++;
+			st.wall = true;
+			std::memcpy( st.quad, quad, sizeof st.quad );
 		}
+		const qint64 drawn = qint64( st.list.size() ) + ( quad ? 1 : 0 );
+		plan.push_back( std::move( st ) );
 		return drawn;
 	};
 	auto blit = [&]( int srcLayer, const LsRect & a, int slotLayer, const LsRect & b ) {
-		fn->glFramebufferTextureLayer( GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, g.lsTex, 0, srcLayer );
-		fn->glFramebufferTextureLayer( GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, g.shTex, 0, slotLayer );
 		g.shWrites++;	// lane PERFFIX2 a: wwCellLightsStateKey
-		if ( fn->glCheckFramebufferStatus( GL_READ_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE
-			|| fn->glCheckFramebufferStatus( GL_DRAW_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
-			complete = false;
-			return;
-		}
-		fn->glDisable( GL_SCISSOR_TEST );
-		fn->glBlitFramebuffer( a.x, a.y, a.x + a.w, a.y + a.h, b.x, b.y, b.x + b.w, b.y + b.h, GL_DEPTH_BUFFER_BIT, GL_NEAREST );
+		LsStep st;
+		st.blit = true;
+		st.t.tex = g.shTex;
+		st.t.layer = slotLayer;
+		st.src = srcLayer;
+		st.a = a;
+		st.b = b;
+		plan.push_back( std::move( st ) );
 	};
 	const LsRect full { 0, 0, S, S };
 
@@ -1199,7 +1214,6 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 			break;
 		const int k = j.k, li = g.shSlot[k];
 		const WwCellLight & l = L.lights.at( li );
-		setLight( l );
 		std::vector<const LsCaster *> still, mov;
 		for ( const LsCaster & c : casters ) {
 			if ( !lsTouch( l, c.c, c.rad ) )
@@ -1281,11 +1295,11 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 				} else {
 					drawFace( l, w.back ^ 1, LsTarget { g.lsTex, 3 * blocks[0], 0, 0, full, true }, still, nullptr );
 					int sides[4], layer[4], member[4];
-					lsSides( w.back, sides, layer, member );
+					WwVkPresent::lampSides( w.back, sides, layer, member );
 					for ( int i = 0; i < 4 && complete; i++ ) {
 						LsRect room, wall;
-						lsSideHalves( sides[i], w.back, S, room, wall );
-						const LsRect dst = lsPacked( room, member[i], S );
+						WwVkPresent::lampSideHalves( sides[i], w.back, S, room, wall );
+						const LsRect dst = WwVkPresent::lampPacked( room, member[i], S );
 						drawFace( l, sides[i], LsTarget { g.lsTex, 3 * blocks[0] + layer[i], dst.x - room.x, dst.y - room.y, dst, true },
 							still, nullptr );
 					}
@@ -1305,27 +1319,20 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 			} else {
 				blit( 3 * en.blocks[0], full, 6 * k + ( en.back ^ 1 ), full );
 				int sides[4], layer[4], member[4];
-				lsSides( en.back, sides, layer, member );
+				WwVkPresent::lampSides( en.back, sides, layer, member );
 				for ( int i = 0; i < 4; i++ ) {
 					LsRect room, wall;
-					lsSideHalves( sides[i], en.back, S, room, wall );
-					blit( 3 * en.blocks[0] + layer[i], lsPacked( room, member[i], S ), 6 * k + sides[i], room );
+					WwVkPresent::lampSideHalves( sides[i], en.back, S, room, wall );
+					blit( 3 * en.blocks[0] + layer[i], WwVkPresent::lampPacked( room, member[i], S ), 6 * k + sides[i], room );
 				}
 				// the wall's half: the plane itself, out past the light's reach
-				const int ax = en.back / 2, a1 = ( ax + 1 ) % 3, a2 = ( ax + 2 ) % 3;
-				const float sg = ( en.back & 1 ) ? -1.0f : 1.0f, ext = l.radius * 2.0f + 64.0f;
 				float quad[12];
-				for ( int v = 0; v < 4; v++ ) {
-					float * q = quad + 3 * v;
-					q[ax] = l.pos[ax] + sg * en.dist;
-					q[a1] = l.pos[a1] + ( v == 0 || v == 3 ? -ext : ext );
-					q[a2] = l.pos[a2] + ( v < 2 ? -ext : ext );
-				}
+				WwVkPresent::lampWallQuad( l.pos, l.radius, en.back, en.dist, quad );
 				const std::vector<const LsCaster *> none;
 				drawFace( l, en.back, LsTarget { g.shTex, 6 * k + en.back, 0, 0, full, true }, none, quad );
 				for ( int i = 0; i < 4 && complete; i++ ) {
 					LsRect room, wall;
-					lsSideHalves( sides[i], en.back, S, room, wall );
+					WwVkPresent::lampSideHalves( sides[i], en.back, S, room, wall );
 					drawFace( l, sides[i], LsTarget { g.shTex, 6 * k + sides[i], 0, 0, wall, true }, none, quad );
 				}
 			}
@@ -1341,6 +1348,157 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 				moverDraws += drawFace( l, f, LsTarget { g.shTex, 6 * k + f, 0, 0, full, false }, mov, nullptr );
 		g.lsSlotMovers[k] = j.in;
 	}
+
+	/* lane VKLAMP4 (VKFAR7 item 3 slice 2): the plan runs in three phases. 1: the store's face draws (the present device
+	 * clears them and draws their solid casters into the shared store, then GL the alpha-tested ones, no clear); 2: GL's
+	 * blits and wall planes; 3: the cubes' face draws (direct maps and movers: the device again, then GL's alpha-tested).
+	 * A run refused or failed: GL draws its phase whole. Every store draw before every blit is GL's order for each layer
+	 * (a block is freed only for a lamp no slot holds: nothing blits it this frame). Gate: tests/vkframe/lampview.sh,
+	 * the stored case. WW_VKVIEW_LAMP_RED=1: all on GL */
+	WW_SWITCH_STATIC( bool, vkLampRed, wwEnvInt( "WW_VKVIEW_LAMP_RED" ) == 1 );
+	float vtRot[9];
+	for ( int j = 0; j < 3; j++ )
+		for ( int row = 0; row < 3; row++ )
+			vtRot[j * 3 + row] = vt.rotation( j, row );
+	std::vector<char> isAt( casters.size() ), matSet( casters.size(), 0 );
+	for ( size_t i = 0; i < casters.size(); i++ )
+		isAt[i] = casters[i].sh->wwDrawAlpha( "cube" ).test ? 1 : 0;
+	std::vector<float> mats( casters.size() * 16, 0.0f );
+	std::vector<WwVkPresent::LampMesh> meshes;
+	std::map<const Shape *, std::uint32_t> meshOf;
+	// the face steps into tex (not the wall's) on the present device: their clears and solid casters; false = GL draws them
+	auto vkRun = [&]( GLuint tex, bool shared, std::uintptr_t key, int layers, QString & line ) -> bool {
+		if ( !shared ) {
+			line = QStringLiteral( "gl (not shared)" );
+			return false;
+		}
+		std::string no = vkLampRed ? std::string( "WW_VKVIEW_LAMP_RED=1" ) : WwVkPresent::lampRefusal();
+		if ( no.empty() ) {
+			WwVkPresent::LampRun run;
+			std::vector<std::uint32_t> draws;
+			int glAt = 0;
+			for ( const LsStep & st : plan ) {
+				if ( st.blit || st.wall || st.t.tex != tex )
+					continue;
+				WwVkPresent::LampOp op;
+				op.layer = st.t.layer;
+				op.clear = st.t.clear;
+				op.vx = st.t.vx;
+				op.vy = st.t.vy;
+				op.cut = st.t.cut;
+				WwVkPresent::lampRelFromView( vtRot, sc, cam, st.l->pos, op.rel );
+				WwVkPresent::lampFaceClip( st.face, st.l->radius, op.clip );
+				op.rn[0] = st.l->radius;
+				op.rn[1] = st.l->nearClip;
+				op.first = std::uint32_t( draws.size() / 2 );
+				for ( const LsCaster * c : st.list ) {
+					const size_t i = size_t( c - casters.data() );
+					if ( isAt[i] ) {
+						glAt++;	// GL draws it after the run
+						continue;
+					}
+					if ( !matSet[i] ) {
+						const Matrix4 mv = c->sh->viewTrans().toMatrix4();
+						std::memcpy( &mats[i * 16], mv.data(), 64 );
+						matSet[i] = 1;
+					}
+					const std::uint32_t d[2] = { lampPoolMesh( c->sh, meshes, meshOf ), std::uint32_t( i ) };
+					draws.insert( draws.end(), d, d + 2 );
+				}
+				op.n = std::uint32_t( draws.size() / 2 ) - op.first;
+				run.ops.push_back( op );
+			}
+			if ( run.ops.empty() ) {
+				line = QStringLiteral( "none" );	// no face step into it this frame
+				return true;
+			}
+			run.tex = tex;
+			run.key = key;
+			run.face = S;
+			run.layers = layers;
+			run.meshes = meshes.data();
+			run.nMeshes = meshes.size();
+			run.mats = mats.data();
+			run.nMats = casters.size();
+			run.draws = draws.data();
+			run.nDraws = draws.size() / 2;
+			if ( WwVkPresent::lampRun( run, no ) ) {
+				line = QStringLiteral( "on ops=%1 draws=%2 meshes=%3 glAlpha=%4" ).arg( run.ops.size() ).arg( run.nDraws ).arg( meshes.size() )
+					.arg( glAt );
+				return true;
+			}
+		}
+		WwVkPresent::lampOnGl( no.c_str() );
+		line = QStringLiteral( "gl why=%1" ).arg( QString::fromStdString( no ) );
+		return false;
+	};
+	// a face step on GL: every caster it keeps, or (solidOnVk) only the alpha-tested ones over the device's clear and draws
+	auto glFace = [&]( const LsStep & st, bool solidOnVk ) {
+		if ( solidOnVk ) {
+			bool any = false;
+			for ( const LsCaster * c : st.list )
+				any = any || isAt[size_t( c - casters.data() )];
+			if ( !any )
+				return;	// the device did all of it: GL attaches nothing
+		}
+		fn->glFramebufferTextureLayer( GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, st.t.tex, 0, st.t.layer );
+		if ( fn->glCheckFramebufferStatus( GL_DRAW_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
+			complete = false;
+			return;
+		}
+		setLight( *st.l );
+		fn->glViewport( st.t.vx, st.t.vy, S, S );
+		fn->glEnable( GL_SCISSOR_TEST );
+		fn->glScissor( st.t.cut.x, st.t.cut.y, st.t.cut.w, st.t.cut.h );
+		if ( st.t.clear && !solidOnVk )
+			fn->glClear( GL_DEPTH_BUFFER_BIT );
+		float clip[16];
+		WwVkPresent::lampFaceClip( st.face, st.l->radius, clip );
+		if ( lClip >= 0 )
+			fn->glUniformMatrix4fv( lClip, 1, GL_FALSE, clip );
+		for ( const LsCaster * c : st.list ) {
+			if ( solidOnVk && !isAt[size_t( c - casters.data() )] )
+				continue;	// drawn on the present device
+			prog->uni4m( "modelViewMatrix", c->sh->viewTrans().toMatrix4() );
+			cubeDrawCaster( r, prog, c->sh );
+		}
+		if ( st.wall ) {
+			static const quint16 idx[6] = { 0, 1, 2, 0, 2, 3 };
+			const float * quad = st.quad;
+			prog->uni1i( "shAlphaTest", 0 );
+			prog->uni4m( "modelViewMatrix", viewM );
+			r->drawShape( 4u, 3, 6u, GL_TRIANGLES, GL_UNSIGNED_SHORT, &quad, idx );
+		}
+	};
+	auto glBlit = [&]( const LsStep & st ) {
+		fn->glFramebufferTextureLayer( GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, g.lsTex, 0, st.src );
+		fn->glFramebufferTextureLayer( GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, g.shTex, 0, st.t.layer );
+		if ( fn->glCheckFramebufferStatus( GL_READ_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE
+			|| fn->glCheckFramebufferStatus( GL_DRAW_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
+			complete = false;
+			return;
+		}
+		fn->glDisable( GL_SCISSOR_TEST );
+		fn->glBlitFramebuffer( st.a.x, st.a.y, st.a.x + st.a.w, st.a.y + st.a.h, st.b.x, st.b.y, st.b.x + st.b.w, st.b.y + st.b.h,
+			GL_DEPTH_BUFFER_BIT, GL_NEAREST );
+	};
+	QString vkStore, vkCubes;
+	const bool storeOnVk = complete && vkRun( g.lsTex, g.lsShared, lsShareKey( r ), 3 * g.lsBlocks, vkStore );
+	for ( const LsStep & st : plan )
+		if ( complete && !st.blit && !st.wall && st.t.tex == g.lsTex )
+			glFace( st, storeOnVk );
+	for ( const LsStep & st : plan ) {
+		if ( !complete )
+			break;
+		if ( st.blit )
+			glBlit( st );
+		else if ( st.wall )
+			glFace( st, false );
+	}
+	const bool cubesOnVk = complete && vkRun( g.shTex, g.shShared, shadowShareKey( r ), 6 * kShadowSlots, vkCubes );
+	for ( const LsStep & st : plan )
+		if ( complete && !st.blit && !st.wall && st.t.tex == g.shTex )
+			glFace( st, cubesOnVk );
 	r->stopProgram();
 
 	// restore
@@ -1370,6 +1528,7 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 		return;
 	}
 	census( nStored, nRestored, nDirect, int( moverDraws ) );
+	s.lampLast += QStringLiteral( " vk store: %1 vk cubes: %2" ).arg( vkStore ).arg( vkCubes ) + lampPoolLine();	// lane VKLAMP4
 	shadowDump( scene );
 }
 
@@ -1582,8 +1741,7 @@ void wwCellShadowPass( Scene * scene )
 		}
 	}
 	if ( g.lsTex ) {	// the row turned Off: the store's memory goes back
-		r->fn->glDeleteTextures( 1, &g.lsTex );
-		g.lsTex = 0;
+		lsDrop( r, g );	// lane VKLAMP4
 		g.lsDoc = nullptr;
 		g.lsStore.clear();
 	}
@@ -1691,11 +1849,12 @@ void wwCellShadowPass( Scene * scene )
 		std::string no = vkLampRed ? std::string( "WW_VKVIEW_LAMP_RED=1" ) : WwVkPresent::lampRefusal();
 		if ( no.empty() ) {
 			WwVkPresent::LampRun run;
-			std::vector<float> pos, mats( casters.size() * 16, 0.0f );
-			std::vector<std::uint16_t> idx;
-			std::vector<std::uint32_t> cmds;
-			std::vector<std::int64_t> first( casters.size(), -1 );
-			std::vector<std::int32_t> base( casters.size(), 0 );
+			// lane VKLAMP2: one pool mesh a shape (lampRun keeps it on the device while its key and gen match), draws {mesh, caster}
+			std::vector<float> mats( casters.size() * 16, 0.0f );
+			std::vector<WwVkPresent::LampMesh> meshes;
+			std::vector<std::uint32_t> draws;
+			std::map<const Shape *, std::uint32_t> meshOf;
+			std::vector<std::int64_t> mesh( casters.size(), -1 );
 			std::vector<char> isAt( casters.size() );
 			for ( std::size_t i = 0; i < casters.size(); i++ )
 				isAt[i] = casters[i].sh->wwDrawAlpha( "cube" ).test ? 1 : 0;
@@ -1711,7 +1870,7 @@ void wwCellShadowPass( Scene * scene )
 					WwVkPresent::lampFaceClip( fc, l.radius, op.clip );
 					op.rn[0] = l.radius;
 					op.rn[1] = l.nearClip;
-					op.first = std::uint32_t( cmds.size() / 5 );
+					op.first = std::uint32_t( draws.size() / 2 );
 					for ( std::size_t i = 0; ( coneF >> fc & 1 ) && i < casters.size(); i++ ) {
 						const ShCaster & c = casters[i];
 						const float dx = c.c[0] - l.pos[0], dy = c.c[1] - l.pos[1], dz = c.c[2] - l.pos[2];
@@ -1724,21 +1883,16 @@ void wwCellShadowPass( Scene * scene )
 						}
 						if ( !cubeFaceKeeps( fc, l.pos, c.c, c.rad ) )
 							continue;
-						if ( first[i] < 0 ) {
-							static_assert( sizeof( Vector3 ) == 12 && sizeof( Triangle ) == 6, "the pool copies verts / triangles as packed arrays" );
-							const float * v = reinterpret_cast<const float *>( c.sh->verts.constData() );
-							const std::uint16_t * t = reinterpret_cast<const std::uint16_t *>( c.sh->triangles.constData() );
-							base[i] = std::int32_t( pos.size() / 3 );
-							first[i] = std::int64_t( idx.size() );
-							pos.insert( pos.end(), v, v + std::size_t( c.sh->verts.size() ) * 3 );
-							idx.insert( idx.end(), t, t + std::size_t( c.sh->triangles.size() ) * 3 );
+						if ( c.sh->verts.isEmpty() || c.sh->triangles.isEmpty() )
+							continue;	// GL draws nothing of it either
+						if ( mesh[i] < 0 ) {
+							mesh[i] = lampPoolMesh( c.sh, meshes, meshOf );
 							std::memcpy( &mats[i * 16], c.mv.data(), 64 );
 						}
-						const std::uint32_t cmd[5] = { std::uint32_t( c.sh->triangles.size() * 3 ), 1u, std::uint32_t( first[i] ),
-							std::uint32_t( base[i] ), std::uint32_t( i ) };
-						cmds.insert( cmds.end(), cmd, cmd + 5 );
+						const std::uint32_t d[2] = { std::uint32_t( mesh[i] ), std::uint32_t( i ) };
+						draws.insert( draws.end(), d, d + 2 );
 					}
-					op.n = std::uint32_t( cmds.size() / 5 ) - op.first;
+					op.n = std::uint32_t( draws.size() / 2 ) - op.first;
 					run.ops.push_back( op );
 				}
 			}
@@ -1746,18 +1900,17 @@ void wwCellShadowPass( Scene * scene )
 			run.key = shadowShareKey( r );
 			run.face = face;
 			run.layers = 6 * kShadowSlots;
-			run.pos = pos.data();
-			run.posBytes = pos.size() * 4;
-			run.idx = idx.data();
-			run.idxBytes = idx.size() * 2;
+			run.meshes = meshes.data();
+			run.nMeshes = meshes.size();
 			run.mats = mats.data();
 			run.nMats = casters.size();
-			run.cmds = cmds.data();
-			run.nCmds = cmds.size() / 5;
+			run.draws = draws.data();
+			run.nDraws = draws.size() / 2;
 			onVk = WwVkPresent::lampRun( run, no );
 			if ( onVk ) {
-				vkDraws = qint64( cmds.size() / 5 );
-				vkLine = QStringLiteral( "on ops=%1 draws=%2 glAlpha=%3" ).arg( run.ops.size() ).arg( vkDraws ).arg( glAt ? 1 : 0 );
+				vkDraws = qint64( draws.size() / 2 );
+				vkLine = QStringLiteral( "on ops=%1 draws=%2 meshes=%3 glAlpha=%4" ).arg( run.ops.size() ).arg( vkDraws ).arg( meshes.size() )
+					.arg( glAt ? 1 : 0 );
 			}
 		}
 		if ( !onVk ) {
@@ -1845,6 +1998,7 @@ void wwCellShadowPass( Scene * scene )
 		.arg( waterCastsRed ? QStringLiteral( "casts(RED)" ) : QStringLiteral( "skipped %1" ).arg( waterSkipped ) )
 		.arg( g_cubeFaceSkip ).arg( g_cubeConeSkip )	// lane PERFFIX2 b: draws the per-face and the cone cull saved, since the start
 		+ QStringLiteral( " vk lamp: %1" ).arg( vkLine );	// lane VKLAMP1
+	s.shadowLast += lampPoolLine();	// lane VKLAMP4: the pool's counts since the last pass
 	shadowDump( scene );
 }
 

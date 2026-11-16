@@ -13,6 +13,7 @@
 #include "cloudrecx14math.h"	// lane CLOUDRECX1
 #include "cloudsheetmath.h"	// SKYLIGHT1 round 3: the layer's zenith-cap fit (uv = J world / altitude + c)
 #include "harnesswindow.h"
+#include "features/vkframe/vkcloudmap.h"	// lane VKCLOUD4: the map's layers on the Vulkan view
 
 #include <QElapsedTimer>
 #include <QHash>
@@ -23,6 +24,8 @@
 #include <cmath>
 #include <cstdio>
 #include <vector>
+#include <QDebug>
+#include <chrono>
 
 /* lane CLOUD1: the cloud map (cloudmap.h). Per band, the weather's layers are projected from the dome onto the band's
  * plane (res/shaders/cloudmap.*) and unioned; the band scalars are the census rung (gl/cloudcensus.inc, derived offline
@@ -85,6 +88,8 @@ struct CmState
 	// GL
 	GLuint fbo = 0;
 	int texSize = 0;
+	std::uintptr_t mapKey = 0;	// lane VKCLOUD4: the map's sharedTarget key (WW_VKVIEW=1)
+	bool mapShared = false, shareAsk = false;
 	GLuint q[4] = { 0, 0, 0, 0 };
 	bool pending[2] = { false, false };
 	int cur2 = 0;
@@ -144,8 +149,14 @@ void drop( Scene * scene, CmState & s )
 {
 	if ( scene && scene->renderer ) {
 		auto fn = scene->renderer->fn;
-		if ( s.map.tex )
+		if ( s.mapShared ) {	// lane VKCLOUD4: the present device's name: not ours to delete
+			if ( WwVkPresent::sharedTargetIs( s.mapKey, s.map.tex ) )
+				WwVkPresent::sharedTargetDrop( s.mapKey );
+			s.map.tex = 0;
+			s.mapShared = false;
+		} else if ( s.map.tex ) {
 			fn->glDeleteTextures( 1, &s.map.tex );
+		}
 		if ( s.fbo )
 			fn->glDeleteFramebuffers( 1, &s.fbo );
 	}
@@ -277,15 +288,40 @@ void paramsOf( const QVector<Draw> & ds, BandParams out[3], bool redMax,
 
 bool ensureTarget( NifSkopeOpenGLContext::GLFunctions * fn, CmState & s, int n )
 {
-	if ( s.map.tex && s.texSize == n )
+	// lane VKCLOUD4: a flipped wish (WW_VKVIEW, red WW_VKVIEW_CLOUDMAP_RED=1) or a shared map a shutdown dropped: made again
+	const bool share = WwVkPresent::shareWanted( "WW_VKVIEW_CLOUDMAP_RED" );
+	const bool lost = s.mapShared && !WwVkPresent::sharedTargetIs( s.mapKey, s.map.tex );
+	if ( s.map.tex && s.texSize == n && s.shareAsk == share && !lost )
 		return true;
+	s.shareAsk = share;
 	if ( !s.fbo )
 		fn->glGenFramebuffers( 1, &s.fbo );
-	if ( s.map.tex )
+	if ( s.mapShared ) {	// the present device's name (or one a shutdown already dropped): not ours to delete
+		if ( WwVkPresent::sharedTargetIs( s.mapKey, s.map.tex ) )
+			WwVkPresent::sharedTargetDrop( s.mapKey );
+		s.map.tex = 0;
+		s.mapShared = false;
+	} else if ( s.map.tex ) {
 		fn->glDeleteTextures( 1, &s.map.tex );
-	fn->glGenTextures( 1, &s.map.tex );
-	fn->glBindTexture( GL_TEXTURE_2D, s.map.tex );
-	fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, n, n, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr );
+	}
+	if ( share ) {
+		if ( !s.mapKey )
+			s.mapKey = reinterpret_cast<std::uintptr_t>( new char );
+		unsigned t = 0;
+		std::string w;
+		s.mapShared = WwVkPresent::sharedTarget( s.mapKey, 0, n, n, 1, GL_RGBA8, t, w, 1 );
+		if ( s.mapShared )
+			s.map.tex = t;
+		else
+			qInfo().noquote() << "vk cloudmap: the map stays GL's (" << QString::fromStdString( w ) << ")";
+	}
+	if ( !s.mapShared ) {
+		fn->glGenTextures( 1, &s.map.tex );
+		fn->glBindTexture( GL_TEXTURE_2D, s.map.tex );
+		fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, n, n, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr );
+	} else {
+		fn->glBindTexture( GL_TEXTURE_2D, s.map.tex );
+	}
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
@@ -377,10 +413,54 @@ struct SavedGl
 	}
 };
 
+/* lane VKCLOUD4: the `vk cloudmap:` line, every 5 s while on Vulkan (or when the route changes); the stats summed over
+ * the builds since the last line */
+void vkSay( int n )
+{
+	static QString said;
+	static auto at = std::chrono::steady_clock::now();
+	static WwVkPresent::FxStat sum;
+	const WwVkPresent::FxStat st = WwVkPresent::takeCloudMapStat();
+	sum.runs += st.runs;
+	sum.gl += st.gl;
+	sum.fails += st.fails;
+	sum.cpuMs += st.cpuMs;
+	sum.maxMs = std::max( sum.maxMs, st.maxMs );
+	sum.copies += st.copies;
+	sum.refusedPacks += st.refusedPacks;	// here: layer textures read in place through the texture cache's twins
+	sum.pipelines = st.pipelines;
+	sum.buildMs = st.buildMs;
+	if ( !st.glWhy.empty() )
+		sum.glWhy = st.glWhy;
+	if ( !st.failWhy.empty() )
+		sum.failWhy = st.failWhy;
+	QString line = sum.runs > 0
+		? QStringLiteral( "vk cloudmap: on Vulkan %1 runs (%2x%2 RGBA8 map, CLEAR + one indexed draw a layer, one crossing; "
+			"%3 pipelines built in %4 ms; %5 input copies; %6 layer textures read in place; drawing thread %7 ms, max %8)" )
+			.arg( sum.runs ).arg( n ).arg( sum.pipelines ).arg( sum.buildMs, 0, 'f', 1 ).arg( sum.copies ).arg( sum.refusedPacks )
+			.arg( sum.cpuMs / sum.runs, 0, 'f', 3 ).arg( sum.maxMs, 0, 'f', 3 )
+		: QStringLiteral( "vk cloudmap: on Vulkan wanted, 0 runs drawn" );
+	if ( sum.gl > 0 )
+		line += QStringLiteral( ", on GL %1 runs (last: %2)" ).arg( sum.gl ).arg( QString::fromStdString( sum.glWhy ) );
+	if ( sum.fails > 0 )
+		line += QStringLiteral( ", refused %1 (last: %2)" ).arg( sum.fails ).arg( QString::fromStdString( sum.failWhy ) );
+	const bool kind = line.left( 22 ) != said.left( 22 );
+	if ( kind || std::chrono::duration<double>( std::chrono::steady_clock::now() - at ).count() >= 5.0 ) {
+		if ( line != said )
+			qInfo().noquote() << line;
+		said = line;
+		at = std::chrono::steady_clock::now();
+		sum = WwVkPresent::FxStat();
+	}
+}
+
 /* the map: each layer (weight w) drawn onto its band's plane into the band's channel, unioned by the blend
- * dst = src (1 - dst) + dst; the red "max" keeps the largest (GL_MAX) */
+ * dst = src (1 - dst) + dst; the red "max" keeps the largest (GL_MAX).
+ * lane VKCLOUD4: WW_VKVIEW=1 (red WW_VKVIEW_CLOUDMAP_RED=1: GL) gathers the layers (their uniforms set and units bound as
+ * for GL's draw, read back) into one run on the present device (vkcloudmap.inc); a refusal draws them again on GL
+ * (glOnly), the reason on the `vk cloudmap:` line */
 bool buildMap( Scene * scene, CmState & s, const QVector<Draw> & ds, const QVector<float> & weight, const BandParams bp[3],
-	int n, bool redMax, QString * why )
+	int n, bool redMax, QString * why, bool glOnly = false )
 {
 	Renderer * r = scene->renderer;
 	auto fn = r->fn;
@@ -431,6 +511,32 @@ bool buildMap( Scene * scene, CmState & s, const QVector<Draw> & ds, const QVect
 	 * (a horizon band) is left out. Red WW_CLOUDMAP_RED=domeproj: the dome's projection (before). */
 	const bool worldLay = !red( "domeproj" );
 	s.worldLaid = s.worldSkipped = 0;
+	const bool vkTried = !glOnly && WwVkPresent::shareWanted( "WW_VKVIEW_CLOUDMAP_RED" );
+	bool onVk = vkTried && s.mapShared && WwVkPresent::sharedTargetIs( s.mapKey, s.map.tex );
+	std::string vkWhy = onVk ? "" : "the map is GL's own (not a shared target)";
+	static WwVkPresent::CloudMapRun vt;
+	vt = WwVkPresent::CloudMapRun();
+	auto vkLayer = [&]( int nv, const float * pos, const float * col, const float * uv, const unsigned short * idx, int nIdx,
+		int mask, bool tex2 ) {
+		static char twin[2 * WwVkPresent::kCloudMapLayers];
+		if ( !WwVkPresent::cloudMapAddMesh( vt, pos, col, uv, nv, idx, nIdx ) ) {
+			onVk = false;
+			vkWhy = "past the run's layer / vertex budget";
+			return;
+		}
+		WwVkPresent::CloudMapLayer & x = vt.layer[vt.layers - 1];
+		// Tex2 is read only when texBlend > 0: otherwise the zero texture (a stale unit 1 is not read)
+		if ( !WwVkPresent::fxTexOf( fn, prog->id, "Tex", 0, x.tex, vkWhy )
+			|| ( tex2 && !WwVkPresent::fxTexOf( fn, prog->id, "Tex2", 0, x.tex2, vkWhy ) ) ) {
+			onVk = false;
+			return;
+		}
+		x.tex.twin = reinterpret_cast<std::uintptr_t>( &twin[2 * ( vt.layers - 1 )] );
+		x.tex2.twin = reinterpret_cast<std::uintptr_t>( &twin[2 * ( vt.layers - 1 ) + 1] );
+		WwVkPresent::fxPack( fn, prog->id, WwVkPresent::kT_cloudmap_vs, int( std::size( WwVkPresent::kT_cloudmap_vs ) ), x.vs );
+		WwVkPresent::fxPack( fn, prog->id, WwVkPresent::kT_cloudmap_ps, int( std::size( WwVkPresent::kT_cloudmap_ps ) ), x.ps );
+		x.mask = mask;
+	};
 	for ( int i = 0; i < ds.size(); i++ ) {
 		const Draw & d = ds[i];
 		if ( !d.in.pos || !d.in.idx || d.in.nIdx <= 0 || weight[i] <= 0.0f )
@@ -463,6 +569,7 @@ bool buildMap( Scene * scene, CmState & s, const QVector<Draw> & ds, const QVect
 		const int b = ri.band;
 		// R = Low, G = Mid, A = High; a sheet layer also writes B (the Low band's sheet coverage)
 		fn->glColorMask( b == 0, b == 1, b == 0 && ri.sheet, b == 2 );
+		const int mask = ( b == 0 ? 1 : 0 ) | ( b == 1 ? 2 : 0 ) | ( b == 0 && ri.sheet ? 4 : 0 ) | ( b == 2 ? 8 : 0 );	// lane VKCLOUD4
 		prog->uni1i( "Tex", 0 );
 		prog->uni1i( "Tex2", 1 );
 		prog->uni1f( "texBlend", tb );
@@ -490,17 +597,42 @@ bool buildMap( Scene * scene, CmState & s, const QVector<Draw> & ds, const QVect
 				qu[k * 2 + 1] = jm[2] * wx + jm[3] * wy + c0[1];
 			}
 			const float * qa[8] = { qp, qc, nullptr, nullptr, nullptr, nullptr, nullptr, qu };
-			r->drawShape( 4u, 0x20000043ULL, 6u, GL_TRIANGLES, GL_UNSIGNED_SHORT, qa, qi );
+			if ( onVk )
+				vkLayer( 4, qp, qc, qu, qi, 6, mask, tb > 0.0f );
+			else
+				r->drawShape( 4u, 0x20000043ULL, 6u, GL_TRIANGLES, GL_UNSIGNED_SHORT, qa, qi );
 			s.worldLaid++;
 		} else {
 			const float * attrs[8] = { d.in.pos, d.in.col, nullptr, nullptr, nullptr, nullptr, nullptr, d.in.uv };
-			r->drawShape( unsigned( d.in.nv ), 0x20000043ULL, unsigned( d.in.nIdx ), GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs,
-				d.in.idx );
+			if ( onVk )
+				vkLayer( d.in.nv, d.in.pos, d.in.col, d.in.uv, d.in.idx, d.in.nIdx, mask, tb > 0.0f );
+			else
+				r->drawShape( unsigned( d.in.nv ), 0x20000043ULL, unsigned( d.in.nIdx ), GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs,
+					d.in.idx );
 		}
 		drawn++;
 	}
 	r->stopProgram();
 	s.partLayers = double( partClock.nsecsElapsed() - layersAt ) * 1e-6;
+	if ( vkTried && drawn > 0 ) {	// lane VKCLOUD4: the gathered layers in one run, or GL draws them all again
+		bool drew = false;
+		if ( onVk ) {
+			vt.n = n;
+			vt.key = s.mapKey;
+			vt.max = redMax;
+			drew = WwVkPresent::cloudMapRun( vt, vkWhy );
+		} else {
+			WwVkPresent::cloudMapOnGl( vkWhy.c_str() );
+		}
+		vkSay( n );
+		if ( !drew )
+			return buildMap( scene, s, ds, weight, bp, n, redMax, why, true );
+	} else if ( !vkTried && !glOnly ) {
+		static bool saidGl = false;
+		if ( !saidGl )
+			qInfo().noquote() << "vk cloudmap: on GL (red WW_VKVIEW_CLOUDMAP_RED=1 or the view not on Vulkan)";
+		saidGl = true;
+	}
 	if ( !drawn && !ds.isEmpty() ) {
 		*why = s.worldSkipped > 0 && !drawn ? QStringLiteral( "no layer has a zenith cap to lay on the world (red "
 			"WW_CLOUDMAP_RED=domeproj: the dome's projection)" ) : QStringLiteral( "no layer drew (no mesh or texture resolved)" );

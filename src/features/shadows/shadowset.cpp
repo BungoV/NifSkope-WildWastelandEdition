@@ -2317,6 +2317,53 @@ void contactLineRun( GLuint gbuf, GLuint mask, int W, int H, int mw, int mh, int
 	g->glUseProgram( 0 );
 }
 
+/* lane VKSHADOW3: contactFarPass's three stages on the present device (contactfar_vk.hlsl stages 1-3, gated by
+ * tests/vklight/light.sh contactfar + tests/vkframe/lightview.sh): the min by 4 and the march into twins only the
+ * dispatches use, then the resolve by min into the near mask (copied in and back). The push constants are the GL
+ * uniforms the frags read (see contactfar_vk.hlsl's header). false: lightRun refused, nothing changed (GL draws). */
+bool contactFarVk( GLuint gbuf, GLuint mask, int W, int H, int mw, int mh, int scale, int fw, int fh, int div,
+	const float light[4], bool par, bool earlyExit, const double lv[3], float tolerance, const float fade[4] )
+{
+	WwVkPresent::LightRun t;
+	t.pass = WwVkPresent::LightContactFar;
+	auto image = [&t]( GLuint tex, unsigned fmt, int w, int h, bool in, bool out ) {
+		WwVkPresent::LightImage im;
+		im.tex = tex;
+		im.glFmt = fmt;
+		im.w = w;
+		im.h = h;
+		im.in = in;
+		im.out = out;
+		t.img.push_back( im );
+	};
+	image( gbuf, GL_RGBA32F, W, H, true, false );	// 0
+	image( 0, GL_RGBA32F, fw, fh, false, false );	// 1 farDepth
+	image( 0, GL_R8, fw, fh, false, false );	// 2 farMask
+	image( mask, GL_R8, mw, mh, true, true );	// 3 the near mask
+	auto dispatch = [&t]( int kernel, int out0, int t0, int t1, int t2, const float ( &c )[6][4], int i0, int i1 ) {
+		WwVkPresent::LightDispatch d;
+		d.kernel = kernel;
+		d.out0 = out0;
+		d.t[0] = t0;
+		d.t[1] = t1;
+		d.t[2] = t2;
+		std::memcpy( d.pc, c, sizeof( c ) );
+		const std::int32_t i[4] = { i0, i1, 0, 0 };
+		std::memcpy( d.pc + 112, i, sizeof( i ) );
+		t.d.push_back( d );
+	};
+	const float c1[6][4] = { {}, {}, {}, {}, { float( W ), float( H ), float( fw ), float( fh ) }, {} };
+	dispatch( WwVkPresent::LightCfarMin, 1, 0, -1, -1, c1, div, 0 );
+	const float c2[6][4] = { { light[0], light[1], light[2], light[3] }, { par ? 0.005f : 0.02f, 0.02f, 4.0f, 96.0f }, {},
+		{ 1.0f, 250.0f, 0.0f, 0.0f }, { float( fw ), float( fh ), 0.0f, 0.0f }, { float( lv[0] ), float( lv[1] ), float( lv[2] ), 0.0f } };
+	dispatch( WwVkPresent::LightCfarMarch, 2, 1, -1, -1, c2, par ? 1 : 0, earlyExit ? 1 : 0 );
+	const float c3[6][4] = { { float( W ), float( H ), float( fw ), float( fh ) }, { float( scale ), tolerance, float( div ), 0.0f },
+		{ fade[0], fade[1], fade[2], fade[3] }, {}, {}, {} };
+	dispatch( WwVkPresent::LightCfarComp, 3, 0, 1, 2, c3, 0, 0 );
+	std::string why;
+	return WwVkPresent::lightRun( t, why );
+}
+
 }	// namespace
 
 /* lane GAPLOOK1 (C7): FO4CS's far tier (res/Effects/ScreenSpaceShadows/Far*.hlsl): the depth min-reduced by 4, the
@@ -2327,6 +2374,31 @@ QString contactFarPass( Renderer * r, Contact & c, unsigned int gbuf, int W, int
 {
 	auto fn = r->fn;
 	const int div = 4, fw = ( W + div - 1 ) / div, fh = ( H + div - 1 ) / div;
+	// Red WW_CELL_CONTACT_FAR_RED=halo: no depth agreement in the resolve; =inside: the tier at every distance (below)
+	const bool halo = wwEnvStr( "WW_CELL_CONTACT_FAR_RED" ) == QLatin1String( "halo" );
+	float fade[4];
+	{
+		WwCascadePreset cp;
+		const bool give = ss().csmSeen && wwShadowCascadePreset( cp ) && wwEnvStr( "WW_CELL_CONTACT_FAR_RED" ) != QLatin1String( "inside" );
+		const auto & pm = r->globalUniforms->projectionMatrix;
+		fade[0] = give ? float( cp.D ) : 0.0f;
+		fade[1] = give ? 1.0f : 0.0f;
+		fade[2] = pm[0][0] != 0.0f ? 1.0f / pm[0][0] : 1.0f;
+		fade[3] = pm[1][1] != 0.0f ? 1.0f / pm[1][1] : 1.0f;
+	}
+	const float light[4] = { float( ( ndcX * 0.5 + 0.5 ) * fw ), float( ( ndcY * 0.5 + 0.5 ) * fh ), float( lz ), cw > 0 ? 1.0f : -1.0f };
+	// lane VKSHADOW3: the three stages on the present device first; red WW_VKVIEW_CONTACTFAR_RED=1 (or the view on GL): GL's
+	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_CONTACTFAR_RED" ) ) {
+		WwVkPresent::lightSay( WwVkPresent::LightContactFar, false, "red WW_VKVIEW_CONTACTFAR_RED=1 or the view not on Vulkan" );
+	} else {
+		const bool ok = contactFarVk( gbuf, c.tex, W, H, mw, mh, scale, fw, fh, div, light, par, earlyExit, lv, halo ? 1e6f : 0.02f, fade );
+		WwVkPresent::lightSay( WwVkPresent::LightContactFar, true, nullptr );
+		if ( ok ) {
+			fn->glBindFramebuffer( GL_FRAMEBUFFER, c.fbo );	// GL's stages leave the near mask's target bound
+			fn->glViewport( 0, 0, mw, mh );
+			return QStringLiteral( "far=%1x%2 vk%3" ).arg( fw ).arg( fh ).arg( halo ? QStringLiteral( "(red halo)" ) : QString() );
+		}
+	}
 	auto makeTarget = [fn]( unsigned int & tex, unsigned int & fbo, int w, int h, GLenum ifmt, GLenum fmt, GLenum type ) {
 		if ( !tex ) {
 			fn->glGenTextures( 1, &tex );
@@ -2373,7 +2445,7 @@ QString contactFarPass( Renderer * r, Contact & c, unsigned int gbuf, int W, int
 	prog->uni1i( "gbuf", 0 );
 	fn->glUniform2i( prog->uniLocation( "fullSize" ), fw, fh );
 	prog->uni1f( "maskScale", 1.0f );
-	prog->uni4f( "lightCoord", FloatVector4( float( ( ndcX * 0.5 + 0.5 ) * fw ), float( ( ndcY * 0.5 + 0.5 ) * fh ), float( lz ), cw > 0 ? 1.0f : -1.0f ) );
+	prog->uni4f( "lightCoord", FloatVector4( light[0], light[1], light[2], light[3] ) );
 	prog->uni4f( "sssParams", FloatVector4( par ? 0.005f : 0.02f, 0.02f, 4.0f, 96.0f ) );
 	prog->uni1f( "sssFloor", 250.0f );
 	prog->uni1i( "sssPar", par ? 1 : 0 );
@@ -2383,7 +2455,6 @@ QString contactFarPass( Renderer * r, Contact & c, unsigned int gbuf, int W, int
 	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 	r->stopProgram();
 	// 3: the depth-aware resolve into the near mask, by min. Red WW_CELL_CONTACT_FAR_RED=halo: no depth agreement
-	const bool halo = wwEnvStr( "WW_CELL_CONTACT_FAR_RED" ) == QLatin1String( "halo" );
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, c.fbo );
 	fn->glViewport( 0, 0, mw, mh );
 	prog = r->useProgram( "ww_contact_farcomp.prog" );
@@ -2406,13 +2477,7 @@ QString contactFarPass( Renderer * r, Contact & c, unsigned int gbuf, int W, int
 	 * the cascade map holds the far casters to the texel, and the tier's 250-unit slab made a thin caster in front of a
 	 * wall (a power line 85 u off it) a 384-pixel band of stripes. Past the reach, and with the cascades off, today's tier.
 	 * Red WW_CELL_CONTACT_FAR_RED=inside: the tier at every distance (the banding) */
-	{
-		WwCascadePreset cp;
-		const bool give = ss().csmSeen && wwShadowCascadePreset( cp ) && wwEnvStr( "WW_CELL_CONTACT_FAR_RED" ) != QLatin1String( "inside" );
-		const auto & pm = r->globalUniforms->projectionMatrix;
-		prog->uni4f( "farFade", FloatVector4( give ? float( cp.D ) : 0.0f, give ? 1.0f : 0.0f,
-			pm[0][0] != 0.0f ? 1.0f / pm[0][0] : 1.0f, pm[1][1] != 0.0f ? 1.0f / pm[1][1] : 1.0f ) );
-	}
+	prog->uni4f( "farFade", FloatVector4( fade[0], fade[1], fade[2], fade[3] ) );
 	fn->glEnable( GL_BLEND );
 	fn->glBlendEquation( GL_MIN );
 	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );

@@ -2,7 +2,7 @@
 # Lane VKLIGHT1 (2026-11-12): the lighting passes on Vulkan compute (res/shaders/hlsl/vklight/*.hlsl) against the GL .frag
 # chains on the same inputs (tests/vklight/light_gl_ref.py, a hidden GL context; tests/vklight/lightmatch.cpp, a headless
 # Vulkan device). Copied from VKFRAME1's tests/vkframe/postfx.sh.
-# bash tests/vklight/light.sh <out dir> [<WW_CELL_HDR_DUMP .hdr>] [<pass> ...]     (passes: ao contact ssgi ssr aox; default all)
+# bash tests/vklight/light.sh <out dir> [<WW_CELL_HDR_DUMP .hdr>] [<pass> ...]     (passes: ao contact ssgi ssr aox contactfar; default all)
 # VKLIGHT_NOTIME=1 skips every timing (gate only, while another job loads the GPU).
 # Needs MSYS2 UCRT64 g++ (Vulkan headers), DXC (DXC= to override) and python with numpy.
 # Green: every job LIGHTMATCH EXACT or BOUND; each kernel's red build must FAIL its job. Last line `VKLIGHT GATE OK` / `FAILED`.
@@ -10,7 +10,7 @@ set -u
 OUT="${1:?out dir}"
 HDR="${2:-X:/ClaudeOverflow/fogmatch1/m1/mem_fm_def.hdr}"
 shift; [ $# -gt 0 ] && shift
-PASSES="${*:-ao contact ssgi ssr aox}"
+PASSES="${*:-ao contact ssgi ssr aox contactfar}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DXC="${DXC:-/e/Tools/dxc/bin/x64/dxc.exe}"
 PY="${PY:-$(command -v python)}"	# before the UCRT64 PATH: its python has no numpy
@@ -34,6 +34,15 @@ for p in $PASSES; do
 		JOBS="$JOBS ao_A ao_L ao_N ao_S ao_SL"; NRED=$((NRED + 5)) ;;
 	contact) K="$K contact:contact_vk.hlsl::CONTACT_RED"
 		JOBS="$JOBS ct_A ct_B ct_C ct_S"; NRED=$((NRED + 1)) ;;
+	# lane VKSHADOW3: the far tier (shadowset.cpp contactFarPass) on compute, contactfar_vk.hlsl stages 1-3. Bar, stated before
+	# the first run: every job's farDepth ulp0 (EXACT: a min over texels), farMask and the composed mask ulp1 (one R8 level, as
+	# the near tier's ct_ jobs). Jobs cf_A (dump, light in front, the cascades' reach D 40000 given: the dump's geometry is 31000-42000 out), cf_B (dump, light behind,
+	# SHADOWPAR1 + early exit, no reach), cf_S (synthetic 641x361, D 1500 given). Reds on cf_A, each must FAIL:
+	# cfar_min (the block's first texel, not its min), cfar_march (the light's w sign flipped), cfar_comp (halo: tolerance
+	# 1e6), cfar_compi (inside: farFade off, the tier at every distance)
+	contactfar) K="$K cfar_min:contactfar_vk.hlsl:-DCFAR_STAGE=1:CFAR_MIN_RED cfar_march:contactfar_vk.hlsl:-DCFAR_STAGE=2:CFAR_MARCH_RED
+		cfar_comp:contactfar_vk.hlsl:-DCFAR_STAGE=3:CFAR_HALO_RED cfar_compi:contactfar_vk.hlsl:-DCFAR_STAGE=3:CFAR_INSIDE_RED"
+		JOBS="$JOBS cf_A cf_B cf_S"; NRED=$((NRED + 4)) ;;
 	ssgi) K="$K ssgi:ssgi_vk.hlsl::SSGI_RED ssgie:ssgi_vk.hlsl::SSGI_EMIT_RED"	# ssgie: lane VKFAR3, the emission subtracted
 		JOBS="$JOBS sg_A sg_B sg_S sg_E"; NRED=$((NRED + 2)) ;;
 	aox) K="$K aox_z:aox_vk.hlsl:-DAOX_KERNEL=1:AOX_Z_RED aox_xe:aox_vk.hlsl:-DAOX_KERNEL=2:AOX_XE_RED

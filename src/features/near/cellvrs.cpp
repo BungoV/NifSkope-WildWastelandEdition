@@ -6,6 +6,7 @@
 #include "features/shared/cellpasstime.h"
 #include "gl/cellunits.h"	// lane WATERFIX7: the passes' named units
 #include "features/post/gametaa.h"
+#include "features/vkframe/vkvrs.h"	// lane VKSMALL3: the rate images on the present device
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 
@@ -15,7 +16,9 @@
 #include <QOpenGLContext>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 // lane VRS1: variable rate shading in the cell view (cellvrs.h)
@@ -44,6 +47,8 @@ constexpr int kPalette = 7;	// cell_vrs_rate.frag's indices: 1x1, 1x2, 2x1, 2x2,
 using BindImageFn = void ( * )( GLuint );
 using PaletteFn = void ( * )( GLuint, GLuint, GLsizei, const GLenum * );
 using TexStorageFn = void ( * )( GLenum, GLsizei, GLenum, GLsizei, GLsizei );
+using CopyImageFn = void ( * )( GLuint, GLenum, GLint, GLint, GLint, GLint, GLuint, GLenum, GLint, GLint, GLint, GLint, GLsizei,
+	GLsizei, GLsizei );
 
 enum Red { RedNone, Red1x1, Red4x4, RedNoAlpha };
 
@@ -87,6 +92,7 @@ struct VrsGpu
 	BindImageFn bindImage = nullptr;
 	PaletteFn palette = nullptr;
 	TexStorageFn texStorage = nullptr;	// the rate images are immutable R8UI (GL 4.2; the view's functions are 4.1)
+	CopyImageFn copyImage = nullptr;	// lane VKSMALL3: the Vulkan route's twins into the rate images (GL 4.3)
 	bool passChecked = false;	// the first pass through these images read its GL error
 	GLint texelW = 16, texelH = 16, paletteSize = 0, coarseSamples = 0;
 	GLuint srcFbo = 0, src = 0, rateFbo = 0, rate[2] = { 0, 0 };
@@ -147,6 +153,7 @@ bool initGpu( Renderer * r, VrsGpu & g )
 	g.bindImage = reinterpret_cast<BindImageFn>( cx->getProcAddress( "glBindShadingRateImageNV" ) );
 	g.palette = reinterpret_cast<PaletteFn>( cx->getProcAddress( "glShadingRateImagePaletteNV" ) );
 	g.texStorage = reinterpret_cast<TexStorageFn>( cx->getProcAddress( "glTexStorage2D" ) );
+	g.copyImage = reinterpret_cast<CopyImageFn>( cx->getProcAddress( "glCopyImageSubData" ) );	// optional: Vulkan's route only
 	if ( !g.bindImage || !g.palette || !g.texStorage ) {
 		note( QStringLiteral( "off (GL_NV_shading_rate_image without its entry points)" ) );
 		return false;
@@ -276,6 +283,82 @@ QString wwCellVrsEcho()
 	return vst().last;
 }
 
+/* lane VKSMALL3 (census row 76): the rate images on the present device (vkvrs.inc; WW_VKVIEW=1, red WW_VKVIEW_VRS_RED=1:
+ * GL's blit + quad). Vulkan resolves the view and draws both into its R8UI twins; GL copies them into its own rate images
+ * (the NV binding stays GL's). true: g.rate[] hold this frame's; false: GL builds them (the reason on "vk vrs:") */
+static bool vrsOnVk( Scene * scene, VrsGpu & g, int prevDraw, int W, int H, const VrsCfg & c )
+{
+	static QString said;
+	static auto at = std::chrono::steady_clock::now();
+	auto say = [&]( const QString & line ) {
+		if ( line == said )
+			return;
+		said = line;
+		at = std::chrono::steady_clock::now();
+		qInfo().noquote() << line;
+	};
+	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_VRS_RED" ) ) {
+		say( QStringLiteral( "vk vrs: on GL (red WW_VKVIEW_VRS_RED=1 or the view not on Vulkan)" ) );
+		return false;
+	}
+	bool drew = false;
+	if ( !g.copyImage || !g.rate[0] || !g.rate[1] ) {
+		WwVkPresent::vrsOnGl( "no glCopyImageSubData or no rate images" );
+	} else {
+		int mw = 0, mh = 0;
+		const GLuint mv = c.motion > 0.0f ? wwGameTaaMotionTex( scene, mw, mh ) : 0;
+		WwVkPresent::VrsRun t;
+		t.w = W;
+		t.h = H;
+		t.drawFb = GLuint( prevDraw );
+		t.tw = g.tw;
+		t.th = g.th;
+		t.texelW = g.texelW;
+		t.texelH = g.texelH;
+		t.mv = ( mv && mw == W && mh == H ) ? mv : 0;
+		t.cut = c.cut;
+		t.cutSorted = c.cutSorted;
+		t.motion = c.motion;
+		t.maxRate = c.maxRate;
+		unsigned tex[2] = {};
+		std::string why;
+		drew = WwVkPresent::vrsRun( t, tex, why );
+		if ( drew ) {
+			for ( int k = 0; k < 2; k++ )
+				g.copyImage( tex[k], GL_TEXTURE_2D, 0, 0, 0, 0, g.rate[k], GL_TEXTURE_2D, 0, 0, 0, 0, g.tw, g.th, 1 );
+		}
+	}
+	const WwVkPresent::FxStat st = WwVkPresent::takeVrsStat();
+	static WwVkPresent::FxStat sum;
+	sum.runs += st.runs;
+	sum.gl += st.gl;
+	sum.fails += st.fails;
+	sum.cpuMs += st.cpuMs;
+	sum.maxMs = std::max( sum.maxMs, st.maxMs );
+	sum.pipelines = st.pipelines;
+	sum.buildMs = st.buildMs;
+	if ( !st.glWhy.empty() )
+		sum.glWhy = st.glWhy;
+	if ( !st.failWhy.empty() )
+		sum.failWhy = st.failWhy;
+	if ( std::chrono::duration<double>( std::chrono::steady_clock::now() - at ).count() >= 5.0 || !said.startsWith( QStringLiteral( "vk vrs: on V" ) ) ) {
+		QString line = sum.runs > 0
+			? QStringLiteral( "vk vrs: on Vulkan %1 runs (%2x%3 tiles, two R8UI twins copied into GL's rate images, the view resolved "
+				"on Vulkan, one draw, one crossing; %4 pipelines built in %5 ms; drawing thread %6 ms, max %7)" ).arg( sum.runs )
+				.arg( g.tw ).arg( g.th ).arg( sum.pipelines ).arg( sum.buildMs, 0, 'f', 1 ).arg( sum.cpuMs / sum.runs, 0, 'f', 3 )
+				.arg( sum.maxMs, 0, 'f', 3 )
+			: QStringLiteral( "vk vrs: on Vulkan wanted, 0 runs drawn" );
+		if ( sum.gl > 0 )
+			line += QStringLiteral( ", on GL %1 runs (last: %2)" ).arg( sum.gl ).arg( QString::fromStdString( sum.glWhy ) );
+		if ( sum.fails > 0 )
+			line += QStringLiteral( ", refused %1 (last: %2)" ).arg( sum.fails ).arg( QString::fromStdString( sum.failWhy ) );
+		said.clear();
+		say( line );
+		sum = WwVkPresent::FxStat();
+	}
+	return drew;
+}
+
 void wwCellVrsBuild( Scene * scene, int prevDraw, int prevRead, int W, int H, const int vp[4] )
 {
 	const VrsCfg & c = cfg();
@@ -314,12 +397,14 @@ void wwCellVrsBuild( Scene * scene, int prevDraw, int prevRead, int W, int H, co
 		while ( fn->glGetError() != GL_NO_ERROR ) {
 		}
 	}
+	bool ok = true;
+	const bool vkDone = vrsOnVk( scene, g, prevDraw, W, H, c );
+	if ( !vkDone ) {	// lane VKSMALL3: GL's own blit + quad (the red, a refusal, the view not on Vulkan)
 	// 1. this frame's finished picture, resolved (the view is multisampled)
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevDraw ) );
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.srcFbo );
 	fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_COLOR_BUFFER_BIT, GL_NEAREST );
 	// 2. the two rate images, one texel per tile
-	bool ok = true;
 	auto prog = r->useProgram( "cell_vrs_rate.prog" );
 	if ( !prog ) {
 		ok = false;
@@ -362,6 +447,7 @@ void wwCellVrsBuild( Scene * scene, int prevDraw, int prevRead, int W, int H, co
 			qInfo().noquote() << "cell vrs: motion" << ( mvOn ? "from the temporal AA's vectors" : "none (no vectors this frame)" );
 		}
 	}
+	}	// !vkDone
 	if ( ok && check ) {
 		const GLenum err = fn->glGetError();
 		ok = err == GL_NO_ERROR;

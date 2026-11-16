@@ -21,6 +21,7 @@
 #include "features/vkframe/vkframe.h"	// lane VKFRAME1 round 3: the frame shared with the Vulkan bloom source
 #include "features/vkframe/vkpresent.h"	// lane VKFRAME1 round 10: the view on Vulkan keeps the view's cached format
 #include "features/vkframe/vkobjpipe.h"	// lane VKOBJ4 open item 3: the frame as shared targets (objBlFrame)
+#include "features/vkframe/vkdepthmax.h"	// lane VKSMALL2: the farthest depth on the Vulkan view (row 40)
 #include "features/near/cellbindless.h"	// WwBl::vkShadeOn
 #include "features/shared/glstatememo.h"	// lane EMPTY240 R11-2: the clear's state reads kept
 
@@ -1085,6 +1086,80 @@ static GLuint backdropCopy( Renderer * r, GLint viewDraw, GLint viewRead, int w,
 	return d.ok ? d.tex : 0;
 }
 
+/* lane VKSMALL2 (census row 40): the farthest depth drawn on the present device (vkdepthmax.inc; WW_VKVIEW=1, red
+ * WW_VKVIEW_DEPTHMAX_RED=1: GL's quad). The shared tone frame's own depth is read in place. true: tex = the route's
+ * shared R32F twin (GL's readers take that name); false: GL's quad (the reason on "vk depthmax:") */
+static bool depthMaxVk( Renderer * r, const HdrGpu & g, const HdrState & s, unsigned int & tex )
+{
+	static QString said;
+	static auto at = std::chrono::steady_clock::now();
+	auto say = [&]( const QString & line ) {
+		if ( line == said )
+			return;
+		said = line;
+		at = std::chrono::steady_clock::now();
+		qInfo().noquote() << line;
+	};
+	tex = 0;
+	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_DEPTHMAX_RED" ) ) {
+		say( QStringLiteral( "vk depthmax: on GL (red WW_VKVIEW_DEPTHMAX_RED=1 or the view not on Vulkan)" ) );
+		return false;
+	}
+	bool drew = false;
+	if ( !g.vkTone || !WwVkPresent::toneFrameIs( g.color ) ) {
+		WwVkPresent::depthMaxOnGl( "the frame is not the shared tone frame" );
+	} else {
+		WwVkPresent::DepthMaxRun t;
+		t.w = s.w;
+		t.h = s.h;
+		t.ds = g.ds;
+		t.samples = std::max( s.samples, 1 );
+		std::string why;
+		drew = WwVkPresent::depthMaxRun( t, tex, why );
+		static unsigned int filtered = 0;	// the twin's GL sampling as GL's own target: NEAREST, CLAMP (once per new twin)
+		if ( drew && tex != filtered ) {
+			filtered = tex;
+			auto fn = r->fn;
+			GLint prev = 0;
+			fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prev );
+			fn->glBindTexture( GL_TEXTURE_2D, tex );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+			fn->glBindTexture( GL_TEXTURE_2D, GLuint( prev ) );
+		}
+	}
+	const WwVkPresent::FxStat st = WwVkPresent::takeDepthMaxStat();
+	static WwVkPresent::FxStat sum;
+	sum.runs += st.runs;
+	sum.gl += st.gl;
+	sum.fails += st.fails;
+	sum.cpuMs += st.cpuMs;
+	sum.maxMs = std::max( sum.maxMs, st.maxMs );
+	sum.pipelines = st.pipelines;
+	sum.buildMs = st.buildMs;
+	if ( !st.glWhy.empty() )
+		sum.glWhy = st.glWhy;
+	if ( !st.failWhy.empty() )
+		sum.failWhy = st.failWhy;
+	if ( std::chrono::duration<double>( std::chrono::steady_clock::now() - at ).count() >= 5.0 || !said.startsWith( QStringLiteral( "vk depthmax: on V" ) ) ) {
+		QString line = sum.runs > 0
+			? QStringLiteral( "vk depthmax: on Vulkan %1 runs (%2x%3 R32F twin, the tone frame's depth read in place, one draw, one crossing; "
+				"%4 pipelines built in %5 ms; drawing thread %6 ms, max %7)" ).arg( sum.runs ).arg( s.w ).arg( s.h )
+				.arg( sum.pipelines ).arg( sum.buildMs, 0, 'f', 1 ).arg( sum.cpuMs / sum.runs, 0, 'f', 3 ).arg( sum.maxMs, 0, 'f', 3 )
+			: QStringLiteral( "vk depthmax: on Vulkan wanted, 0 runs drawn" );
+		if ( sum.gl > 0 )
+			line += QStringLiteral( ", on GL %1 runs (last: %2)" ).arg( sum.gl ).arg( QString::fromStdString( sum.glWhy ) );
+		if ( sum.fails > 0 )
+			line += QStringLiteral( ", refused %1 (last: %2)" ).arg( sum.fails ).arg( QString::fromStdString( sum.failWhy ) );
+		said.clear();
+		say( line );
+		sum = WwVkPresent::FxStat();
+	}
+	return drew;
+}
+
 static unsigned int depthMaxMake( Scene * scene )
 {
 	HdrState & s = hst();
@@ -1095,6 +1170,8 @@ static unsigned int depthMaxMake( Scene * scene )
 	HdrGpu & g = hdrGpus()[r];
 	if ( !g.dsTex || !g.ds )
 		return 0;
+	if ( unsigned int vkTex = 0; depthMaxVk( r, g, s, vkTex ) )
+		return vkTex;
 	static QHash<Renderer *, DepthMaxGpu> gpus;
 	DepthMaxGpu & d = gpus[r];
 	GLint prevDraw = 0, prevActive = 0, vp[4] = { 0, 0, 1, 1 };

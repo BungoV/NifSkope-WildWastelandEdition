@@ -165,8 +165,8 @@ def gl_uniforms(p, vals, units):
         if ty.value not in GLT:  # a sampler: its unit
             if base in units:
                 loc = uloc(p, base.encode())
-                arr = np.array([units[base]], np.int32)
-                u1iv(loc, 1, arr.ctypes.data)
+                arr = np.array(units[base] if isinstance(units[base], list) else [units[base]], np.int32)
+                u1iv(loc, len(arr), arr.ctypes.data)
             continue
         kind, comp = GLT[ty.value]
         if bi.value >= 0:
@@ -429,12 +429,21 @@ def run_job(job, jobdir):
     kinds = gl_samplers(p)  # every sampler GL declares gets its own unit (two types on one unit = a draw error)
     kinds.update({im['name']: ('3d' if '3D' in im['type'] else '2darray' if 'Array' in im['type'] else '2dms' if 'MS' in im['type']
                                else '2d') for im in refl.get('separate_images', [])})
-    names = sorted(set(kinds) | set(texs))
+    # lane VKCLOUD1: a sampler array (cloud_shadowmap's csSheetTex[8]) is a list, one Tex an element, each its own unit
+    arrs = {n: t for n, t in texs.items() if isinstance(t, list)}
+    names = sorted((set(kinds) | set(texs)) - set(arrs) - {n + '[0]' for n in arrs})
     full = {n: texs.get(n) or zero_tex(kinds.get(n, '2d')) for n in names}
     units = {}
     for u, n in enumerate(names):
         gl_texture(full[n], u)
         units[n] = u
+    nu = len(names)
+    for n, lst in arrs.items():
+        units[n] = []
+        for t in lst:
+            gl_texture(t, nu)
+            units[n].append(nu)
+            nu += 1
     gl_uniforms(p, vals, units)
     useProgram(p)
     fbo = U(); genFB(1, ctypes.byref(fbo)); bindFB(FBO, fbo)
@@ -487,15 +496,19 @@ def run_job(job, jobdir):
         for b, f in vk_blocks(refl, vals, jobdir, tag):
             lines.append('ubo %d %s' % (b, f.replace('\\', '/')))
         for im in refl.get('separate_images', []):
-            t = full[im['name']]
-            f = os.path.join(jobdir, 'tex_%s.bin' % im['name'])
-            if t.data is not None and tag == 'green':
-                (t.data.astype(np.float16) if t.fmt in ('rgba16f', 'r16f') else t.data).tofile(f)
-            lines.append('tex %d %s %s %d %d %d %s' % (im['binding'], t.kind, t.fmt, t.w, t.h, t.d, f.replace('\\', '/')))
+            arr = im['name'] in arrs  # lane VKCLOUD1: an array's elements as `<binding>:<element>` lines
+            for e, t in enumerate(arrs[im['name']] if arr else [full[im['name']]]):
+                f = os.path.join(jobdir, 'tex_%s%s.bin' % (im['name'], '_%d' % e if arr else ''))
+                if t.data is not None and tag == 'green':
+                    (t.data.astype(np.float16) if t.fmt in ('rgba16f', 'r16f') else t.data).tofile(f)
+                b = '%d:%d' % (im['binding'], e) if arr else '%d' % im['binding']
+                lines.append('tex %s %s %s %d %d %d %s' % (b, t.kind, t.fmt, t.w, t.h, t.d, f.replace('\\', '/')))
         for sm in refl.get('separate_samplers', []):
             base = sm['name'][1:-8] if sm['name'].startswith('_') and sm['name'].endswith('_sampler') else sm['name']
-            t = full.get(base) or zero_tex('2d')
-            lines.append('smp %d %s %s' % (sm['binding'], t.filt, t.wrap))
+            arr = base in arrs
+            for e, t in enumerate(arrs[base] if arr else [full.get(base) or zero_tex('2d')]):
+                b = '%d:%d' % (sm['binding'], e) if arr else '%d' % sm['binding']
+                lines.append('smp %s %s %s' % (b, t.filt, t.wrap))
         with open(path, 'w') as fh:
             fh.write('\n'.join(lines) + '\n')
 
@@ -515,6 +528,11 @@ def run_job(job, jobdir):
         lit = int((np.abs(gl_out[k]) > 0).any(-1).sum())
         print('FRAGMATCH %s rt%d %s (%s; nonzero px %d of %d)' % (job['name'], k, v, stats, lit, W * H))
         ok = ok and v != 'FAIL'
+        if k == 0 and job.get('min_cloud'):  # lane VKCLOUD1: the fixture must reach the branch (w = 1: a cloud met)
+            nc = int((gl_out[0][..., 3] > 0).sum())
+            print('cloud texels %s %d (min %d)' % (job['name'], nc, job['min_cloud']))
+            if nc < job['min_cloud']:
+                print('FIXTURE %s TOO CLEAR' % job['name']); ok = False
     if gl_ms is not None or vk_ms is not None:
         print('time %s gl_ms %s vk_ms %s' % (job['name'], gl_ms, vk_ms))
 

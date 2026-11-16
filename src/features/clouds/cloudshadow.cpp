@@ -28,6 +28,10 @@
 #include <cstring>
 
 #include "features/clouds/cloudshadowslice.h"	// lane PERFFIX3: the time-sliced rebuild
+#include "features/vkframe/vkcloudshadow.h"	// lane VKCLOUD3: the map's rows on the Vulkan view
+
+#include <chrono>
+#include <string>
 
 // lane CLOUD3: the clouds' Beer shadow map (cloudshadow.h). The build is res/shaders/features/clouds/cloud_shadowmap.frag.
 
@@ -305,6 +309,11 @@ struct CsGpu
 	GLuint fbo = 0, tex = 0;
 	// lane PERFFIX3: the back map, built size/16 rows a frame under a moved fit, then swapped in (cloudshadowslice.h)
 	GLuint fbo2 = 0, tex2 = 0;
+	/* lane VKCLOUD3: while the view is on Vulkan both maps are shared targets of the present device (keys: one byte each
+	 * for the renderer's life; sh: the name is the device's, dropped there, never deleted here); swapped with the maps */
+	std::uintptr_t key = 0, key2 = 0;
+	bool sh = false, sh2 = false;
+	bool shareAsk = false;
 	WwCloudShadowSlice::State sl;
 	M::Basis backBasis{};
 	M::Fit backFit{};
@@ -349,15 +358,36 @@ QHash<Renderer *, CsGpu> & gpus()
 
 Renderer * g_last = nullptr;	// the renderer of the last pass (wwCloudShadowValid)
 
-bool ensureOne( NifSkopeOpenGLContext::GLFunctions * fn, GLuint & fbo, GLuint & tex, int n )
+bool ensureOne( NifSkopeOpenGLContext::GLFunctions * fn, GLuint & fbo, GLuint & tex, std::uintptr_t & key, bool & sh, bool share, int n )
 {
 	if ( !fbo )
 		fn->glGenFramebuffers( 1, &fbo );
-	if ( tex )
+	if ( sh ) {	// lane VKCLOUD3: the present device's name (or one a shutdown already dropped): not ours to delete
+		if ( WwVkPresent::sharedTargetIs( key, tex ) )
+			WwVkPresent::sharedTargetDrop( key );
+		tex = 0;
+		sh = false;
+	} else if ( tex ) {
 		fn->glDeleteTextures( 1, &tex );
-	fn->glGenTextures( 1, &tex );
-	fn->glBindTexture( GL_TEXTURE_2D, tex );
-	fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA16F, n, n, 0, GL_RGBA, GL_FLOAT, nullptr );
+	}
+	if ( share ) {
+		if ( !key )
+			key = reinterpret_cast<std::uintptr_t>( new char );
+		unsigned t = 0;
+		std::string why;
+		sh = WwVkPresent::sharedTarget( key, 0, n, n, 1, GL_RGBA16F, t, why, 1 );
+		if ( sh )
+			tex = t;
+		else
+			qInfo().noquote() << "vk cloudshadow: the map stays GL's (" << QString::fromStdString( why ) << ")";
+	}
+	if ( !sh ) {
+		fn->glGenTextures( 1, &tex );
+		fn->glBindTexture( GL_TEXTURE_2D, tex );
+		fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA16F, n, n, 0, GL_RGBA, GL_FLOAT, nullptr );
+	} else {
+		fn->glBindTexture( GL_TEXTURE_2D, tex );
+	}
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
@@ -372,10 +402,14 @@ bool ensureOne( NifSkopeOpenGLContext::GLFunctions * fn, GLuint & fbo, GLuint & 
 
 bool ensure( NifSkopeOpenGLContext::GLFunctions * fn, CsGpu & g, int n )
 {
-	if ( g.fbo && g.fbo2 && g.size == n )
+	// lane VKCLOUD3: a flipped wish (WW_VKVIEW, red WW_VKVIEW_CLOUDSHADOW_RED=1) or a shared map a shutdown dropped: made again
+	const bool share = WwVkPresent::shareWanted( "WW_VKVIEW_CLOUDSHADOW_RED" );
+	const bool lost = ( g.sh && !WwVkPresent::sharedTargetIs( g.key, g.tex ) ) || ( g.sh2 && !WwVkPresent::sharedTargetIs( g.key2, g.tex2 ) );
+	if ( g.fbo && g.fbo2 && g.size == n && g.shareAsk == share && !lost )
 		return true;
+	g.shareAsk = share;
 	// lane PERFFIX3: the front and the back map (a new size: both made again, the front rebuilt whole)
-	const bool ok = ensureOne( fn, g.fbo, g.tex, n ) && ensureOne( fn, g.fbo2, g.tex2, n );
+	const bool ok = ensureOne( fn, g.fbo, g.tex, g.key, g.sh, share, n ) && ensureOne( fn, g.fbo2, g.tex2, g.key2, g.sh2, share, n );
 	g.size = n;
 	g.valid = false;
 	return ok;
@@ -387,6 +421,102 @@ void quad( Renderer * r )
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
 	const float * attrs = q;
 	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+}
+
+/* lane VKCLOUD3: the slice's rows drawn on the present device (vkcloudshadow.inc; WW_VKVIEW=1, red
+ * WW_VKVIEW_CLOUDSHADOW_RED=1: GL's quad). cloud_shadowmap's uniforms are set and its units bound as for GL's quad and read
+ * back. true: drawn there (GL draws nothing, no timing query); false: GL's quad (the reason on "vk cloudshadow:") */
+bool vkRows( NifSkopeOpenGLContext::GLFunctions * fn, NifSkopeOpenGLContext::Program * p, const CsGpu & g, bool intoBack, int n,
+	int row0, int rows, bool variety, int mode, int sheetN )
+{
+	static QString said;
+	static auto at = std::chrono::steady_clock::now();
+	auto say = [&]( const QString & line ) {
+		if ( line == said )
+			return;
+		said = line;
+		at = std::chrono::steady_clock::now();
+		qInfo().noquote() << line;
+	};
+	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_CLOUDSHADOW_RED" ) ) {
+		say( QStringLiteral( "vk cloudshadow: on GL (red WW_VKVIEW_CLOUDSHADOW_RED=1 or the view not on Vulkan)" ) );
+		return false;
+	}
+	static WwVkPresent::CloudShadowRun t;
+	t = WwVkPresent::CloudShadowRun();
+	std::string why;
+	bool drew = false;
+	const GLuint tex = intoBack ? g.tex2 : g.tex;
+	const std::uintptr_t key = intoBack ? g.key2 : g.key;
+	const bool shared = intoBack ? g.sh2 : g.sh;
+	if ( variety ) {
+		WwVkPresent::cloudShadowOnGl( "Cloud Variety: cloud_shadowmap_v has no Vulkan twin" );
+	} else if ( !shared || !WwVkPresent::sharedTargetIs( key, tex ) ) {
+		WwVkPresent::cloudShadowOnGl( "the map is GL's own (not a shared target)" );
+	} else {
+		t.n = n;
+		t.row0 = row0;
+		t.rows = rows;
+		t.key = key;
+		/* cloud_shadowmap_view_ps's t64..t66, t67[8], t75[8]; the sheets are read in place through the texture cache's twins
+		 * (textures/sky/: gltex.cpp wwSkyTexTwin). Only what this mode samples is read: the volume's noise in mode 1 (made
+		 * once: still), the sheets below csSheetN in mode 3; the other slots keep the zero texture (stale units are not read) */
+		static const char * const kName[3] = { "cvShape", "cvDetail", "cvMap" };
+		static const int kType[3] = { 1, 1, 0 };
+		static char twin[3 + 2 * WwVkPresent::kCloudShadowSheets];
+		bool ok = true;
+		for ( int k = 0; k < 3 && ok; k++ ) {
+			if ( k < 2 && mode != 1 )
+				continue;
+			ok = WwVkPresent::fxTexOf( fn, p->id, kName[k], kType[k], t.tex[k], why );
+			t.tex[k].twin = reinterpret_cast<std::uintptr_t>( &twin[k] );
+			t.tex[k].still = k < 2;
+		}
+		for ( int i = 0; i < ( mode == 3 ? std::min( sheetN, WwVkPresent::kCloudShadowSheets ) : 0 ) && ok; i++ ) {
+			const std::string a = "csSheetTex[" + std::to_string( i ) + "]", b = "csSheetTex2[" + std::to_string( i ) + "]";
+			ok = WwVkPresent::fxTexOf( fn, p->id, a.c_str(), 0, t.sheet[i], why )
+				&& WwVkPresent::fxTexOf( fn, p->id, b.c_str(), 0, t.sheet2[i], why );
+			t.sheet[i].twin = reinterpret_cast<std::uintptr_t>( &twin[3 + i] );
+			t.sheet2[i].twin = reinterpret_cast<std::uintptr_t>( &twin[3 + WwVkPresent::kCloudShadowSheets + i] );
+		}
+		if ( !ok ) {
+			WwVkPresent::cloudShadowOnGl( why.c_str() );
+		} else {
+			WwVkPresent::fxPack( fn, p->id, WwVkPresent::kT_cloudshadow, int( std::size( WwVkPresent::kT_cloudshadow ) ), t.loose );
+			drew = WwVkPresent::cloudShadowRun( t, why );
+		}
+	}
+	const WwVkPresent::FxStat st = WwVkPresent::takeCloudShadowStat();
+	static WwVkPresent::FxStat sum;
+	sum.runs += st.runs;
+	sum.gl += st.gl;
+	sum.fails += st.fails;
+	sum.cpuMs += st.cpuMs;
+	sum.maxMs = std::max( sum.maxMs, st.maxMs );
+	sum.copies += st.copies;
+	sum.refusedPacks += st.refusedPacks;	// here: sheets read in place through the texture cache's twins
+	sum.pipelines = st.pipelines;
+	sum.buildMs = st.buildMs;
+	if ( !st.glWhy.empty() )
+		sum.glWhy = st.glWhy;
+	if ( !st.failWhy.empty() )
+		sum.failWhy = st.failWhy;
+	if ( std::chrono::duration<double>( std::chrono::steady_clock::now() - at ).count() >= 5.0 || !said.startsWith( QStringLiteral( "vk cloudshadow: on V" ) ) ) {
+		QString line = sum.runs > 0
+			? QStringLiteral( "vk cloudshadow: on Vulkan %1 runs (%2x%2 RGBA16F map, LOAD + the slice's scissor, one draw, one crossing; "
+				"%3 pipelines built in %4 ms; %5 input copies; %6 sheets read in place; drawing thread %7 ms, max %8)" ).arg( sum.runs )
+				.arg( n ).arg( sum.pipelines ).arg( sum.buildMs, 0, 'f', 1 ).arg( sum.copies ).arg( sum.refusedPacks )
+				.arg( sum.cpuMs / sum.runs, 0, 'f', 3 ).arg( sum.maxMs, 0, 'f', 3 )
+			: QStringLiteral( "vk cloudshadow: on Vulkan wanted, 0 runs drawn" );
+		if ( sum.gl > 0 )
+			line += QStringLiteral( ", on GL %1 runs (last: %2)" ).arg( sum.gl ).arg( QString::fromStdString( sum.glWhy ) );
+		if ( sum.fails > 0 )
+			line += QStringLiteral( ", refused %1 (last: %2)" ).arg( sum.fails ).arg( QString::fromStdString( sum.failWhy ) );
+		said.clear();
+		say( line );
+		sum = WwVkPresent::FxStat();
+	}
+	return drew;
 }
 
 //! world (game units) from view: Q = R^T (p - t) / sc, as shadowset.cpp's ussWorldFromView
@@ -870,11 +1000,14 @@ void wwCloudShadowPass( Scene * scene )
 		p->uni1f( "csUnitKm", float( unitKm ) );
 	}
 	p->uni1i( "csSteps", std::max( pr.steps, 1 ) );
+	// lane VKCLOUD3: the rows on the present device when the map is its shared target (no GL timing query that run)
+	const bool onVk = vkRows( fn, p, g, intoBack, n, row0, rowN, variety, mode, sheets.n );
 	const int slot = g.qcur;
-	const bool timing = !g.pending[slot];
+	const bool timing = !onVk && !g.pending[slot];
 	if ( timing )
 		fn->glBeginQuery( kTimeElapsed, g.q[slot] );
-	quad( r );
+	if ( !onVk )
+		quad( r );
 	if ( timing ) {
 		fn->glEndQuery( kTimeElapsed );
 		g.pending[slot] = true;
@@ -886,6 +1019,8 @@ void wwCloudShadowPass( Scene * scene )
 	if ( st.swap ) {	// lane PERFFIX3: the back is whole: the receivers take it (and its fit) from now
 		std::swap( g.fbo, g.fbo2 );
 		std::swap( g.tex, g.tex2 );
+		std::swap( g.key, g.key2 );	// lane VKCLOUD3: the shared targets' keys and flags go with their maps
+		std::swap( g.sh, g.sh2 );
 		g.basis = g.backBasis;
 		g.fit = g.backFit;
 		std::copy( g.backLightFromWorld, g.backLightFromWorld + 16, g.lightFromWorld );

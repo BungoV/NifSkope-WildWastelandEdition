@@ -7,6 +7,7 @@
 #include "features/reflections/cellssr.h"
 #include "gl/cellunits.h"	// lane WATERFIX7: the passes' named units
 #include "features/near/cellvrs.h"
+#include "features/vkframe/vkfxres.h"	// lane VKSMALL5: steps 1 and 3 on the present device
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
@@ -17,8 +18,10 @@
 #include <QHash>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <string>
 
 namespace {
 
@@ -71,6 +74,10 @@ struct FxGpu
 	bool complete = false;
 	bool trusted = false;	// a pass on these targets raised no GL error (errors read on new targets only)
 	bool failed = false;	// a GL error on these targets: the row stays off for this view
+	bool vkAsked = false, vkShared = false;	// lane VKSMALL5: the five targets are the present device's (owner = the renderer)
+	GLuint srcTex = 0;	// lane VKSMALL5: fxrSrc's internal format, read once a texture / size
+	int srcW = 0, srcH = 0;
+	GLenum srcFmt = 0;
 };
 
 struct FxState
@@ -123,7 +130,10 @@ void freeTargets( Renderer * r, FxGpu & g )
 {
 	auto fn = r->fn;
 	const GLuint tex[5] = { g.z, g.depth, g.c, g.t, g.cov };
-	fn->glDeleteTextures( 5, tex );
+	if ( g.vkShared )
+		WwVkPresent::fxresTargetsDrop( r );	// lane VKSMALL5: the route owns those names
+	else
+		fn->glDeleteTextures( 5, tex );
 	const GLuint fbo[2] = { g.zFbo, g.layerFbo };
 	fn->glDeleteFramebuffers( 2, fbo );
 	g = FxGpu();
@@ -132,7 +142,9 @@ void freeTargets( Renderer * r, FxGpu & g )
 //! the layer's targets for a W x H frame at s pixels per texel; fbo = the framebuffer bound after
 bool makeTargets( Renderer * r, FxGpu & g, int W, int H, int s, GLuint fbo )
 {
-	if ( g.zFbo && g.W == W && g.H == H && g.s == s )
+	const bool vkAsk = WwVkPresent::shareKept( "WW_VKVIEW_FXRES_RED" );	// lane VKSMALL5
+	const WwVkPresent::FxresTargets have { g.z, g.depth, g.c, g.t, g.cov };
+	if ( g.zFbo && g.W == W && g.H == H && g.s == s && g.vkAsked == vkAsk && ( !g.vkShared || WwVkPresent::fxresTargetsAre( r, have ) ) )
 		return g.complete;
 	if ( g.zFbo )
 		freeTargets( r, g );
@@ -144,11 +156,34 @@ bool makeTargets( Renderer * r, FxGpu & g, int W, int H, int s, GLuint fbo )
 	g.s = s;
 	g.w = ( W + s - 1 ) / s;
 	g.h = ( H + s - 1 ) / s;
-	g.z = makeTex( r, GL_R32F, GL_RED, GL_FLOAT, g.w, g.h );
-	g.depth = makeTex( r, GL_DEPTH_COMPONENT32F, GL_DEPTH_COMPONENT, GL_FLOAT, g.w, g.h );
-	g.c = makeTex( r, GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, g.w, g.h );
-	g.t = makeTex( r, GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, g.w, g.h );
-	g.cov = makeTex( r, GL_R8, GL_RED, GL_UNSIGNED_BYTE, g.w, g.h );
+	g.vkAsked = vkAsk;
+	WwVkPresent::FxresTargets vt;
+	std::string why;
+	if ( vkAsk && WwVkPresent::fxresTargets( r, g.w, g.h, vt, why ) ) {
+		// lane VKSMALL5: the present device's twins (steps 1 and 3 draw there on Vulkan); GL attaches them as before
+		g.vkShared = true;
+		g.z = vt.z;
+		g.depth = vt.depth;
+		g.c = vt.c;
+		g.t = vt.t;
+		g.cov = vt.cov;
+		const GLuint tex[5] = { g.z, g.depth, g.c, g.t, g.cov };
+		for ( GLuint t : tex ) {
+			fn->glBindTexture( GL_TEXTURE_2D, t );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		}
+	} else {
+		if ( vkAsk )
+			WwVkPresent::fxresOnGl( ( "the layer's targets: " + why ).c_str() );
+		g.z = makeTex( r, GL_R32F, GL_RED, GL_FLOAT, g.w, g.h );
+		g.depth = makeTex( r, GL_DEPTH_COMPONENT32F, GL_DEPTH_COMPONENT, GL_FLOAT, g.w, g.h );
+		g.c = makeTex( r, GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, g.w, g.h );
+		g.t = makeTex( r, GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, g.w, g.h );
+		g.cov = makeTex( r, GL_R8, GL_RED, GL_UNSIGNED_BYTE, g.w, g.h );
+	}
 	fn->glBindTexture( GL_TEXTURE_2D, GLuint( prevTex ) );
 	fn->glGenFramebuffers( 1, &g.zFbo );
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.zFbo );
@@ -370,6 +405,111 @@ QVector<Node *> wwCellFxResSplit( const QVector<Node *> & sorted )
 	return out;
 }
 
+/* lane VKSMALL5 (census row 77): step 1 (cell_fxres_down) and step 3 (cell_fxres_comp) on the present device
+ * (vkfxres.inc; WW_VKVIEW=1, red WW_VKVIEW_FXRES_RED=1: GL's quads). Each is its own crossing and GL waits on Vulkan;
+ * step 2 stays GL, into the shared targets. true: drawn there; false: GL draws the quad (the reason on "vk fxres:") */
+static bool fxresOnVk( int step, Scene * scene, FxGpu & g, int W, int H, const GLint vp[4], GLint prevDraw )
+{
+	static QString said;
+	static auto at = std::chrono::steady_clock::now();
+	auto say = [&]( const QString & line ) {
+		if ( line == said )
+			return;
+		said = line;
+		at = std::chrono::steady_clock::now();
+		qInfo().noquote() << line;
+	};
+	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_FXRES_RED" ) ) {
+		say( QStringLiteral( "vk fxres: on GL (red WW_VKVIEW_FXRES_RED=1 or the view not on Vulkan)" ) );
+		return false;
+	}
+	Renderer * r = scene->renderer;
+	auto fn = r->fn;
+	const FxCfg & c = cfg();
+	const GLuint src = scene->fxDepthTexId;
+	bool drew = false;
+	if ( !g.vkShared ) {
+		WwVkPresent::fxresOnGl( "the layer's targets are GL's own (refused at their make)" );
+	} else if ( !src || scene->fxDepthTexW != W || scene->fxDepthTexH != H ) {
+		WwVkPresent::fxresOnGl( "the opaque depth is not at the frame's size" );
+	} else {
+		const std::uintptr_t key = scene->fxDepthShared ? reinterpret_cast<std::uintptr_t>( &scene->fxDepthTexId ) : 0;
+		if ( !key && ( g.srcTex != src || g.srcW != W || g.srcH != H ) ) {
+			GLint prevTex = 0, f = 0;
+			fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prevTex );
+			fn->glBindTexture( GL_TEXTURE_2D, src );
+			fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &f );
+			fn->glBindTexture( GL_TEXTURE_2D, GLuint( prevTex ) );
+			g.srcTex = src;
+			g.srcW = W;
+			g.srcH = H;
+			g.srcFmt = GLenum( f );
+		}
+		std::string why;
+		if ( step == 1 ) {
+			WwVkPresent::FxresDown d;
+			d.owner = r;
+			d.W = W;
+			d.H = H;
+			d.scale = g.s;
+			d.src = src;
+			d.srcFmt = g.srcFmt;
+			d.srcKey = key;
+			drew = WwVkPresent::fxresDownRun( d, why );
+		} else {
+			GLint color = 0;
+			if ( prevDraw )
+				fn->glGetFramebufferAttachmentParameteriv( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &color );
+			WwVkPresent::FxresComp cp;
+			cp.owner = r;
+			cp.color = unsigned( color );
+			cp.W = W;
+			cp.H = H;
+			cp.scale = g.s;
+			cp.src = src;
+			cp.srcFmt = g.srcFmt;
+			cp.srcKey = key;
+			const auto & pm = r->globalUniforms->projectionMatrix;
+			cp.proj[0] = pm[2][2];
+			cp.proj[1] = pm[3][2];
+			cp.edge = c.edge;
+			cp.mode = c.red == RedBilinear ? 1 : 0;
+			for ( int i = 0; i < 4; i++ )
+				cp.vp[i] = vp[i];
+			drew = WwVkPresent::fxresCompRun( cp, why );
+		}
+	}
+	const WwVkPresent::FxStat st = WwVkPresent::takeFxresStat();
+	static WwVkPresent::FxStat sum;
+	sum.runs += st.runs;
+	sum.gl += st.gl;
+	sum.fails += st.fails;
+	sum.copies += st.copies;
+	sum.cpuMs += st.cpuMs;
+	sum.maxMs = std::max( sum.maxMs, st.maxMs );
+	sum.pipelines = st.pipelines;
+	sum.buildMs = st.buildMs;
+	if ( !st.glWhy.empty() )
+		sum.glWhy = st.glWhy;
+	if ( !st.failWhy.empty() )
+		sum.failWhy = st.failWhy;
+	if ( std::chrono::duration<double>( std::chrono::steady_clock::now() - at ).count() >= 5.0 || !said.startsWith( QStringLiteral( "vk fxres: on V" ) ) ) {
+		QString line = sum.runs > 0
+			? QStringLiteral( "vk fxres: on Vulkan %1 runs (steps 1 and 3 of the soft-effect layer, one crossing each, GL waits; %2 opaque "
+				"depth copies; %3 pipelines built in %4 ms; drawing thread %5 ms, max %6)" ).arg( sum.runs ).arg( sum.copies )
+				.arg( sum.pipelines ).arg( sum.buildMs, 0, 'f', 1 ).arg( sum.cpuMs / sum.runs, 0, 'f', 3 ).arg( sum.maxMs, 0, 'f', 3 )
+			: QStringLiteral( "vk fxres: on Vulkan wanted, 0 runs drawn" );
+		if ( sum.gl > 0 )
+			line += QStringLiteral( ", on GL %1 runs (last: %2)" ).arg( sum.gl ).arg( QString::fromStdString( sum.glWhy ) );
+		if ( sum.fails > 0 )
+			line += QStringLiteral( ", refused %1 (last: %2)" ).arg( sum.fails ).arg( QString::fromStdString( sum.failWhy ) );
+		said.clear();
+		say( line );
+		sum = WwVkPresent::FxStat();
+	}
+	return drew;
+}
+
 void wwCellFxResDraw( const QVector<Node *> & soft )
 {
 	if ( soft.isEmpty() )
@@ -425,7 +565,10 @@ void wwCellFxResDraw( const QVector<Node *> & soft )
 	fn->glDepthMask( GL_TRUE );
 	fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
 	bool ok = false;
-	if ( auto prog = r->useProgram( "cell_fxres_down.prog" ) ) {
+	const bool vkDown = fxresOnVk( 1, scene, g, W, H, vp, prevDraw );	// lane VKSMALL5: z and depth drawn on Vulkan, GL waited
+	if ( vkDown ) {
+		ok = true;
+	} else if ( auto prog = r->useProgram( "cell_fxres_down.prog" ) ) {
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kUnit0 ) );
 		fn->glBindTexture( GL_TEXTURE_2D, fullDepth );
 		prog->uni1i( "fxrSrc", kUnit0 );
@@ -484,7 +627,10 @@ void wwCellFxResDraw( const QVector<Node *> & soft )
 	fn->glStencilMask( 0x03 );
 	fn->glStencilFunc( GL_ALWAYS, 1, 0xFF );
 	fn->glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
-	if ( auto prog = r->useProgram( "cell_fxres_comp.prog" ) ) {
+	const bool vkComp = fxresOnVk( 3, scene, g, W, H, vp, prevDraw );	// lane VKSMALL5: the composite drawn on Vulkan, GL waited
+	if ( vkComp ) {
+		// GL's state above stays set (keep.put restores it): nothing bound here
+	} else if ( auto prog = r->useProgram( "cell_fxres_comp.prog" ) ) {
 		const GLuint tex[5] = { g.c, g.t, g.cov, g.z, fullDepth };
 		static const char * const names[5] = { "fxrC", "fxrT", "fxrCov", "fxrZ", "fxrDepth" };
 		for ( int i = 0; i < 5; i++ ) {

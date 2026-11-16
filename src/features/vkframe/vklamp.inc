@@ -4,7 +4,8 @@
  * offset, depth LEQUAL with writes, no blend / scissor, viewport 0 0 face face, gl_FragDepth = |rel| / radius. Here: one
  * render pass an op in the ops' order (CLEAR or LOAD, a dependency orders it after the last one), the face block (rel, clip,
  * radius / near) at a 256-byte dynamic offset, the casters' commands by baseInstance (their matrices), GL's clip z kept
- * (negativeOneToOne). The pool is CPU arrays (GL streams client arrays here): copied into host buffers every run. */
+ * (negativeOneToOne). The pool (lane VKLAMP2): host buffers holding each caster mesh while its (key, gen) holds; a run
+ * copies only its misses, and repacks (every mesh of the run again) when they do not fit. */
 #include "features/vkframe/vklamp.h"
 #include "features/vkframe/lamp_view_vs.spv.h"  // vkframe_spirv.sh's fxv / fx lines
 #include "features/vkframe/lamp_view_ps.spv.h"
@@ -20,6 +21,14 @@ struct LampFb
 	int layer = 0, w = 0, h = 0;
 	VkImageView view = VK_NULL_HANDLE;
 	VkFramebuffer fb = VK_NULL_HANDLE;
+};
+
+//! a mesh's place in the pool: its generation, where its indices / vertices start, its sizes
+struct LampPlace
+{
+	std::uint64_t gen = 0;
+	std::uint32_t firstIndex = 0, verts = 0, indices = 0;
+	std::int32_t baseVertex = 0;
 };
 
 struct Lamp
@@ -41,6 +50,9 @@ struct Lamp
 	VkFence fence = VK_NULL_HANDLE;
 	bool pending = false;
 	CsmBuf pos, idx, mats, cmds, faces;
+	std::map<std::uintptr_t, LampPlace> pool;  // key -> place in pos / idx
+	std::uint32_t posUsed = 0, idxUsed = 0;    // vertices / indices taken (stale places included until a repack)
+	std::vector<std::uint32_t> cmdWords;       // the run's VkDrawIndexedIndirectCommands
 	std::vector<LampFb> fbs;
 	std::uint64_t fbGen = 0;
 	std::vector<WwVkPresent::LampOp> ops;
@@ -262,8 +274,8 @@ int lampFb( std::uintptr_t key, int layer, std::string & why )
 		if ( S.fbs[k].key == key && S.fbs[k].layer == layer )
 			return int( k );
 	const Shared * sh = sharedFind( key );
-	if ( !sh || !sh->img || sh->fmt != VK_FORMAT_D16_UNORM || sh->type != 3 ) {
-		why = "the lamp cubes are not a shared D16 cube array";
+	if ( !sh || !sh->img || sh->fmt != VK_FORMAT_D16_UNORM || ( sh->type != 3 && sh->type != 2 ) ) {
+		why = "the lamp target is not a shared D16 cube array or 2D array";
 		return -1;
 	}
 	LampFb f;
@@ -316,16 +328,19 @@ bool lampWork( std::string & why )
 		const LampFb & F = S.fbs[std::size_t( S.opFb[o] )];
 		VkClearValue cv {};
 		cv.depthStencil.depth = 1.0f;
+		// lane VKLAMP4: the cut is the render area (a CLEAR load op clears only it, as GL's scissored glClear) and the scissor;
+		// the viewport keeps the face's size at its (shifted) origin
+		const VkRect2D sc = op.cut.w > 0 ? VkRect2D { { op.cut.x, op.cut.y }, { std::uint32_t( op.cut.w ), std::uint32_t( op.cut.h ) } }
+										: VkRect2D { { 0, 0 }, { std::uint32_t( F.w ), std::uint32_t( F.h ) } };
 		VkRenderPassBeginInfo rbi { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
 		rbi.renderPass = S.pass[op.clear ? 0 : 1];
 		rbi.framebuffer = F.fb;
-		rbi.renderArea = { { 0, 0 }, { std::uint32_t( F.w ), std::uint32_t( F.h ) } };
+		rbi.renderArea = sc;
 		rbi.clearValueCount = 1;
 		rbi.pClearValues = &cv;
 		v.vkCmdBeginRenderPass( S.cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE );
 		if ( op.n ) {
-			const VkViewport vp { 0.0f, 0.0f, float( F.w ), float( F.h ), 0.0f, 1.0f };
-			const VkRect2D sc { { 0, 0 }, { std::uint32_t( F.w ), std::uint32_t( F.h ) } };
+			const VkViewport vp { float( op.vx ), float( op.vy ), float( F.w ), float( F.h ), 0.0f, 1.0f };
 			v.vkCmdSetViewport( S.cmd, 0, 1, &vp );
 			v.vkCmdSetScissor( S.cmd, 0, 1, &sc );
 			const std::uint32_t off = std::uint32_t( VkDeviceSize( o ) * kLampFaceBytes );
@@ -362,6 +377,89 @@ bool lampWork( std::string & why )
 	return true;
 }
 
+// gates only (lampview): 1 = the key alone (the generation not compared), 2 = grow without copying the kept meshes again
+int lampPoolRed()
+{
+	const char * e = std::getenv( "WW_VKLAMP_POOL_RED" );
+	return e ? std::atoi( e ) : 0;
+}
+
+/* the meshes the run's ops draw into the pool (the last run is done: fenceDone). A kept mesh (key, sizes and gen equal)
+ * is served where it sits; a miss is appended; when the misses do not fit, the pool repacks: emptied, grown to twice the
+ * run's meshes when they need it, and every mesh of the run copied again */
+bool lampPool( const WwVkPresent::LampRun & t, int red, std::string & why )
+{
+	Lamp & S = lampS();
+	std::vector<char> used( t.nMeshes, 0 );
+	bool any = false;
+	for ( const WwVkPresent::LampOp & op : t.ops )
+		for ( std::uint32_t d = op.first; d < op.first + op.n; d++ ) {
+			used[t.draws[2 * std::size_t( d )]] = 1;
+			any = true;
+		}
+	if ( !any )
+		return true;
+	auto kept = [&]( const WwVkPresent::LampMesh & m, bool count ) {
+		const auto it = S.pool.find( m.key );
+		if ( it == S.pool.end() || it->second.verts != m.verts || it->second.indices != m.indices )
+			return false;
+		if ( it->second.gen == m.gen )
+			return true;
+		if ( count )
+			( red == 1 ? S.st.redSkips : S.st.regen )++;
+		return red == 1;
+	};
+	std::uint64_t liveV = 0, liveI = 0, missV = 0, missI = 0;
+	for ( std::size_t m = 0; m < t.nMeshes; m++ ) {
+		if ( !used[m] )
+			continue;
+		const WwVkPresent::LampMesh & me = t.meshes[m];
+		liveV += me.verts;
+		liveI += me.indices;
+		if ( !kept( me, true ) ) {
+			missV += me.verts;
+			missI += me.indices;
+		}
+	}
+	if ( !S.pos.buf || !S.idx.buf || S.posUsed + missV > S.pos.cap / 12 || S.idxUsed + missI > S.idx.cap / 2 ) {
+		S.st.repacks++;
+		if ( red != 2 ) {
+			S.pool.clear();
+			S.posUsed = S.idxUsed = 0;
+		}
+		const std::uint64_t needV = 2 * ( red == 2 ? S.posUsed + missV : liveV ), needI = 2 * ( red == 2 ? S.idxUsed + missI : liveI );
+		if ( !csmBuf( S.pos, VkDeviceSize( needV ) * 12, false, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, why, "the lamp cubes' positions" )
+			|| !csmBuf( S.idx, VkDeviceSize( needI ) * 2, false, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, why, "the lamp cubes' indices" ) ) {
+			S.pool.clear();
+			S.posUsed = S.idxUsed = 0;
+			return false;
+		}
+	}
+	for ( std::size_t m = 0; m < t.nMeshes; m++ ) {
+		if ( !used[m] )
+			continue;
+		const WwVkPresent::LampMesh & me = t.meshes[m];
+		if ( kept( me, false ) ) {
+			S.st.hits++;
+			continue;
+		}
+		LampPlace p;
+		p.gen = me.gen;
+		p.verts = me.verts;
+		p.indices = me.indices;
+		p.baseVertex = std::int32_t( S.posUsed );
+		p.firstIndex = S.idxUsed;
+		std::memcpy( static_cast<char *>( S.pos.ptr ) + std::size_t( S.posUsed ) * 12, me.pos, std::size_t( me.verts ) * 12 );
+		std::memcpy( static_cast<char *>( S.idx.ptr ) + std::size_t( S.idxUsed ) * 2, me.idx, std::size_t( me.indices ) * 2 );
+		S.posUsed += me.verts;
+		S.idxUsed += me.indices;
+		S.pool[me.key] = p;
+		S.st.copies++;
+		S.st.copyKb += double( std::size_t( me.verts ) * 12 + std::size_t( me.indices ) * 2 ) / 1024.0;
+	}
+	return true;
+}
+
 // shutdown (vkpresent.cpp, before the shared targets go): the layer views, the semaphores, the buffers
 void lampDrop()
 {
@@ -375,6 +473,8 @@ void lampDrop()
 	S.fbGen = 0;
 	for ( CsmBuf * b : { &S.pos, &S.idx, &S.mats, &S.cmds, &S.faces } )
 		csmBufFree( *b, false );  // host buffers: no GL names
+	S.pool.clear();
+	S.posUsed = S.idxUsed = 0;
 	S.setBuf = VK_NULL_HANDLE;
 	lampSemsDrop( gl().ok && S.semCtx == gl().ctx );
 }
@@ -425,20 +525,33 @@ bool lampRun( const LampRun & t, std::string & why )
 	if ( t.ops.empty() )
 		return true;
 	if ( !t.tex || !t.key || !sharedTargetIs( t.key, t.tex ) )
-		return refuse( "the lamp cubes are not the shared cube array" );
+		return refuse( "the lamp target is not a live shared target" );
 	const Shared * sh = sharedFind( t.key );
 	if ( !sh || sh->w != t.face || sh->h != t.face || sh->d != t.layers )
-		return refuse( "the lamp cubes' size is not the shared array's" );
+		return refuse( "the lamp target's size is not the shared array's" );
 	std::size_t draws = 0;
 	for ( const LampOp & op : t.ops ) {
 		if ( op.layer < 0 || op.layer >= t.layers )
-			return refuse( "an op names no layer of the cube array" );
-		if ( std::size_t( op.first ) + op.n > t.nCmds )
-			return refuse( "an op's commands are out of range" );
+			return refuse( "an op names no layer of the lamp target" );
+		if ( op.cut.w < 0 || op.cut.h < 0 || ( op.cut.w > 0 && ( op.cut.h == 0 || op.cut.x < 0 || op.cut.y < 0 || op.cut.x + op.cut.w > t.face
+				|| op.cut.y + op.cut.h > t.face ) ) )
+			return refuse( "a lamp op's cut is outside its layer" );
+		if ( op.vx <= -2 * t.face || op.vy <= -2 * t.face || op.vx >= t.face || op.vy >= t.face )
+			return refuse( "a lamp op's viewport origin is out of reach" );
+		if ( std::size_t( op.first ) + op.n > t.nDraws )
+			return refuse( "a lamp op's draws are out of range" );
 		draws += op.n;
 	}
-	if ( draws && ( !t.pos || !t.idx || !t.posBytes || !t.idxBytes || !t.mats || !t.nMats || !t.cmds ) )
-		return refuse( "no pool, matrices or commands" );
+	if ( draws && ( !t.meshes || !t.mats || !t.draws ) )
+		return refuse( "the lamp cubes have no meshes, matrices or draws" );
+	for ( std::size_t d = 0; draws && d < t.nDraws; d++ ) {
+		const std::uint32_t m = t.draws[2 * d], x = t.draws[2 * d + 1];
+		if ( m >= t.nMeshes || x >= t.nMats )
+			return refuse( "a lamp draw names no mesh or matrix" );
+		const LampMesh & me = t.meshes[m];
+		if ( !me.pos || !me.idx || !me.verts || !me.indices )
+			return refuse( "a lamp caster's mesh is empty" );
+	}
 	// the last run is done before its command buffer, buffers and framebuffers are touched again
 	if ( std::string fw; !fenceDone( S.fence, S.pending, "lamp", fw ) )
 		return refuse( fw );
@@ -457,18 +570,29 @@ bool lampRun( const LampRun & t, std::string & why )
 		if ( S.opFb[k] < 0 )
 			return breakOff( w );
 	}
-	if ( !csmBuf( S.pos, VkDeviceSize( std::max<std::size_t>( t.posBytes, 12 ) ), false, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, w )
-		|| !csmBuf( S.idx, VkDeviceSize( std::max<std::size_t>( t.idxBytes, 2 ) ), false, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, w )
-		|| !csmBuf( S.mats, VkDeviceSize( std::max<std::size_t>( t.nMats, 1 ) ) * 64, false, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, w )
-		|| !csmBuf( S.cmds, VkDeviceSize( std::max<std::size_t>( t.nCmds, 1 ) ) * kLampCmdBytes, false,
-			VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, w )
-		|| !csmBuf( S.faces, VkDeviceSize( t.ops.size() ) * kLampFaceBytes, false, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, w ) )
+	if ( !lampPool( t, lampPoolRed(), w )
+		|| !csmBuf( S.mats, VkDeviceSize( std::max<std::size_t>( t.nMats, 1 ) ) * 64, false, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, w,
+			"the lamp cubes' matrices" )
+		|| !csmBuf( S.cmds, VkDeviceSize( std::max<std::size_t>( t.nDraws, 1 ) ) * kLampCmdBytes, false,
+			VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, w, "the lamp cubes' draws" )
+		|| !csmBuf( S.faces, VkDeviceSize( t.ops.size() ) * kLampFaceBytes, false, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, w,
+			"the lamp cubes' faces" ) )
 		return breakOff( w );
 	if ( draws ) {
-		std::memcpy( S.pos.ptr, t.pos, t.posBytes );
-		std::memcpy( S.idx.ptr, t.idx, t.idxBytes );
 		std::memcpy( S.mats.ptr, t.mats, t.nMats * 64 );
-		std::memcpy( S.cmds.ptr, t.cmds, t.nCmds * kLampCmdBytes );
+		S.cmdWords.assign( t.nDraws * 5, 0u );
+		for ( std::size_t d = 0; d < t.nDraws; d++ ) {
+			const auto it = S.pool.find( t.meshes[t.draws[2 * d]].key );
+			if ( it == S.pool.end() )
+				continue;  // no op draws it: an empty command
+			std::uint32_t * c = &S.cmdWords[d * 5];
+			c[0] = it->second.indices;
+			c[1] = 1;
+			c[2] = it->second.firstIndex;
+			c[3] = std::uint32_t( it->second.baseVertex );
+			c[4] = t.draws[2 * d + 1];
+		}
+		std::memcpy( S.cmds.ptr, S.cmdWords.data(), t.nDraws * kLampCmdBytes );
 	}
 	for ( std::size_t k = 0; k < t.ops.size(); k++ ) {
 		char * p = static_cast<char *>( S.faces.ptr ) + k * kLampFaceBytes;

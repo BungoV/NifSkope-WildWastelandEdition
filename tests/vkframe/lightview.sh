@@ -19,7 +19,7 @@ fi
 mkdir -p "$OUT"
 DIRS="${LIGHTVIEW_JOBS:-}"
 if [ -z "$DIRS" ]; then
-	bash "$ROOT/tests/vklight/light.sh" "$OUT/light" "${2:-E:/Projects/Claude/notes/batch1121/fixtures/lightview/b9.hdr}" ao contact ssgi aox > "$OUT/light.txt" 2>&1
+	bash "$ROOT/tests/vklight/light.sh" "$OUT/light" "${2:-E:/Projects/Claude/notes/batch1121/fixtures/lightview/b9.hdr}" ao contact ssgi aox contactfar > "$OUT/light.txt" 2>&1
 	tail -1 "$OUT/light.txt"
 	tail -1 "$OUT/light.txt" | grep -q "VKLIGHT GATE OK" || { echo "LIGHTVIEW GATE FAILED (the offline gate)"; exit 1; }
 	DIRS="$OUT/light/jobs ${LIGHTVIEW_KEPT-}"
@@ -27,20 +27,20 @@ fi
 NEED_G=0; NEED_R=0
 for d in $DIRS; do
 	[ -d "$d" ] || { echo "LIGHTVIEW GATE FAILED (no job dir $d)"; exit 1; }
-	NEED_G=$((NEED_G + $(ls "$d" | grep -cE '^(ao|ct|sg|ax)_')))
-	NEED_R=$((NEED_R + $(ls "$d"/ao_*/red_*.txt "$d"/ct_*/red_*.txt "$d"/sg_*/red_*.txt "$d"/ax_*/red_*.txt 2>/dev/null | wc -l)))
+	NEED_G=$((NEED_G + $(ls "$d" | grep -cE '^(ao|ct|sg|ax|cf)_')))
+	NEED_R=$((NEED_R + $(ls "$d"/ao_*/red_*.txt "$d"/ct_*/red_*.txt "$d"/sg_*/red_*.txt "$d"/ax_*/red_*.txt "$d"/cf_*/red_*.txt 2>/dev/null | wc -l)))
 done
 # the default two sets: the fresh one 17 jobs and 12 reds (lane VKFAR3 added sg_E + red ssgie, ax_X / ax_G / ax_S / ax_H + the
-# 4 aox reds), the kept one 12 and 7
-[ -n "${LIGHTVIEW_JOBS:-}" ] || [ -n "${LIGHTVIEW_KEPT:-}" ] || [ "$NEED_G $NEED_R" = "17 12" ] \
-	|| { echo "LIGHTVIEW GATE FAILED (the fresh set holds $NEED_G jobs and $NEED_R reds, 17 and 12 expected)"; exit 1; }
+# 4 aox reds; lane VKSHADOW3 the far contact tier's cf_A / cf_B / cf_S + its 4 reds), the kept one 12 and 7
+[ -n "${LIGHTVIEW_JOBS:-}" ] || [ -n "${LIGHTVIEW_KEPT:-}" ] || [ "$NEED_G $NEED_R" = "20 16" ] \
+	|| { echo "LIGHTVIEW GATE FAILED (the fresh set holds $NEED_G jobs and $NEED_R reds, 20 and 16 expected)"; exit 1; }
 export PATH="/c/msys64/ucrt64/bin:$PATH"
 g++ -O2 -std=c++17 -pthread -I"$ROOT/src" "$ROOT/tests/vkframe/lightview.cpp" -o "$OUT/lightview.exe" -lopengl32 -lgdi32 -luser32 \
 	|| { echo "LIGHTVIEW GATE FAILED (g++)"; exit 1; }
 : > "$OUT/lightview.txt"
 G=0; R=0; BAD=0
 for d in $DIRS; do
-	JOBS=$(ls "$d" | grep -E '^(ao|ct|sg|ax)_' | tr '\n' ' ')
+	JOBS=$(ls "$d" | grep -E '^(ao|ct|sg|ax|cf)_' | tr '\n' ' ')
 	"$OUT/lightview.exe" "$d" "$OUT/light/spv" $JOBS > "$OUT/lv_one.txt" 2>&1
 	cat "$OUT/lv_one.txt" | tee -a "$OUT/lightview.txt"
 	tail -1 "$OUT/lv_one.txt" | grep -q "LIGHTVIEW GATE OK" || BAD=1

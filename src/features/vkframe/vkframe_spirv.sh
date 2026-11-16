@@ -40,7 +40,7 @@ for s in sky_view_ps; do
 done
 # lane VKLIGHT1: AO, contact shadows and the SSGI cast (res/shaders/hlsl/vklight), -O0 as tests/vklight/light.sh proved them
 # lane VKWATER4 (row G5): the ultra ocean, ocean_vk.hlsl stages 1-6 (one line: tests/spvsync/check_spv.py reads it)
-for l in ao_gbuf:ao_vk:AO_STAGE=5 ao_mip:ao_vk:AO_STAGE=1 ao_raw:ao_vk:AO_STAGE=2 ao_blur:ao_vk:AO_STAGE=3 ao_blurf:ao_vk:AO_STAGE=4 contact:contact_vk: ssgi:ssgi_vk: aox_z:aox_vk:AOX_KERNEL=1 aox_xe:aox_vk:AOX_KERNEL=2 aox_r8:aox_vk:AOX_KERNEL=3 ocean_spec:ocean_vk:OCEAN_STAGE=1 ocean_fft:ocean_vk:OCEAN_STAGE=2 ocean_finbc:ocean_vk:OCEAN_STAGE=3 ocean_find:ocean_vk:OCEAN_STAGE=4 ocean_mipbc:ocean_vk:OCEAN_STAGE=5 ocean_mipd:ocean_vk:OCEAN_STAGE=6 ocean_finbca:ocean_vk:OCEAN_STAGE=7 ocean_finda:ocean_vk:OCEAN_STAGE=8 ocean_mipbca:ocean_vk:OCEAN_STAGE=9 ocean_mipda:ocean_vk:OCEAN_STAGE=10; do
+for l in ao_gbuf:ao_vk:AO_STAGE=5 ao_mip:ao_vk:AO_STAGE=1 ao_raw:ao_vk:AO_STAGE=2 ao_blur:ao_vk:AO_STAGE=3 ao_blurf:ao_vk:AO_STAGE=4 contact:contact_vk: ssgi:ssgi_vk: aox_z:aox_vk:AOX_KERNEL=1 aox_xe:aox_vk:AOX_KERNEL=2 aox_r8:aox_vk:AOX_KERNEL=3 ocean_spec:ocean_vk:OCEAN_STAGE=1 ocean_fft:ocean_vk:OCEAN_STAGE=2 ocean_finbc:ocean_vk:OCEAN_STAGE=3 ocean_find:ocean_vk:OCEAN_STAGE=4 ocean_mipbc:ocean_vk:OCEAN_STAGE=5 ocean_mipd:ocean_vk:OCEAN_STAGE=6 ocean_finbca:ocean_vk:OCEAN_STAGE=7 ocean_finda:ocean_vk:OCEAN_STAGE=8 ocean_mipbca:ocean_vk:OCEAN_STAGE=9 ocean_mipda:ocean_vk:OCEAN_STAGE=10 cfar_min:contactfar_vk:CFAR_STAGE=1 cfar_march:contactfar_vk:CFAR_STAGE=2 cfar_comp:contactfar_vk:CFAR_STAGE=3; do
 	n="${l%%:*}"; r="${l#*:}"; f="${r%%:*}"; d="${r#*:}"
 	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main -O0 ${d:+-D "$d"} -Fo "light_${n}.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/vklight/${f}.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/vklight/${f}.hlsl")"
 	python -I "$ROOT/tools/spv_header.py" "light_${n}.spv" "vkframe_light_${n}_spv" "light_${n}.spv.h" < /dev/null
@@ -50,7 +50,7 @@ done
 "$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main -O0 -D WW_CELL_FOGLEAK=1 -D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_FRAME_UBO=1 -Fo "light_gihalf.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/vklight/gihalf_vk.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/vklight/gihalf_vk.hlsl")"
 python -I "$ROOT/tools/spv_header.py" "light_gihalf.spv" "vkframe_light_gihalf_spv" "light_gihalf.spv.h" < /dev/null
 rm -f "light_gihalf.spv"
-ls -la light_ao_gbuf.spv.h light_ao_mip.spv.h light_ao_raw.spv.h light_ao_blur.spv.h light_ao_blurf.spv.h light_contact.spv.h light_ssgi.spv.h light_aox_z.spv.h light_aox_xe.spv.h light_aox_r8.spv.h light_gihalf.spv.h
+ls -la light_ao_gbuf.spv.h light_ao_mip.spv.h light_ao_raw.spv.h light_ao_blur.spv.h light_ao_blurf.spv.h light_contact.spv.h light_ssgi.spv.h light_aox_z.spv.h light_aox_xe.spv.h light_aox_r8.spv.h light_gihalf.spv.h light_cfar_min.spv.h light_cfar_march.spv.h light_cfar_comp.spv.h
 # lane VKLIGHT2: the reflections (res/shaders/hlsl/vklight/ssr_vk.hlsl, SSR_LIVE) per stage; w = the water look twin
 ssr() {
 	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main -DSSR_LIVE $2 -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/vklight/ssr_vk.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/vklight/ssr_vk.hlsl")"
@@ -66,8 +66,9 @@ ssr ssr_view_s4 "-DSSR_STAGE=4"
 ssr ssr_view_s5 "-DSSR_STAGE=5"
 # lane VKSHADOW1: the sun cascades' queued casters (res/shaders/hlsl/near/csm_view_vs.hlsl), depth only
 # lane VKOBJ1: the objects' opaque depth prepass (obj_depth_vs.hlsl)
-for c in csm_view_vs obj_depth_vs; do
-	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main -Fo "${c}.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/near/${c}.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/near/${c}.hlsl")"
+# lane VKSHADOW6: the cascade cache's Scroll remap (csm_remap_view_vs / _ps.hlsl); the profile is the name's suffix
+for c in csm_view_vs obj_depth_vs csm_remap_view_vs csm_remap_view_ps; do
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T ${c##*_}_6_0 -E main -Fo "${c}.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/near/${c}.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/near/${c}.hlsl")"
 	python -I "$ROOT/tools/spv_header.py" "${c}.spv" "vkframe_${c}_spv" "${c}.spv.h" < /dev/null
 	rm -f "${c}.spv"
 done
@@ -173,6 +174,9 @@ fxb skystars_view_vs clouds/lookdev_clouds_vs
 fxk skystars_view_ps clouds/lookdev_clouds_ps
 fxb skymoon_view_vs core/lookdev_bill_vs
 fxk skymoon_view_ps sky/sky_moon_ps
+# lane VKCLOUD4: the cloud map (cloudmap.cpp buildMap, vkcloudmap.inc), the readable sources themselves: the vertex stage
+# here (its b31 at 32), the pixel stage on fx()'s shifts (its b31 at 31) below
+fxb cloudmap_view_vs clouds/cloudmap_vs
 ls -la skystars_view_vs.spv.h skystars_view_ps.spv.h skymoon_view_vs.spv.h skymoon_view_ps.spv.h
 # lane VKFAR2 P9: the lens-flare sprites in the tone pass (vkflare.inc): lens_flare.hlsl's pixel entry as it stands, its
 # vertex entry through lens_flare_view_vs.hlsl (renamed main). PostFxBindingsVk.hlsli's own bindings, unused ones stripped
@@ -248,22 +252,19 @@ PS_SHIFT="-fvk-b-shift 0 0 -fvk-t-shift 64 0 -fvk-s-shift 128 0 -fvk-u-shift 192
 VS_SHIFT="-fvk-b-shift 256 0 -fvk-t-shift 320 0 -fvk-s-shift 384 0 -fvk-u-shift 448 0"
 # the bl twins (res/shaders/hlsl/near, -D WW_VK_BINDLESS), every binding kept: objBlPipe reflects them (vkobjpipe.inc);
 # $5: a variant's other loader defines (the pixel twins are readable wrappers of core/fo4_default_ps.hlsl, VKWATER3 G4)
-# This redefines fxb(): a two-argument call (VKFAR7's taareactive_view_vs below) still means the sky-body fxb() above, kept as
-# fxbsky() (BATCH1117: before, that call died `$3: unbound variable` and every header after it went unbuilt).
-eval "fxbsky()$(declare -f fxb | tail -n +2)"
-fxb() {
-	[ $# -ge 3 ] || { fxbsky "$@"; return; }
+# lane VKSMALL1: named fxn(), not fxb(): a second fxb() here ran every later sky-body style `fxb` line (taareactive) with 2 args
+fxn() {
 	"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main -D WW_VK_BINDLESS $4 ${5:-} -fspv-preserve-bindings -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/near/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/near/$2.hlsl")"
 	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
 	rm -f "$1.spv"
 }
-fxb objbl_vs fo4_defaultbl_vs vs_6_0 "$VS_SHIFT"
+fxn objbl_vs fo4_defaultbl_vs vs_6_0 "$VS_SHIFT"
 # the bl pair on the app's key (WW_CELL_FOGLEAK + WW_FRAME_UBO, as the loader defines it for GL; no define: the plain variant)
-fxb objbl_cell_ps fo4_cellbl_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1"
-fxb objbl_cellcsm_ps fo4_cellcsmbl_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1"
+fxn objbl_cell_ps fo4_cellbl_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1"
+fxn objbl_cellcsm_ps fo4_cellcsmbl_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1"
 # the all-on route's RT GI variant of the bl pair
-fxb objbl_cell_rt_ps fo4_cellbl_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 -D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1"
-fxb objbl_cellcsm_rt_ps fo4_cellcsmbl_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 -D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1"
+fxn objbl_cell_rt_ps fo4_cellbl_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 -D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1"
+fxn objbl_cellcsm_rt_ps fo4_cellcsmbl_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 -D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1"
 # lane VKWATER3 (G4 by draws): the non-bindless fallbacks fo4_cell / fo4_cellcsm / pbrm_default (res/shaders/hlsl/core) on
 # the app's base variant (WW_CELL_FOGLEAK + WW_FRAME_UBO; the app site refuses any other), every binding kept for
 # objBlPipe; the frozen pixel stages invert FragCoord.w themselves (-fvk-use-dx-position-w). The alpha tests discard after
@@ -327,6 +328,17 @@ ls -la taareactive_view_ps.spv.h taareactive_view_vs.spv.h
 fxv lamp_view_vs lights/lamp_view_vs
 fx lamp_view_ps lights/lamp_view_ps
 ls -la lamp_view_vs.spv.h lamp_view_ps.spv.h
+# lane VKCLOUD1: the cloud shadow map (cloudshadow.cpp, vkcloudshadow.inc), the readable source itself on fx()'s shifts
+fx cloud_shadowmap_view_ps clouds/cloud_shadowmap_ps
+fx cloudmap_view_ps clouds/cloudmap_ps
+# lane VKSMALL2: the frame's farthest depth (cellhdr.cpp depthMaxMake, vkdepthmax.inc), the readable source on fx()'s shifts
+fx depthmax_view_ps exposure/cell_depthmax_ps
+# lane VKSMALL3: the shading rate images (cellvrs.cpp wwCellVrsBuild, vkvrs.inc), the readable source on fx()'s shifts
+fx vrs_rate_view_ps near/cell_vrs_rate_ps
+# lane VKSMALL4: the soft-effect layer (cellfxres.cpp steps 1 and 3): the downsample is the readable source itself; the
+# composite is its twin with both outputs at location 0 (index 0 / 1) for the dual-source blend
+fx fxres_down_view_ps particles/cell_fxres_down_ps
+fx fxres_comp_view_ps particles/fxres_comp_view_ps
 # lane VKWATER4: the water look off (fo4_water.prog), frozen from the old fo4_water_ps FOGLEAK + FRAME_UBO spirv-cross file
 fxkw water_view_off_ps water/water_view_off_ps
 # lane VKWATER4 (L7): the camera-underwater fog (cell_underwater.prog + its per-sample _ms), frozen twins: both outputs at

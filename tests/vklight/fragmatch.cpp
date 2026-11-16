@@ -194,8 +194,15 @@ static void barrierAll( VkCommandBuffer cb )
 	vkCmdPipelineBarrier( cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr );
 }
 
-struct Tex { uint32_t binding; std::string kind, fmt, file; int w, h, d; };
-struct Smp { uint32_t binding; std::string filt, wrap; };
+struct Tex { uint32_t binding; std::string kind, fmt, file; int w, h, d; uint32_t elem = 0; };
+struct Smp { uint32_t binding; std::string filt, wrap; uint32_t elem = 0; };
+// lane VKCLOUD1: `<binding>:<element>` names one element of a descriptor array (cloud_shadowmap's csSheetTex[8])
+static void bindingAt( const std::string & s, uint32_t & binding, uint32_t & elem )
+{
+	const size_t c = s.find( ':' );
+	binding = uint32_t( std::stoul( s.substr( 0, c ) ) );
+	elem = c == std::string::npos ? 0u : uint32_t( std::stoul( s.substr( c + 1 ) ) );
+}
 struct Ubo { uint32_t binding; std::string file; };
 
 int main( int argc, char ** argv )
@@ -245,11 +252,15 @@ int main( int argc, char ** argv )
 				ubos.push_back( u );
 			} else if ( k == "tex" ) {
 				Tex t;
-				l >> t.binding >> t.kind >> t.fmt >> t.w >> t.h >> t.d >> t.file;
+				std::string b;
+				l >> b >> t.kind >> t.fmt >> t.w >> t.h >> t.d >> t.file;
+				bindingAt( b, t.binding, t.elem );
 				texs.push_back( t );
 			} else if ( k == "smp" ) {
 				Smp s;
-				l >> s.binding >> s.filt >> s.wrap;
+				std::string b;
+				l >> b >> s.filt >> s.wrap;
+				bindingAt( b, s.binding, s.elem );
 				smps.push_back( s );
 			}
 		}
@@ -413,10 +424,18 @@ int main( int argc, char ** argv )
 	std::vector<VkDescriptorSetLayoutBinding> lb;
 	for ( const Ubo & u : ubos )
 		lb.push_back( { u.binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr } );
+	auto addBinding = [&lb]( uint32_t binding, uint32_t elem, VkDescriptorType type ) {
+		for ( VkDescriptorSetLayoutBinding & x : lb )
+			if ( x.binding == binding ) {
+				x.descriptorCount = std::max( x.descriptorCount, elem + 1 );
+				return;
+			}
+		lb.push_back( { binding, type, elem + 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr } );
+	};
 	for ( const Tex & t : texs )
-		lb.push_back( { t.binding, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr } );
+		addBinding( t.binding, t.elem, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE );
 	for ( const Smp & s : smps )
-		lb.push_back( { s.binding, VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr } );
+		addBinding( s.binding, s.elem, VK_DESCRIPTOR_TYPE_SAMPLER );
 	VkDescriptorSetLayout setLayout = VK_NULL_HANDLE;
 	VkDescriptorSetLayoutCreateInfo li { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
 	li.bindingCount = uint32_t( lb.size() );
@@ -464,6 +483,7 @@ int main( int argc, char ** argv )
 			VkWriteDescriptorSet w { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
 			w.dstSet = set;
 			w.dstBinding = texs[i].binding;
+			w.dstArrayElement = texs[i].elem;
 			w.descriptorCount = 1;
 			w.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 			w.pImageInfo = &iis[i];
@@ -474,6 +494,7 @@ int main( int argc, char ** argv )
 			VkWriteDescriptorSet w { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
 			w.dstSet = set;
 			w.dstBinding = smps[i].binding;
+			w.dstArrayElement = smps[i].elem;
 			w.descriptorCount = 1;
 			w.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
 			w.pImageInfo = &iis[texs.size() + i];

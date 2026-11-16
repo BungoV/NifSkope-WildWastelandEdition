@@ -642,6 +642,11 @@ struct State
 	unsigned int liveTex = 0;
 	int texMap = 0;
 	bool shared = false;	// lane VKSHADOW1: tex is a shared D16 array (keyed &tex) while the live map is one
+	/* lane VKSHADOW6: the Scroll remap's source on Vulkan, a shared D16 array of kCascades layers (keyed &vkScr) while the
+	 * live map is one: layer i holds the old static layer i until the crossing remaps it (0: GL remaps, the old way) */
+	unsigned int vkScr = 0;
+	int vkScrMap = 0;
+	bool vkScrShared = false;
 	std::string vkWhy;
 	qint64 frame = 0;
 	Layer c[kCascades];
@@ -785,6 +790,9 @@ bool ensure( Renderer * r, int map, unsigned int liveTex, bool shared )
 		s.tex = s.scratch = s.fbo = s.vao = 0;
 		s.texMap = 0;
 		s.shared = false;
+		s.vkScr = 0;
+		s.vkScrMap = 0;
+		s.vkScrShared = false;
 		invalidate();
 	}
 	// lane VKSHADOW1: the static layers are shared with the live map (the queued static casters go into both on Vulkan)
@@ -794,6 +802,11 @@ bool ensure( Renderer * r, int map, unsigned int liveTex, bool shared )
 			invalidate();
 		if ( s.shared && was != map )
 			s.texMap = was;	// the scratch below follows the new size
+	}
+	// lane VKSHADOW6: the remap's shared source follows the live map's share (refused: GL remaps, the old way)
+	{
+		std::string why;
+		csmShare( fn, s.vkScr, s.vkScrShared, s.vkScrMap, map, shared, false, why );
 	}
 	if ( liveTex != s.liveTex ) {
 		s.liveTex = liveTex;	// the live map was made again: its content is gone
@@ -1696,7 +1709,7 @@ static void sunShadowPassImpl( Scene * scene )
 
 	/* lane VKSHADOW1 (plan row G6): the solid and two-sided queues go on the present device. drawJob records (job, layer)
 	 * instead of drawing them; after the cascades one crossing draws the list (depth-only LEQUAL keeps the nearest depth
-	 * in any order). GL keeps the clears, copies, remap, scratch, alpha-tested queue, per-draw casters and ground. */
+	 * in any order). GL keeps the clears, copies, the remap's scratch blit (lane VKSHADOW6: the remap moved), alpha-tested queue, per-draw casters and ground. */
 	static_assert( sizeof( GpuDriven::DrawCmd ) == 20, "VkDrawIndexedIndirectCommand" );
 	const bool vkWanted = progQ && csmShareWanted();
 	bool vkCsm = false;
@@ -1714,14 +1727,72 @@ static void sunShadowPassImpl( Scene * scene )
 	} else if ( progQ ) {
 		vkWhy = "the view is not on Vulkan, or WW_VKVIEW_CSM_RED=1";
 	}
-	struct VkRec { std::size_t jb; int target, layer; };
+	// lane VKSHADOW4: mFirst / mN = the job's mesh draws in vkMDraw, [0] back faces culled, [1] two-sided
+	struct VkRec { std::size_t jb; int target, layer; std::uint32_t mFirst[2] = { 0, 0 }, mN[2] = { 0, 0 }; };
 	std::vector<VkRec> vkRec;
+	std::vector<int> vkRemap;	// lane VKSHADOW6: the cascades whose Scroll remap the crossing draws (static and live layer)
 	int curTarget = -1, curLayer = 0;	// the attached layer: 0 the live map, 1 the static layers, -1 another
+	/* lane VKSHADOW4 (item 3 part 1): the per-draw solid casters (pass 0, not a far ring, not swaying: csm_view_vs has no
+	 * sway block) go into the same crossing as pooled meshes (CsmMesh: key = the shape, gen = the hash of the arrays GL's
+	 * draw takes, CPU-skinned positions included). The whole shape, or one draw per cullIdx range. GL keeps the alpha-tested
+	 * and swaying casters, the far rings and the scratch layers (lane VKSHADOW5: the ground quad moved too) */
+	std::vector<WwVkPresent::CsmMesh> vkMesh;
+	std::vector<std::int32_t> vkMeshOf( casters.size(), -1 );	// caster -> its mesh in vkMesh
+	std::vector<Matrix4> vkMeshMv;	// one model-view a recorded caster
+	std::vector<std::uint32_t> vkMDraw;	// 4 words a draw: mesh, matrix (in vkMeshMv), first index, index count
+	auto vkMeshFor = [&]( std::size_t kn ) {
+		if ( vkMeshOf[kn] >= 0 )
+			return std::uint32_t( vkMeshOf[kn] );
+		static_assert( sizeof( Vector3 ) == 12 && sizeof( Triangle ) == 6, "the pool reads verts / triangles as packed arrays" );
+		const Caster & k = casters[kn];
+		const float * attrv[8] = { k.skinned.empty() ? &( k.sh->verts.constFirst()[0] ) : &( k.skinned.front()[0] ), nullptr, nullptr,
+			nullptr, nullptr, nullptr, nullptr, nullptr };
+		const NifSkopeOpenGLContext::ShapeDataHash h( std::uint32_t( k.sh->verts.size() ), 3, std::size_t( k.sh->triangles.size() ) * 6,
+			attrv, k.sh->triangles.constData() );
+		WwVkPresent::CsmMesh m;
+		m.key = reinterpret_cast<std::uintptr_t>( k.sh );
+		m.gen = h.h[0] ^ ( h.h[1] * 0x9E3779B97F4A7C15ULL ) ^ ( std::uint64_t( h.numVerts ) << 32 | h.elementBytes );
+		m.pos = attrv[0];
+		m.verts = std::uint32_t( k.sh->verts.size() );
+		m.idx = reinterpret_cast<const std::uint16_t *>( k.sh->triangles.constData() );
+		m.indices = std::uint32_t( k.sh->triangles.size() * 3 );
+		vkMeshOf[kn] = std::int32_t( vkMesh.size() );
+		vkMesh.push_back( m );
+		return std::uint32_t( vkMeshOf[kn] );
+	};
+	/* lane VKSHADOW5 (item 3 part 2): the ground quad as one pooled mesh a pass (key: the static index list's address; gen: an
+	 * FNV-1a hash of its 12 floats, which move with gxy / ghalf / gz). Its draws join each job's culled mesh draws */
+	static const std::uint16_t kGroundIdx[6] = { 0, 1, 2, 2, 1, 3 };
+	float vkGroundPos[12] = {};
+	std::int32_t vkGroundOf = -1;
+	auto vkGroundMesh = [&]() {
+		if ( vkGroundOf >= 0 )
+			return std::uint32_t( vkGroundOf );
+		const float x0 = gxy[0] - ghalf, x1 = gxy[0] + ghalf, y0 = gxy[1] - ghalf, y1 = gxy[1] + ghalf;
+		const float quad[12] = { x0, y0, gz, x1, y0, gz, x0, y1, gz, x1, y1, gz };
+		std::memcpy( vkGroundPos, quad, sizeof( quad ) );
+		std::uint64_t h = 1469598103934665603ULL;
+		const unsigned char * b = reinterpret_cast<const unsigned char *>( vkGroundPos );
+		for ( std::size_t i = 0; i < sizeof( vkGroundPos ); i++ )
+			h = ( h ^ b[i] ) * 1099511628211ULL;
+		WwVkPresent::CsmMesh m;
+		m.key = reinterpret_cast<std::uintptr_t>( &kGroundIdx );
+		m.gen = h;
+		m.pos = vkGroundPos;
+		m.verts = 4;
+		m.idx = kGroundIdx;
+		m.indices = 6;
+		vkGroundOf = std::int32_t( vkMesh.size() );
+		vkMesh.push_back( m );
+		return std::uint32_t( vkGroundOf );
+	};
 
 	// one job into whatever layer is attached
 	auto drawJob = [&]( std::size_t jb ) {
 		const Job & J = jobs[jb];
 		const Cascade & c = s.c[J.i];
+		const bool vkThis = vkCsm && curTarget >= 0;	// lane VKSHADOW1
+		std::vector<std::uint32_t> vkJob[2];	// lane VKSHADOW4: this job's mesh draws, culled / two-sided
 		fn->glViewport( 0, 0, c.vw, c.vh );
 		if ( J.scissor ) {
 			fn->glEnable( GL_SCISSOR_TEST );
@@ -1740,9 +1811,7 @@ static void sunShadowPassImpl( Scene * scene )
 			r->useProgram( "lookdev_csmdepth_q.prog" );
 			if ( const int l = progQ->uniLocation( "csmClipFromView" ); l >= 0 )
 				fn->glUniformMatrix4fv( l, 1, GL_FALSE, c.clipFromView );
-			const bool vkThis = vkCsm && curTarget >= 0;	// lane VKSHADOW1
-			if ( vkThis && ( span[jb][QSolid].n || span[jb][QTwoSided].n ) )
-				vkRec.push_back( { jb, curTarget, curLayer } );
+			// lane VKSHADOW4: the job's record is pushed after the per-draw casters (it carries their mesh draws too)
 			for ( int q : { int( QSolid ), int( QTwoSided ) } ) {
 				if ( !span[jb][q].n || vkThis )
 					continue;
@@ -1855,6 +1924,20 @@ static void sunShadowPassImpl( Scene * scene )
 				}
 				continue;
 			}
+			if ( vkThis && !pass && !k.sway && !k.sh->triangles.isEmpty() ) {
+				// lane VKSHADOW4: recorded for the crossing (GL draws it there on a refusal), not drawn here
+				const std::uint32_t mi = vkMeshFor( kn ), mx = std::uint32_t( vkMeshMv.size() );
+				vkMeshMv.push_back( k.sh->viewTrans().toMatrix4() );
+				std::vector<std::uint32_t> & o = vkJob[k.twoSided ? 1 : 0];
+				if ( runs ) {
+					for ( size_t q = 0; q + 1 < cullRanges.size(); q += 2 )
+						if ( cullRanges[q + 1] > 0 )
+							o.insert( o.end(), { mi, mx, std::uint32_t( cullRanges[q] ) * 3, std::uint32_t( cullRanges[q + 1] ) * 3 } );
+				} else {
+					o.insert( o.end(), { mi, mx, 0u, std::uint32_t( k.sh->triangles.size() * 3 ) } );
+				}
+				continue;
+			}
 			const float * const * attrs = attrv;
 			if ( runs ) {
 				cullIdx.clear();
@@ -1874,10 +1957,28 @@ static void sunShadowPassImpl( Scene * scene )
 			PassTime::countDraw( 1 );
 		}
 		}
+		if ( vkThis && s.groundCast && J.set != 2 ) {
+			// lane VKSHADOW5: the ground quad (below), recorded with the job's culled mesh draws; model-view vt, lodTreeAnim 0
+			const std::uint32_t mi = vkGroundMesh(), mx = std::uint32_t( vkMeshMv.size() );
+			vkMeshMv.push_back( vt.toMatrix4() );
+			vkJob[0].insert( vkJob[0].end(), { mi, mx, 0u, 6u } );
+		}
+		if ( vkThis ) {
+			// lane VKSHADOW1 / VKSHADOW4: the job's queue spans and mesh draws, one record for the crossing
+			VkRec v { jb, curTarget, curLayer };
+			for ( int q = 0; q < 2; q++ ) {
+				v.mFirst[q] = std::uint32_t( vkMDraw.size() / 4 );
+				v.mN[q] = std::uint32_t( vkJob[q].size() / 4 );
+				vkMDraw.insert( vkMDraw.end(), vkJob[q].begin(), vkJob[q].end() );
+			}
+			if ( ( progQ && ( span[jb][QSolid].n || span[jb][QTwoSided].n ) ) || v.mN[0] || v.mN[1] )
+				vkRec.push_back( v );
+		}
 		if ( progAt )
 			r->useProgram( "lookdev_csmdepth.prog" );
-		if ( s.groundCast && J.set != 2 ) {
-			// the ground quad, exactly as wwLookdevDrawGround places it (world space, Z up); static
+		if ( s.groundCast && J.set != 2 && !vkThis ) {
+			// the ground quad, exactly as wwLookdevDrawGround places it (world space, Z up); static (lane VKSHADOW5: GL's when not
+			// recorded for the crossing above)
 			fn->glEnable( GL_CULL_FACE );
 			prog->uni4m( "modelViewMatrix", vt.toMatrix4() );
 			prog->uni1i( "lodTreeAnim", 0 );	// lane SHADOWSHIMMER2: the ground never sways
@@ -1910,7 +2011,7 @@ static void sunShadowPassImpl( Scene * scene )
 		fn->glReadBuffer( GL_NONE );
 		fn->glBlitFramebuffer( 0, 0, s.map, s.map, 0, 0, s.map, s.map, GL_DEPTH_BUFFER_BIT, GL_NEAREST );
 	};
-	auto remap = [&]( int i ) {
+	auto remap = [&]( int i, GLenum func = GL_ALWAYS ) {	// lane VKSHADOW6: LEQUAL when it replays a refused crossing
 		const Cascade & c = s.c[i];
 		r->useProgram( "lookdev_csmremap.prog" );
 		progRemap->uni1i( "srcMap", kTextureUnit );
@@ -1929,7 +2030,7 @@ static void sunShadowPassImpl( Scene * scene )
 		fn->glBindVertexArray( cst.vao );
 		fn->glDisable( GL_CULL_FACE );
 		fn->glDisable( GL_POLYGON_OFFSET_FILL );
-		fn->glDepthFunc( GL_ALWAYS );
+		fn->glDepthFunc( func );
 		fn->glViewport( 0, 0, c.vw, c.vh );
 		fn->glDrawArrays( GL_TRIANGLES, 0, 3 );
 		fn->glDepthFunc( GL_LEQUAL );
@@ -2042,6 +2143,18 @@ static void sunShadowPassImpl( Scene * scene )
 			break;
 		case ShadowCache::Scroll:
 			// the old static layer to the scratch, then back remapped onto the moved window, then the new strips
+			/* lane VKSHADOW6: on Vulkan the old layer goes to the shared scratch's layer i and the crossing draws the remap
+			 * (LEQUAL) into the static and the live layer; GL clears and records as before */
+			if ( vkCsm && cst.vkScrShared ) {
+				if ( attach( cst.vkScr, i ) )
+					copyFrom( cst.tex, i );
+				if ( attach( cst.tex, i ) ) {
+					clearAll();
+					vkRemap.push_back( i );
+					runSet( i, 1 );
+				}
+				break;
+			}
 			if ( attach( cst.scratch, 0 ) )
 				copyFrom( cst.tex, i );
 			if ( attach( cst.tex, i ) ) {
@@ -2116,11 +2229,14 @@ static void sunShadowPassImpl( Scene * scene )
 	}
 	/* lane VKSHADOW1: the recorded queue draws, one crossing. A static layer's draws go into the live layer too (GL copied
 	 * that layer into it before they were drawn). Refused: GL draws the same list now (late, the same depths). */
-	if ( vkCsm && complete && !vkRec.empty() ) {
+	if ( vkCsm && complete && ( !vkRec.empty() || !vkRemap.empty() ) ) {
 		const std::size_t nRec = vkRec.size();
 		for ( std::size_t k = 0; k < nRec; k++ )
-			if ( vkRec[k].target == 1 )
-				vkRec.push_back( { vkRec[k].jb, 0, vkRec[k].layer } );
+			if ( vkRec[k].target == 1 ) {
+				VkRec live = vkRec[k];
+				live.target = 0;
+				vkRec.push_back( live );
+			}
 		WwVkPresent::CsmRun run;
 		run.map = s.map;
 		run.layers = kCascades;
@@ -2128,11 +2244,43 @@ static void sunShadowPassImpl( Scene * scene )
 		run.tex[1] = cacheOn ? cst.tex : 0;
 		run.key[0] = reinterpret_cast<std::uintptr_t>( &s.tex );
 		run.key[1] = cacheOn ? reinterpret_cast<std::uintptr_t>( &cst.tex ) : 0;
+		run.scratch = vkRemap.empty() ? 0 : cst.vkScr;	// lane VKSHADOW6
+		run.scratchKey = vkRemap.empty() ? 0 : reinterpret_cast<std::uintptr_t>( &cst.vkScr );
 		const bool havePool = GpuDriven::poolBuffers( run.pos, run.idx, run.posBytes, run.idxBytes );
-		run.mats = mats.data();
-		run.nMats = mats.size() / 16;
+		// lane VKSHADOW4: the mesh draws' matrices after the queue's (one buffer); their draws renumbered to match
+		std::vector<float> vkAllMats( mats );
+		for ( const Matrix4 & m : vkMeshMv )
+			vkAllMats.insert( vkAllMats.end(), m.data(), m.data() + 16 );
+		std::vector<std::uint32_t> vkMd( vkMDraw );
+		for ( std::size_t k = 1; k < vkMd.size(); k += 4 )
+			vkMd[k] += std::uint32_t( mats.size() / 16 );
+		run.mats = vkAllMats.data();
+		run.nMats = vkAllMats.size() / 16;
+		run.meshes = vkMesh.data();
+		run.nMeshes = vkMesh.size();
+		run.mdraws = vkMd.data();
+		run.nMDraws = vkMd.size() / 4;
 		run.cmds = reinterpret_cast<const std::uint32_t *>( cmds.data() );
 		run.nCmds = cmds.size();
+		// lane VKSHADOW6: the Scroll remaps, into the static layer and the live one (GL copied the cleared static layer there)
+		for ( int i : vkRemap ) {
+			WwVkPresent::CsmDraw d;
+			d.remap = true;
+			d.layer = i;
+			d.vw = s.c[i].vw;
+			d.vh = s.c[i].vh;
+			d.src = i;
+			d.srcX = srcOff[i][0];
+			d.srcY = srcOff[i][1];
+			d.srcW = oldSize[i][0];
+			d.srcH = oldSize[i][1];
+			d.zScale = zMap[i][0];
+			d.zBias = zMap[i][1];
+			for ( int t : { 1, 0 } ) {
+				d.target = t;
+				run.d.push_back( d );
+			}
+		}
 		const bool noBias = red( "nobias" );
 		for ( const VkRec & v : vkRec ) {
 			const Job & J = jobs[v.jb];
@@ -2140,7 +2288,7 @@ static void sunShadowPassImpl( Scene * scene )
 			if ( J.scissor && ( J.rc[2] <= J.rc[0] || J.rc[3] <= J.rc[1] ) )
 				continue;	// GL's empty scissor draws nothing
 			for ( int q : { int( QSolid ), int( QTwoSided ) } ) {
-				if ( !span[v.jb][q].n )
+				if ( !span[v.jb][q].n && !v.mN[q] )
 					continue;
 				WwVkPresent::CsmDraw d;
 				d.target = v.target;
@@ -2157,16 +2305,36 @@ static void sunShadowPassImpl( Scene * scene )
 				d.cull = q == QSolid;
 				d.first = std::uint32_t( span[v.jb][q].first );
 				d.n = std::uint32_t( span[v.jb][q].n );
-				run.d.push_back( d );
+				if ( d.n )
+					run.d.push_back( d );
+				if ( v.mN[q] ) {	// lane VKSHADOW4: the job's mesh draws of the same cull form
+					d.mesh = true;
+					d.first = v.mFirst[q];
+					d.n = v.mN[q];
+					run.d.push_back( d );
+				}
 			}
 		}
+		bool anyQueue = false;	// lane VKSHADOW4: a run of mesh draws only needs no pool
+		for ( const WwVkPresent::CsmDraw & d : run.d )
+			anyQueue = anyQueue || ( !d.mesh && !d.remap );	// lane VKSHADOW6: a remap needs no pool either
 		std::string w;
-		if ( !havePool ) {
+		if ( !havePool && anyQueue ) {
 			w = "no pool buffers";
 			WwVkPresent::csmOnGl( w.c_str() );
 		}
-		if ( !havePool || !WwVkPresent::csmRun( run, w ) ) {
+		if ( ( !havePool && anyQueue ) || !WwVkPresent::csmRun( run, w ) ) {
 			vkWhy = w;
+			// lane VKSHADOW6: GL remaps from the shared scratch's layer i through its one-layer scratch, LEQUAL, into both layers
+			for ( int i : vkRemap ) {
+				if ( !attach( cst.scratch, 0 ) )
+					break;
+				copyFrom( cst.vkScr, i );
+				if ( attach( cst.tex, i ) )
+					remap( i, GL_LEQUAL );
+				if ( attach( s.tex, i ) )
+					remap( i, GL_LEQUAL );
+			}
 			for ( const VkRec & v : vkRec ) {
 				const Job & J = jobs[v.jb];
 				const Cascade & c = s.c[J.i];
@@ -2194,6 +2362,23 @@ static void sunShadowPassImpl( Scene * scene )
 					qCommands += qint64( span[v.jb][q].n );
 				}
 				r->useProgram( "lookdev_csmdepth.prog" );
+				// lane VKSHADOW4: the recorded per-draw casters, as the per-draw loop would have drawn them
+				prog->uni1i( "lodTreeAnim", 0 );
+				if ( lMvp >= 0 )
+					fn->glUniformMatrix4fv( lMvp, 1, GL_FALSE, c.clipFromView );
+				for ( int q = 0; q < 2; q++ ) {
+					if ( !v.mN[q] )
+						continue;
+					q ? fn->glDisable( GL_CULL_FACE ) : fn->glEnable( GL_CULL_FACE );
+					for ( std::uint32_t k = v.mFirst[q]; k < v.mFirst[q] + v.mN[q]; k++ ) {
+						const std::uint32_t * m = &vkMDraw[4 * std::size_t( k )];
+						const WwVkPresent::CsmMesh & me = vkMesh[m[0]];
+						prog->uni4m( "modelViewMatrix", vkMeshMv[m[1]] );
+						const float * attrs = me.pos;
+						r->drawShape( me.verts, 3, m[3], GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, me.idx + m[2] );
+						PassTime::countDraw( 1 );
+					}
+				}
 				if ( J.scissor )
 					fn->glDisable( GL_SCISSOR_TEST );
 			}
