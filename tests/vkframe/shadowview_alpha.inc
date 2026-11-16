@@ -22,11 +22,22 @@
 	// ran on the alpha pipeline with their own textures).
 	// Reds on frame 1 (each must FAIL: past 1 unit on > 0.01 % of all covered texels): test off (the alpha casters as plain
 	// mesh draws, atTex 0), wrong (every alpha draw samples T2), uv (uvScale 1, uvOffset 0), alpha (atAlpha 1).
+	// Lane VKSHADOW9 (rulings R1 / R2, 2026-11-16; the bar's rules and thresholds unchanged):
+	// R1: the shadow alpha test samples with anisotropy 1 on both APIs. The GL arm binds the app's sampler object
+	// (features/shadows/shadowatsampler.h: the texture's wrap and min filter, anisotropy 1) on the alpha unit, as sunshadow.cpp
+	// does; the Vulkan arm's csmAtTex forces anisotropy 1. T0 stays anisotropy 4 as texture state, so a missing override on
+	// either arm shows (VKSHADOW8: 133-213 texels flipped). A note line (not a bar) counts the texels the change moves on GL:
+	// GL with the texture's own anisotropy against GL with the sampler (the fixture's T0 is 4x; the app's maps are 16x).
+	// R2 (seeding): the alpha casters of live/0 (casters 0, 1) and static/1 (caster 5) were seeded outside their cascade's
+	// window (light x -174 / -105 / -176 against cascade 0's -55..35 and cascade 1's -90..100), so their alpha-cut read 0 on
+	// GL alone (VKSHADOW8). setAM moves them in light space only: to fixed spots inside their cascade's window, at light z
+	// -45 (in front of the queued casters); their rotation and scale and the random draws are unchanged.
 	bool atOk = rmOk;
 	{
 		void( WINAPI * cTexSub )( GLuint, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLsizei, const void * ) = nullptr;
 		void( WINAPI * uni2f )( GLint, GLfloat, GLfloat ) = nullptr;
 		void( WINAPI * activeTex )( GLenum ) = nullptr;
+		void( WINAPI * bindSmp )( GLuint, GLuint ) = nullptr;
 		std::string vsA = readFile( root + "/res/shaders/features/shadows/lookdev_csmdepth_at.vert" );
 		const std::string inc = "#include \"uniforms.glsl\"";
 		const std::size_t incAt = vsA.find( inc );
@@ -35,7 +46,7 @@
 		const GLuint progA = incAt == std::string::npos ? 0
 			: program( vsA, readFile( root + "/res/shaders/features/shadows/lookdev_csmdepth_at.frag" ) );
 		if ( !progA || !load( cTexSub, "glCompressedTextureSubImage2D" ) || !load( uni2f, "glUniform2f" )
-			|| !load( activeTex, "glActiveTexture" ) ) {
+			|| !load( activeTex, "glActiveTexture" ) || !load( bindSmp, "glBindSampler" ) ) {
 			std::printf( "SHADOWVIEW alpha FAIL (the alpha-tested program or its entry points)\n" );
 			atOk = false;
 		}
@@ -189,11 +200,26 @@
 			ac[i] = { u( rng ), u( rng ), u( rng ) + 1.5, 3.14159 * u( rng ), 90.0 * u( rng ), 90.0 * u( rng ), -150.0 + 80.0 * u( rng ),
 				10.0 + 14.0 * ( 0.5 + 0.5 * u( rng ) ) };
 		std::vector<float> amv( std::size_t( kAC ) * 16 );
+		// R2: the light's depth axis in view space (row 2 of the cascades' view -> light rotation; light z = row 2 . p - 60)
+		double Lr[16];
+		rotT( 0.3, 1.0, 0.2, 0.9, 0.0, 0.0, 0.0, 1.0, Lr );
+		const double lx[3] = { Lr[0], Lr[4], Lr[8] }, ly[3] = { Lr[1], Lr[5], Lr[9] }, lz[3] = { Lr[2], Lr[6], Lr[10] };
+		const bool front[kAC] = { true, true, false, false, false, true, false, false };
 		auto setAM = [&]( double move ) {
 			for ( int i = 0; i < kAC; i++ ) {
 				const Caster & c = ac[i];
 				double M[16];
 				rotT( c.ax, c.ay, c.az, c.ang + 0.25 * move, c.tx + 5.0 * move, c.ty - 3.0 * move, c.tz + 2.0 * move, c.s, M );
+				if ( front[i] ) {
+					// light-space goal: caster 0 / 1 left / right of cascade 0's centre (-10, 8), caster 5 at cascade 1's (5, -6),
+					// each moved with the frame (the same 5 / -3 units a frame in light x / y)
+					const double gx = ( i == 0 ? -25.0 : i == 1 ? 5.0 : 5.0 ) + 5.0 * move, gy = ( i == 5 ? -6.0 : 8.0 ) - 3.0 * move;
+					const double t[3] = { M[12], M[13], M[14] };
+					const double d[3] = { gx - ( lx[0] * t[0] + lx[1] * t[1] + lx[2] * t[2] ), gy - ( ly[0] * t[0] + ly[1] * t[1] + ly[2] * t[2] ),
+						-45.0 - ( lz[0] * t[0] + lz[1] * t[1] + lz[2] * t[2] - 60.0 ) };
+					for ( int k = 0; k < 3; k++ )
+						M[12 + k] += d[0] * lx[k] + d[1] * ly[k] + d[2] * lz[k];
+				}
 				for ( int k = 0; k < 16; k++ )
 					amv[std::size_t( i ) * 16 + k] = float( M[k] );
 			}
@@ -232,6 +258,7 @@
 			return out;
 		};
 		// GL: refOff < 0 replaces every threshold (the "no test" picture for the alpha-cut count)
+		bool glOldAniso = false;  // R1 note only: GL before the ruling (the texture's own anisotropy)
 		auto glAlpha = [&]( const GLuint * tex, const ARec & R, float refOff ) {
 			if ( !attach( tex[R.target], R.layer ) )
 				return false;
@@ -251,6 +278,12 @@
 			f.uniform1f( aAlpha, R.a );
 			f.uniform1f( aRef, refOff < 0.0f ? refOff : R.ref );
 			glBindTexture( kTex2D, tw[R.tex] );
+			// R1: the app's sampler (the texture's wrap and min filter, anisotropy 1); glOldAniso: the texture's own state
+			const GLint wrapA = R.tex == 0 ? GL_REPEAT : GLint( kClampEdge );
+			const GLuint smpA = glOldAniso ? 0u : GLuint( ShadowAt::sampler( csmGlProc, wrapA, wrapA, GL_LINEAR_MIPMAP_LINEAR ) );
+			if ( !glOldAniso && !smpA )
+				return false;
+			bindSmp( 0, smpA );
 			R.cull ? glEnable( GL_CULL_FACE ) : glDisable( GL_CULL_FACE );
 			const AMesh & m = am[std::size_t( meshOfA[R.caster] )];
 			f.bindBuffer( kArrayBuf, m.vb );
@@ -279,6 +312,7 @@
 				activeTex( kTex0 );
 				for ( const ARec & R : arecs )
 					ok2 = ok2 && glAlpha( refT, R, alphaMode == 2 ? -1.0f : 0.0f );
+				bindSmp( 0, 0 );
 				glBindTexture( kTex2D, 0 );
 			}
 			readAll( refT, out );
@@ -381,7 +415,7 @@
 		for ( const ARec & R : arecs )
 			hasA[R.target][R.layer] = true;
 
-		std::vector<std::uint16_t> refA[2][2][3], vkA[2][3], noTest[2][3], bareA[2][3];
+		std::vector<std::uint16_t> refA[2][2][3], vkA[2][3], noTest[2][3], bareA[2][3], oldGl[2][3];
 		WwVkPresent::takeCsmStat();
 		for ( int fr = 0; fr < 2 && atOk; fr++ ) {
 			upload( moves[fr] );
@@ -423,6 +457,24 @@
 			} else {
 				std::printf( "SHADOWVIEW alpha frame%d FAIL (the GL no-test / bare runs)\n", fr );
 				atOk = false;
+			}
+			// R1 note (not a bar): the shadow texels GL's change moves, old GL (the texture's own anisotropy) against new GL
+			glOldAniso = true;
+			const bool oldRan = runGlA( 1, oldGl );
+			glOldAniso = false;
+			if ( oldRan ) {
+				std::size_t moved = 0, cov = 0, past = 0;
+				for ( int t = 0; t < 2; t++ )
+					for ( int l = 0; l < 3; l++ ) {
+						const Diff v = compare( oldGl[t][l], refA[fr][t][l] );
+						moved += v.diff;
+						cov += v.covered;
+						past += v.past1;
+					}
+				std::printf( "SHADOWVIEW alpha frame%d note R1: old GL (T0 4x anisotropy) against new GL (sampler at 1x): %zu of %zu "
+					"covered texels moved, %zu past 1 unit (the app's maps are 16x)\n", fr, moved, cov, past );
+			} else {
+				std::printf( "SHADOWVIEW alpha frame%d note R1: the old-GL run failed\n", fr );
 			}
 		}
 		// the reds on frame 1's content: each must FAIL (past 1 unit on > 0.01 % of all covered texels)

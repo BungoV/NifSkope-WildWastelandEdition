@@ -57,6 +57,7 @@
 // casters on the cache's BC twins; the case, its BOUND and its reds: shadowview_alpha.inc.
 #define WW_VKPRESENT_NO_QT
 #include "../../src/features/vkframe/vkpresent.cpp"
+#include "../../src/features/shadows/shadowatsampler.h"  // lane VKSHADOW9 (R1): the app's alpha-test sampler
 
 #include <GL/gl.h>
 #include <algorithm>

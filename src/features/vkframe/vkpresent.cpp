@@ -9345,22 +9345,37 @@ void * csmGlProc( const char * name )
 }
 
 // lane VKSHADOW8: an alpha-tested caster's map (CsmDraw::atTex): the texture cache's BC twin with GL's own sampler state,
-// resolved as the flare's sprite maps are (vkflare.inc flTex)
+// resolved as the flare's sprite maps are (vkflare.inc flTex). Lane VKSHADOW9 (R1): anisotropy 1, as GL's alpha test
+// samples it (features/shadows/shadowatsampler.h); NV GL's anisotropic footprint is not Vulkan's (VKSHADOW8)
 bool csmAtTex( unsigned name, VkImageView & view, VkSampler & smp, std::string & why )
 {
-	// NV GL's anisotropic footprint is not Vulkan's: shadowview alpha (VKSHADOW8) read 133-213 of 99k texels flipped at
-	// every Vulkan level 1..16 against GL's 4, and EXACT with both at 1. Such a map stays on GL.
-	WwVkPresent::BlSampler bs;
-	std::string w;
-	if ( WwVkPresent::blSamplerRead( name, bs, csmGlProc, w ) && bs.aniso > 1.0f ) {
-		why = "an alpha caster's map is anisotropic (" + std::to_string( int( bs.aniso ) ) + "x: GL's footprint is not "
-			  "Vulkan's)";
+	view = VK_NULL_HANDLE;
+	smp = VK_NULL_HANDLE;
+	auto it = ot().twins.find( GLuint( name ) );
+	const Shared * s = it == ot().twins.end() ? nullptr : farTwinFind( it->second.key );
+	if ( !s || !s->view || s->type != 0 ) {
+		why = "an alpha caster's map " + std::to_string( name ) + " has no Vulkan twin (not block-compressed)";
 		return false;
 	}
-	if ( flTex( name, csmGlProc, view, smp, why ) )
-		return true;
-	why = "an alpha caster's map: " + why;
-	return false;
+	WwVkPresent::BlSampler bs;
+	BlSmpKey k;
+	std::string w;
+	if ( !WwVkPresent::blSamplerRead( name, bs, csmGlProc, w ) ) {
+		why = "an alpha caster's map " + std::to_string( name ) + ": " + w;
+		return false;
+	}
+	if ( blIsSrgb( s->fmt ) && bs.srgbDecode == 0x8A4A ) {
+		why = "an alpha caster's map " + std::to_string( name ) + ": an sRGB map with its decode skipped";
+		return false;
+	}
+	bs.aniso = 1.0f;
+	blSwizzleNorm( s->fmt, bs );
+	if ( !blSamplerKey( bs, k, w ) || !( smp = sbSampler( k, w ) ) ) {
+		why = "an alpha caster's map " + std::to_string( name ) + ": " + w;
+		return false;
+	}
+	view = s->view;
+	return true;
 }
 }  // namespace
 

@@ -45,6 +45,8 @@ static bool shadowCacheCheck()
 }
 #include "features/far-lod/cellfarlod.h"	// lane SHADOWSHIMMER2: the far sway sample the colour pass takes
 
+#include "features/shadows/shadowatsampler.h"	// lane VKSHADOW9 (R1): the alpha test samples with anisotropy 1
+
 #include <QDir>
 #include <QFile>
 #include <QOpenGLContext>
@@ -990,6 +992,18 @@ void wwSunShadowPass( Scene * scene )
 	csmEchoFrame();
 }
 
+// lane VKSHADOW9 (R1): the alpha casters' base map (unit 0) through a sampler object with anisotropy 1 and the bind's own
+// wrap and min filter (features/shadows/shadowatsampler.h); called right after uniSampler, unbound after each alpha loop
+static void atSampler( NifSkopeOpenGLContext::GLFunctions * fn )
+{
+	const ShadowAt::Proc gp = []( const char * n ) -> void * {
+		QOpenGLContext * gc = QOpenGLContext::currentContext();
+		return gc ? reinterpret_cast<void *>( gc->getProcAddress( n ) ) : nullptr;
+	};
+	const int * b = ShadowAt::bindState;
+	fn->glBindSampler( 0, b[2] ? ShadowAt::sampler( gp, b[0], b[1], b[2] ) : 0u );
+}
+
 static void sunShadowPassImpl( Scene * scene )
 {
 	CsmState & s = cs();
@@ -1836,7 +1850,9 @@ static void sunShadowPassImpl( Scene * scene )
 					const BSLightingShaderProperty * lsp = k.sh->wwLightingShader();
 					BSShaderLightingProperty * bsp = k.sh->wwShaderLighting();
 					k.sh->wwLeafCovArm( "sun" );	// lane TREELEAF2: the colour pass's coverage copy
+					ShadowAt::bindState[2] = 0;
 					progAtQ->uniSampler( bsp, "BaseMap", 0, texunit, QString(), bsp->clampMode, QString() );
+					atSampler( fn );
 					k.sh->wwLeafCovDisarm();
 					progAtQ->uni2f( "uvScale", bsp->uvScale.x, bsp->uvScale.y );
 					progAtQ->uni2f( "uvOffset", bsp->uvOffset.x, bsp->uvOffset.y );
@@ -1847,6 +1863,7 @@ static void sunShadowPassImpl( Scene * scene )
 					qCalls++;
 					qCommands += qint64( sp.n );
 				}
+				fn->glBindSampler( 0, 0 );
 			}
 			r->useProgram( "lookdev_csmdepth.prog" );
 		}
@@ -1889,7 +1906,9 @@ static void sunShadowPassImpl( Scene * scene )
 				const BSLightingShaderProperty * lsp = k.sh->wwLightingShader();
 				BSShaderLightingProperty * bsp = k.sh->wwShaderLighting();
 				k.sh->wwLeafCovArm( "sun" );	// lane TREELEAF2: the colour pass's coverage copy
+				ShadowAt::bindState[2] = 0;
 				p->uniSampler( bsp, "BaseMap", 0, texunit, QString(), bsp->clampMode, QString() );
+				atSampler( fn );
 				k.sh->wwLeafCovDisarm();
 				p->uni2f( "uvScale", bsp->uvScale.x, bsp->uvScale.y );
 				p->uni2f( "uvOffset", bsp->uvOffset.x, bsp->uvOffset.y );
@@ -1974,8 +1993,10 @@ static void sunShadowPassImpl( Scene * scene )
 			if ( ( progQ && ( span[jb][QSolid].n || span[jb][QTwoSided].n ) ) || v.mN[0] || v.mN[1] )
 				vkRec.push_back( v );
 		}
-		if ( progAt )
+		if ( progAt ) {
+			fn->glBindSampler( 0, 0 );	// lane VKSHADOW9: material maps keep their anisotropy
 			r->useProgram( "lookdev_csmdepth.prog" );
+		}
 		if ( s.groundCast && J.set != 2 && !vkThis ) {
 			// the ground quad, exactly as wwLookdevDrawGround places it (world space, Z up); static (lane VKSHADOW5: GL's when not
 			// recorded for the crossing above)
