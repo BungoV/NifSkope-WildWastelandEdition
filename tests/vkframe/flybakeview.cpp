@@ -11,6 +11,12 @@
 //   F  the bake phased as the rolling build draws it: [0, 5) then [5, nz) into S0 vs gv0
 //   G0 the route header's GL side (wwFlyBakeRoute wantVk false): GL_SAMPLES_PASSED == nxy * nxy * nz and S0 vs gv0
 //   G  the route on Vulkan: GL_SAMPLES_PASSED == 0 around the whole route, onVk, S0 vs gv0
+//   M  lane VKCLOUD7, the shape's mip chain: cfShapeMip reads cvShape at levels 0, 1, 2 (Load) and keeps the max, and generated
+//      mips never exceed level 0, so the arms above cannot see a dropped level copy. M's cvShape = the job's generated chain
+//      with level 0 cleared to 0 (levels 1 and 2 carry the bound); M2 levels 0 and 1 cleared (level 2 only). Each vs GL on the
+//      same texture. Then cvShape's and cvDetail's twins vs GL at every level (cfProbe 0: the bake never reads cvDetail).
+//      Job checks: fxTexOf gives cvShape and cvDetail >= 3 levels; M's GL bake 0 < occ < total; M and M2 unlike GL's bake on
+//      an all-zero shape.
 // Bar (set before the first run, never widened): every arm EXACT (0 texels differ), read twice equal, no GL error.
 // Job checks (else the job cannot judge): 0 < occupancy < total, gv0 holds only 0 / 255, gv1..gv3 only 0..15, each pass
 // changes its input, some slice differs from slice 0 and at least one adjacent slice pair differs.
@@ -19,6 +25,8 @@
 //   stuck    every slice drawn into slice 0 (FlyBakeRun.red 1)
 //   offby1   slice k drawn into slice k + 1 (red 2)
 //   glwrites the route with redGlWrites (GL draws after Vulkan): GL_SAMPLES_PASSED > 0
+//   nomip    (lane VKCLOUD7) M's run with cvShape read from a twin of level 0 only, levels 1.. cleared to 0 (FxTex.shared):
+//            must FAIL and equal GL's all-zero-shape bake; the same red on the job's own chain is INFO (not judged)
 //   swap     the other pass's program (red 4: cloud_flysdf, b31 zero but cfLayer), run LAST
 // Last line `FLYBAKEVIEW GATE OK` or `FLYBAKEVIEW GATE FAILED`.
 #define main fxview_main
@@ -117,10 +125,13 @@ int main( int argc, char ** argv )
 	const size_t plane = static_cast<size_t>( nxy ) * static_cast<size_t>( nxy );
 
 	// ---- GL as runPass draws: cloud_flybake's units t0..t2 (the reflected order), cloud_flysdf's source on unit 3
+	GLuint shapeGl = tin[0].gl;          // lane VKCLOUD7: the cvShape bound (arms M, M2, red nomip swap it)
+	std::uintptr_t shapeShared = 0;      // non-zero: Vulkan reads cvShape from this shared target (red nomip)
+	int texLevels[3] = {};               // the levels fxTexOf gave each input
 	auto bindBake = [&]() {
 		f.useProgram( pBake );
 		for ( int k = 0; k < 3; k++ ) {
-			bindUnit( k, tin[static_cast<size_t>( k )].target, tin[static_cast<size_t>( k )].gl );
+			bindUnit( k, tin[static_cast<size_t>( k )].target, k == 0 ? shapeGl : tin[static_cast<size_t>( k )].gl );
 			u1i( pBake, tin[static_cast<size_t>( k )].name.c_str(), k );
 		}
 	};
@@ -250,6 +261,9 @@ int main( int argc, char ** argv )
 					return false;
 				}
 				t.tex[k].twin = keyOf( twinKeys[k] );
+				texLevels[k] = t.tex[k].levels;
+				if ( k == 0 && shapeShared )
+					t.tex[0].shared = shapeShared;
 			}
 			WwVkPresent::fxPack( &ga, pBake, WwVkPresent::kT_flybake, int( std::size( WwVkPresent::kT_flybake ) ), t.loose );
 		} else {
@@ -348,6 +362,82 @@ int main( int argc, char ** argv )
 		ok = ok && onVk && drew && n == 0;
 		arm( "G the route on Vulkan vs GL", judgeVol( 0, ref[0] ), drew && onVk );
 	}
+	// ---- M, M2 (lane VKCLOUD7): the shape's mip chain carries the bound
+	const std::uint8_t zero8 = 0;
+	int shapeLev = 1;
+	while ( ( tin[0].w >> shapeLev ) > 0 )
+		shapeLev++;
+	auto shapeCut = [&]( int cut ) {  // the job's cvShape with its generated chain, levels [0, cut) cleared to 0
+		TexIn t = tin[0];
+		t.gl = 0;
+		if ( !upload( dir, t, 0 ) )
+			return GLuint( 0 );
+		for ( int l = 0; l < cut; l++ )
+			clearTex( t.gl, l, fRed, GL_UNSIGNED_BYTE, &zero8 );
+		glFinish();
+		return t.gl;
+	};
+	const GLuint shapeM = shapeCut( 1 ), shapeM2 = shapeCut( 2 ), shapeZ = shapeCut( shapeLev );
+	if ( !shapeM || !shapeM2 || !shapeZ || glGetError() != GL_NO_ERROR )
+		return fatal( "arm M's shape textures" );
+	auto glBakeWith = [&]( GLuint shape ) {
+		shapeGl = shape;
+		GLuint t = vol3();
+		const bool drew = glPass( 0, 0, t, 0, nz );
+		std::vector<std::uint8_t> a = read( t );
+		glDeleteTextures( 1, &t );
+		shapeGl = tin[0].gl;
+		return drew ? a : std::vector<std::uint8_t>();
+	};
+	const std::vector<std::uint8_t> refM = glBakeWith( shapeM ), refM2 = glBakeWith( shapeM2 ), refZ = glBakeWith( shapeZ );
+	{
+		auto occOf = [&]( const std::vector<std::uint8_t> & a ) {
+			size_t n = 0;
+			for ( std::uint8_t x : a )
+				n += x == 255;
+			return n;
+		};
+		const size_t oJ = occOf( ref[0] ), oM = occOf( refM ), oM2 = occOf( refM2 ), oZ = occOf( refZ );
+		std::printf( "FLYBAKEVIEW INFO M: cvShape %d levels; occupancy job %zu, M (level 0 cleared) %zu, M2 (levels 0, 1 cleared) %zu, all-zero shape "
+			"%zu of %zu; M unlike the all-zero bake: %s, M2 unlike it: %s, M2 unlike M: %s\n",
+			shapeLev, oJ, oM, oM2, oZ, total, refM != refZ ? "yes" : "NO", refM2 != refZ ? "yes" : "NO", refM2 != refM ? "yes" : "no" );
+		if ( refM.size() != total || refM2.size() != total || refZ.size() != total || !( oM > 0 && oM < total ) || refM == refZ || refM2 == refZ )
+			return fatal( "arm M cannot judge the mip chain (see INFO)" );
+	}
+	auto vkWith = [&]( GLuint shape, const std::vector<std::uint8_t> & want, const std::string & name ) {
+		shapeGl = shape;
+		sentinel( 0 );
+		const bool ran = vkRun( 0, -1, 0, 0, nz, 0 );
+		shapeGl = tin[0].gl;
+		arm( name, judgeVol( 0, want ), ran );
+	};
+	vkWith( shapeM, refM, "M bake, cvShape level 0 cleared (levels 1, 2 carry the bound) vs GL" );
+	vkWith( shapeM2, refM2, "M2 bake, cvShape levels 0, 1 cleared (level 2 carries the bound) vs GL" );
+	for ( int k = 0; k < 2; k++ ) {  // the twins after M2: every level as GL's
+		const TexIn & x = tin[static_cast<size_t>( k )];
+		const GLuint src = k == 0 ? shapeM2 : x.gl;
+		GLuint tw = 0;
+		if ( !WwVkPresent::sharedTarget( keyOf( twinKeys[k] ), 1, x.w, x.h, x.d, fR8, tw, why, texLevels[k] ) )
+			return fatal( "the " + x.name + " twin: " + why );
+		size_t d = 0, all = 0;
+		for ( int l = 0; l < texLevels[k]; l++ ) {
+			const size_t m = static_cast<size_t>( std::max( x.w >> l, 1 ) ) * static_cast<size_t>( std::max( x.h >> l, 1 ) )
+				* static_cast<size_t>( std::max( x.d >> l, 1 ) );
+			std::vector<std::uint8_t> a( m ), b( m );
+			glBindTexture( fT3D, src );
+			glGetTexImage( fT3D, l, fRed, GL_UNSIGNED_BYTE, a.data() );
+			glBindTexture( fT3D, tw );
+			glGetTexImage( fT3D, l, fRed, GL_UNSIGNED_BYTE, b.data() );
+			for ( size_t i = 0; i < m; i++ )
+				d += a[i] != b[i];
+			all += m;
+		}
+		glBindTexture( fT3D, 0 );
+		const bool same = d == 0 && all > 0 && texLevels[k] >= 3 && glGetError() == GL_NO_ERROR;
+		std::printf( "FLYBAKEVIEW M %s twin: %d levels (want >= 3), %zu of %zu texels differ: %s\n", x.name.c_str(), texLevels[k], d, all,
+			same ? "EXACT" : "FAIL" );
+		ok = ok && same;
+	}
 	{
 		const WwVkPresent::FxStat st0 = WwVkPresent::takeFlyBakeStat();
 		std::printf( "FLYBAKEVIEW stat: %d runs, %d failed (%s), %d pipelines built in %.1f ms, %d input copies\n", st0.runs, st0.fails,
@@ -375,6 +465,38 @@ int main( int argc, char ** argv )
 			std::printf( "FLYBAKEVIEW red glwrites PASSED: the gate cannot see it\n" );
 			ok = false;
 		}
+	}
+	{  // lane VKCLOUD7: the mip copy dropped (a twin of level 0 only, levels 1.. cleared to 0), on M; on the job's chain as INFO
+		static char nomipKey;
+		auto nomip = [&]( GLuint shape, const std::vector<std::uint8_t> & want, Res & r ) {
+			GLuint tw = 0;
+			if ( !WwVkPresent::sharedTarget( keyOf( nomipKey ), 1, tin[0].w, tin[0].h, tin[0].d, fR8, tw, why, texLevels[0] ) )
+				return false;
+			for ( int l = 0; l < texLevels[0]; l++ )
+				clearTex( tw, l, fRed, GL_UNSIGNED_BYTE, &zero8 );
+			f.copyImageSubData( shape, fT3D, 0, 0, 0, 0, tw, fT3D, 0, 0, 0, 0, tin[0].w, tin[0].h, tin[0].d );
+			glFinish();
+			shapeGl = shape;
+			shapeShared = keyOf( nomipKey );
+			sentinel( 0 );
+			const bool ran = vkRun( 0, -1, 0, 0, nz, 0 );
+			shapeShared = 0;
+			shapeGl = tin[0].gl;
+			r = judgeVol( 0, want );
+			return ran;
+		};
+		Res r;
+		const bool ran = nomip( shapeM, refM, r );
+		const Res rz = judgeVol( 0, refZ );
+		redArm( "nomip (cvShape's twin holds level 0 only, levels 1.. 0; on M)", r, ran );
+		const bool zeroEq = ran && rz.twice && rz.diff == 0;
+		std::printf( "FLYBAKEVIEW red nomip equals GL's all-zero-shape bake: %s (%zu of %zu texels differ)\n", zeroEq ? "yes" : "NO", rz.diff, rz.total );
+		ok = ok && zeroEq;
+		Res rj;
+		const bool ranJ = nomip( tin[0].gl, ref[0], rj );
+		std::printf( "FLYBAKEVIEW INFO nomip on the job's own chain (not judged): %zu of %zu texels differ, %zu unwritten%s\n", rj.diff, rj.total,
+			rj.unwritten, ranJ ? "" : ", the run was refused" );
+		WwVkPresent::sharedTargetDrop( keyOf( nomipKey ) );
 	}
 	{  // last: a pipeline of the other program
 		sentinel( 0 );
