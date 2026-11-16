@@ -747,7 +747,10 @@ struct FxStat
 	int reusedHandles = 0;          //!< lane VKWATER4: water ray runs whose depth twin kept its VkImage handle over a sharedGen() move
 	int fenceMisses = 0;            //!< lane VKWATER4: waterRun's wait on the last crossing's fence that did not return VK_SUCCESS
 	int crossings = 0;              //!< lane VKCLOUD9: GL <-> Vulkan crossings that went through (the fly bake: runs = passes)
+	unsigned inPlace = 0;           //!< lane VKCLOUD10: the clouds' inputs read in place (farSharedOf) since the last take, OR of
+	                                //!< kInShape 1, kInDetail 2, kInMap 4, kInField 8 (the fly box's cfSdf)
 };
+inline constexpr unsigned kInShape = 1, kInDetail = 2, kInMap = 4, kInField = 8;
 FxStat takeVolSkyStat();
 //! lane VKCLOUD2: the fly march's t0.. (cloud_fly_ps / cloud_fly_a_ps reflected; t7 cvBlue only in _a, cfSdf Load'd)
 inline constexpr int kFlyTex = 9;

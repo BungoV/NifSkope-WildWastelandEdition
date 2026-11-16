@@ -16,6 +16,7 @@
 // the resolve's march / history swapped. Last line `VOLSKYVIEW GATE OK|FAILED` or `CLOUDVIEW GATE OK|FAILED`.
 #define WW_VKPRESENT_NO_QT
 #include "../../src/features/vkframe/vkpresent.cpp"
+#include "../../src/features/clouds/cloudinshare.h"  // lane VKCLOUD10: the app's own owner calls for the cloud inputs
 
 #include <GL/gl.h>
 #include <algorithm>
@@ -131,6 +132,38 @@ struct GlA
 	void( WINAPI * glGetTexParameterfv )( GLenum, GLenum, GLfloat * ) = nullptr;  // L8 term 3: csmMap's border
 };
 GlA ga;
+
+// lane VKCLOUD10: the GL functions cloudinshare.h's owner calls use (the app hands Qt's), filled by glN()
+struct GlN
+{
+	void( WINAPI * glGenTextures )( GLsizei, GLuint * ) = nullptr;
+	void( WINAPI * glDeleteTextures )( GLsizei, const GLuint * ) = nullptr;
+	void( WINAPI * glBindTexture )( GLenum, GLuint ) = nullptr;
+	void( WINAPI * glPixelStorei )( GLenum, GLint ) = nullptr;
+	void( WINAPI * glTexParameteri )( GLenum, GLenum, GLint ) = nullptr;
+	void( WINAPI * glTexImage2D )( GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void * ) = nullptr;
+	void( WINAPI * glTexImage3D )( GLenum, GLint, GLint, GLsizei, GLsizei, GLsizei, GLint, GLenum, GLenum, const void * ) = nullptr;
+	void( WINAPI * glTexSubImage3D )( GLenum, GLint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei, GLenum, GLenum, const void * ) = nullptr;
+	void( WINAPI * glGenerateMipmap )( GLenum ) = nullptr;
+	void( WINAPI * glBindFramebuffer )( GLenum, GLuint ) = nullptr;
+	void( WINAPI * glFramebufferTexture2D )( GLenum, GLenum, GLenum, GLuint, GLint ) = nullptr;
+};
+GlN glN()
+{
+	GlN n;
+	n.glGenTextures = ::glGenTextures;
+	n.glDeleteTextures = ::glDeleteTextures;
+	n.glBindTexture = ::glBindTexture;
+	n.glPixelStorei = ::glPixelStorei;
+	n.glTexParameteri = ::glTexParameteri;
+	n.glTexImage2D = ::glTexImage2D;
+	n.glTexImage3D = f.texImage3D;
+	n.glTexSubImage3D = f.texSubImage3D;
+	n.glGenerateMipmap = f.generateMipmap;
+	n.glBindFramebuffer = f.bindFramebuffer;
+	n.glFramebufferTexture2D = f.framebufferTexture2D;
+	return n;
+}
 
 template <class P> bool load( P & p, const char * n )
 {
@@ -1339,6 +1372,253 @@ int main( int argc, char ** argv )
 				ok = ok && redClear;
 				tex[k].gl = own;
 				WwVkPresent::sharedTargetDrop( kS );
+			}
+			// lane VKCLOUD10: the density inputs (cvShape, cvDetail, cvMap) made as the app makes them: cloudinshare.h's ensureVol /
+			// ensureMap, want true (shared targets, read in place) vs want false (GL's own names, copied). Bars: every level of each
+			// input EXACT vs the fixture's; GL's march on either set EXACT vs GL's on the fixture; Vulkan's outputs on the shared set
+			// EXACT vs on the plain set, and the plain arm's rules vs GL; copies: on a run that moved sharedGen the shared run makes 3
+			// fewer (noise + map), on a steady run 1 fewer (the map: the still noise is not recopied there either way), and the plain
+			// gen-moved run makes 2 more than its steady one, 3 with cvBlue (proof the gen moved); inPlace names exactly the 3. A remake after a drop
+			// (a present shutdown) is EXACT again. Reds, each must FAIL against the plain-set reference: never shared (copies),
+			// a noise remake not filled, a map remake not attached to the FBO the map draws into, a map remake not drawn again. The
+			// shared memory is cleared to 255 / 1.0 before each drop so reused memory cannot pass a red.
+			{
+				using ClearTex = void( WINAPI * )( GLuint, GLint, GLenum, GLenum, const void * );
+				using BlitFb = void( WINAPI * )( GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLbitfield, GLenum );
+				const ClearTex clearTex = reinterpret_cast<ClearTex>( glProc( "glClearTexImage" ) );
+				const BlitFb blit = reinterpret_cast<BlitFb>( glProc( "glBlitFramebuffer" ) );
+				if ( !clearTex || !blit )
+					return fatal( "glClearTexImage / glBlitFramebuffer" );
+				namespace IS = WwCloudInShare;
+				const unsigned all3 = WwVkPresent::kInShape | WwVkPresent::kInDetail | WwVkPresent::kInMap;
+				GlN gn = glN();
+				static char inKeys[4][4];  // shape, detail, map, the sharedGen mover
+				const std::uintptr_t kIn = reinterpret_cast<std::uintptr_t>( &inKeys[a][0] );
+				const size_t mk = fly ? 2 : 0;
+				const int nS = tex[sh].w, nD = tex[sh + 1].w, nM = tex[mk].w;
+				const std::string bS = readFile( jd + "/" + tex[sh].file ), bD = readFile( jd + "/" + tex[sh + 1].file );
+				GLenum mFmt = 0, mPf = 0, mTy = 0;
+				int mBpp = 0;
+				if ( names[mk] != "cvMap" || tex[mk].h != nM || !fmtOf( tex[mk].fmt, mFmt, mPf, mTy, mBpp ) || bS.size() != static_cast<size_t>( nS ) * nS * nS
+					|| bD.size() != static_cast<size_t>( nD ) * nD * nD )
+					return fatal( "the INPUTS fixture" );
+				const GLuint own[3] = { tex[sh].gl, tex[sh + 1].gl, tex[mk].gl };
+				GLuint rFb = 0, sFb = 0, pFb = 0, uFb = 0;
+				for ( GLuint * b : { &rFb, &sFb, &pFb, &uFb } )
+					f.genFramebuffers( 1, b );
+				f.bindFramebuffer( fFb, rFb );
+				f.framebufferTexture2D( fFb, fCol0, GL_TEXTURE_2D, own[2], 0 );
+				f.bindFramebuffer( fFb, 0 );
+				struct InSet
+				{
+					WwCloudInShare::Vol s, d, m;
+					int size = 0;
+					GLuint fb = 0;
+				};
+				InSet pl, shd, un;
+				pl.fb = pFb;
+				shd.fb = sFb;
+				un.fb = uFb;
+				// make (or keep) a set; fill = draw the map again after a remake (cloudmap.cpp's buildMap: here a blit of the fixture's)
+				auto make = [&]( InSet & z, bool want, unsigned redS, unsigned redM, bool fill ) -> bool {
+					const bool s = IS::ensureVol( &gn, z.s, kIn, reinterpret_cast<const std::uint8_t *>( bS.data() ), nS, want, "cvShape", redS );
+					const bool d = IS::ensureVol( &gn, z.d, kIn + 1, reinterpret_cast<const std::uint8_t *>( bD.data() ), nD, want, "cvDetail", redS );
+					bool remade = false;
+					const bool m = IS::ensureMap( &gn, z.m, z.size, z.fb, kIn + 2, nM, mFmt, want, remade, redM );
+					if ( remade && fill ) {
+						f.bindFramebuffer( 0x8CA8, rFb );  // READ
+						f.bindFramebuffer( 0x8CA9, z.fb );  // DRAW
+						blit( 0, 0, nM, nM, 0, 0, nM, nM, GL_COLOR_BUFFER_BIT, GL_NEAREST );
+					}
+					f.bindFramebuffer( fFb, 0 );
+					return s && d && m && glGetError() == GL_NO_ERROR;
+				};
+				auto use = [&]( const InSet & z ) {
+					tex[sh].gl = z.s.tex;
+					tex[sh + 1].gl = z.d.tex;
+					tex[mk].gl = z.m.tex;
+				};
+				// every level of the set's three inputs vs the fixture's own
+				auto sameLevels = [&]( const InSet & z, size_t & d, size_t & all ) {
+					d = all = 0;
+					glPixelStorei( GL_PACK_ALIGNMENT, 1 );
+					for ( int i = 0; i < 3; i++ ) {
+						const GLuint y0 = i == 0 ? z.s.tex : i == 1 ? z.d.tex : z.m.tex;
+						const GLenum tg = i < 2 ? fT3D : GLenum( GL_TEXTURE_2D );
+						const int n = i == 0 ? nS : i == 1 ? nD : nM, levels = i < 2 ? IS::chainLevels( n ) : 1;
+						for ( int l = 0; l < levels; l++ ) {
+							const int m = std::max( n >> l, 1 );
+							const size_t bytes = i < 2 ? static_cast<size_t>( m ) * m * m : static_cast<size_t>( m ) * m * mBpp;
+							std::vector<unsigned char> x( bytes ), y( bytes );
+							for ( int side = 0; side < 2; side++ ) {
+								glBindTexture( tg, side ? y0 : own[i] );
+								if ( i < 2 )
+									glGetTexImage( tg, l, fRed, GL_UNSIGNED_BYTE, side ? y.data() : x.data() );
+								else
+									glGetTexImage( tg, 0, mPf, mTy, side ? y.data() : x.data() );
+							}
+							for ( size_t j = 0; j < bytes; j++ )
+								d += x[j] != y[j];
+							all += bytes;
+						}
+					}
+					glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+					return glGetError() == GL_NO_ERROR;
+				};
+				auto glMarch = [&]( const InSet & z ) {
+					use( z );
+					bindMarch( s4 );
+					draw( fbM, mw, mh, pM );
+					f.bindFramebuffer( fFb, 0 );
+					return compareRel( gMC, readRgba16f( mC, mw, mh ) );
+				};
+				struct InOut
+				{
+					bool ran = false;
+					int copies = 0;
+					unsigned in = 0;
+					std::vector<float> mc, md, hc, hd;
+				};
+				auto run = [&]( bool gen ) {
+					if ( gen ) {  // a made and dropped target moves sharedGen: the next run recopies every still input it copies
+						GLuint t = 0;
+						std::string w;
+						WwVkPresent::sharedTarget( kIn + 3, 0, 4, 4, 1, fRgba16f, t, w );
+						WwVkPresent::sharedTargetDrop( kIn + 3 );
+					}
+					InOut o;
+					const int c0 = fx().st[1].copies;
+					fx().st[1].inPlace = 0;
+					o.ran = runVk( 0, false );
+					o.copies = fx().st[1].copies - c0;
+					o.in = fx().st[1].inPlace;
+					if ( o.ran ) {
+						o.mc = readRgba16f( sMC, mw, mh );
+						o.md = readRg32f( sMD, mw, mh );
+						o.hc = readRgba16f( sHC[0], hw, hh );
+						o.hd = readRg32f( sHD[0], hw, hh );
+					}
+					return o;
+				};
+				auto sameV = [&]( const std::vector<float> & p, const std::vector<float> & q ) {
+					const Rel r = compareRel( p, q );
+					return r.n > 0 && r.differ == 0;
+				};
+				auto same = [&]( const InOut & p, const InOut & q ) {
+					return p.ran && q.ran && sameV( p.mc, q.mc ) && sameV( p.md, q.md ) && sameV( p.hc, q.hc ) && sameV( p.hd, q.hd );
+				};
+				// the fixture
+				bool made = make( pl, false, 0, 0, true ) && make( shd, true, 0, 0, true );
+				made = made && shd.s.shared && shd.d.shared && shd.m.shared && !pl.s.shared && !pl.d.shared && !pl.m.shared;
+				size_t dP = 0, aP = 0, dS = 0, aS = 0;
+				const bool read = sameLevels( pl, dP, aP ) && sameLevels( shd, dS, aS );
+				const Rel gp = glMarch( pl ), gs = glMarch( shd );
+				const bool fixture = made && read && aP > 0 && dP == 0 && dS == 0 && gp.n > 0 && gp.differ == 0 && gs.n > 0 && gs.differ == 0;
+				std::printf( "%s %s INPUTS fixture: shared made %d; every level vs the fixture's: plain %zu of %zu bytes differ, shared %zu of %zu; "
+					"GL's march on the plain set %zu of %zu values differ, on the shared set %zu of %zu: %s\n", gTag, var, int( made ), dP, aP, dS,
+					aS, gp.differ, gp.n, gs.differ, gs.n, fixture ? "EXACT" : "FAIL" );
+				ok = ok && fixture;
+				// the runs: warm, gen-moved, steady; plain set first
+				use( pl );
+				run( true );
+				const InOut pG = run( true ), pS = run( false );
+				use( shd );
+				run( true );
+				const InOut sG = run( true ), sS = run( false );
+				const bool exact = same( pG, sG ) && same( pS, sS );
+				std::printf( "%s %s INPUTS outputs on the shared set vs on the plain set (gen-moved and steady runs; march colour, depth, hist[0] "
+					"colour, depth): %s\n", gTag, var, exact ? "EXACT" : "FAIL" );
+				ok = ok && exact;
+				if ( sS.ran ) {
+					ok = rel( "INPUTS march colour", gMC, sS.mc, false ) && ok;
+					ok = rel( "INPUTS march depth", gMD, sS.md, false ) && ok;
+					ok = rel( "INPUTS hist[0] colour", gHC, sS.hc, false ) && ok;
+					ok = rel( "INPUTS hist[0] depth", gHD, sS.hd, false ) && ok;
+				}
+				const int stills = accum ? 3 : 2;  // cvShape, cvDetail (+ cvBlue): recopied only when sharedGen moved
+				const bool genMoved = pG.copies == pS.copies + stills;
+				const bool fewer = genMoved && pS.copies > 0 && sG.copies == pG.copies - 3 && sS.copies == pS.copies - 1;
+				std::printf( "%s %s INPUTS copies a run: plain gen-moved %d, steady %d (want steady + %d); shared gen-moved %d (want plain - 3), "
+					"steady %d (want plain - 1): %s\n", gTag, var, pG.copies, pS.copies, stills, sG.copies, sS.copies, fewer ? "OK" : "FAIL" );
+				ok = ok && fewer;
+				const bool named = pG.in == 0 && pS.in == 0 && sG.in == ( all3 ) && sS.in == ( all3 );
+				std::printf( "%s %s INPUTS read in place: plain %s, shared %s (want none / cvShape cvDetail cvMap): %s\n", gTag, var,
+					IS::inPlaceNames( pS.in ).c_str(), IS::inPlaceNames( sS.in ).c_str(), named ? "OK" : "FAIL" );
+				ok = ok && named;
+				// a drop (a present shutdown): the shared memory spoiled first, so a remake that keeps it cannot pass
+				const unsigned char full = 255, full4[4] = { 255, 255, 255, 255 };
+				const float one4[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+				auto spoil = [&]() {
+					for ( int l = 0; l < IS::chainLevels( nS ); l++ )
+						clearTex( shd.s.tex, l, fRed, GL_UNSIGNED_BYTE, &full );
+					for ( int l = 0; l < IS::chainLevels( nD ); l++ )
+						clearTex( shd.d.tex, l, fRed, GL_UNSIGNED_BYTE, &full );
+					clearTex( shd.m.tex, 0, mPf, mTy, mTy == GL_FLOAT ? static_cast<const void *>( one4 ) : static_cast<const void *>( full4 ) );
+					for ( int i = 0; i < 3; i++ )
+						WwVkPresent::sharedTargetDrop( kIn + i );
+				};
+				spoil();
+				const bool stale = IS::mapStale( shd.m, kIn + 2, true );
+				const bool remake = make( shd, true, 0, 0, true ) && shd.s.shared && shd.d.shared && shd.m.shared;
+				use( shd );
+				const InOut g = run( false );
+				const bool green = stale && remake && same( sS, g ) && g.copies == sG.copies && g.in == all3;
+				std::printf( "%s %s INPUTS remake after a drop: map stale %d, outputs %s, %d copies (want %d), read in place %s: %s\n", gTag, var,
+					int( stale ), same( sS, g ) ? "EXACT" : "differ", g.copies, sG.copies, IS::inPlaceNames( g.in ).c_str(), green ? "OK" : "FAIL" );
+				ok = ok && green;
+				// the reds
+				auto restore = [&]() {
+					for ( int i = 0; i < 3; i++ )
+						WwVkPresent::sharedTargetDrop( kIn + i );
+					return make( shd, true, 0, 0, true );
+				};
+				auto judge = [&]( const char * what, const InOut & r ) {
+					const Rel c = compareRel( pS.mc, r.ran ? r.mc : std::vector<float>() ), h = compareRel( pS.hc, r.ran ? r.hc : std::vector<float>() );
+					const bool redFails = !same( pS, r );
+					std::printf( "%s RED %s %s INPUTS %s (%s; vs the plain set: march %zu of %zu values differ, hist %zu; must FAIL)\n", gTag,
+						redFails ? "FAIL" : "EXACT", var, what, r.ran ? "ran" : "did not run", c.differ, c.n, h.differ );
+					return redFails;
+				};
+				{
+					const bool m = make( un, true, IS::kRedUnshared, IS::kRedUnshared, true );
+					use( un );
+					const InOut r = run( true );
+					const bool redFails = m && ( !r.ran || r.copies != sG.copies || r.in != all3 );
+					std::printf( "%s RED %s %s INPUTS never shared (%s; %d copies, shared %d, plain %d; read in place %s; must FAIL)\n", gTag,
+						redFails ? "FAIL" : "OK", var, r.ran ? "ran" : "did not run", r.copies, sG.copies, pG.copies, IS::inPlaceNames( r.in ).c_str() );
+					ok = ok && redFails;
+					for ( GLuint * t : { &un.s.tex, &un.d.tex, &un.m.tex } )
+						glDeleteTextures( 1, t );
+				}
+				{
+					spoil();
+					const bool m = make( shd, true, IS::kRedStale, 0, true );
+					use( shd );
+					ok = judge( "a noise remake not filled", run( false ) ) && m && ok;
+					ok = restore() && ok;
+				}
+				{
+					spoil();
+					const bool m = make( shd, true, 0, IS::kRedStale, true );
+					use( shd );
+					ok = judge( "a map remake not attached to the map's FBO", run( false ) ) && m && ok;
+					ok = restore() && ok;
+				}
+				{
+					spoil();
+					const bool m = make( shd, true, 0, 0, false );
+					use( shd );
+					ok = judge( "a map remake not drawn again", run( false ) ) && m && ok;
+					ok = restore() && ok;
+				}
+				tex[sh].gl = own[0];
+				tex[sh + 1].gl = own[1];
+				tex[mk].gl = own[2];
+				for ( int i = 0; i < 4; i++ )
+					WwVkPresent::sharedTargetDrop( kIn + i );
+				for ( GLuint * t : { &pl.s.tex, &pl.d.tex, &pl.m.tex } )
+					glDeleteTextures( 1, t );
+				f.bindFramebuffer( fFb, 0 );
 			}
 			for ( std::uintptr_t k : { kM, kM + 1, kH0, kH0 + 1, kH1, kH1 + 1 } )
 				WwVkPresent::sharedTargetDrop( k );

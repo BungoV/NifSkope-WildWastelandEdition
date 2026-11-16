@@ -12,6 +12,10 @@ Reads src/features/clouds/cloudfly.cpp. Checks (all on the base text):
   5 (lane VKCLOUD9) the full build crosses once: the build loop hands runPass the queue (`p.nz, &q, nullptr, &qWhy )` once),
     vkRun queues (`queue->push_back( t );` once, inside vkRun), the one crossing `WwVkPresent::flyBakeRunN(` once, and the
     flush after the loop (`flyQueueRun( q, qWhy );` once).
+  6 (lane VKCLOUD10) the density inputs: cloudvol.cpp calls `WwCloudInShare::ensureVol(` twice and no upload3d, cloudmap.cpp
+    `WwCloudInShare::ensureMap(` and `WwCloudInShare::mapStale(` once and drops a shared map with `sharedTargetDrop( mapKey() )`;
+    both files gate the share on `shareWanted( "WW_VKVIEW_CLOUDIN_RED" )`; cloudvol.cpp's and cloudfly.cpp's `vk` lines fold
+    and name the inputs read in place (`WwCloudInShare::inPlaceNames( sum.inPlace )`).
 Reds (in memory, never on disk), each must FAIL:
   glwrites  the route's `false` (GL after Vulkan) replaced by `true`;
   unguarded a `quad( r );` added before the route call (a GL draw outside the refusal path);
@@ -19,6 +23,8 @@ Reds (in memory, never on disk), each must FAIL:
   nowant    `bool wantVk = g.shared` replaced by `bool wantVk = true` (Vulkan tried on GL's own volumes);
   perpass   (lane VKCLOUD9) the build loop without the queue (a crossing a pass);
   noflush   (lane VKCLOUD9) the flush after the loop dropped (the queued passes never drawn).
+  noensure / inkey / nostale / mapdelete / nosay / flynosay  (lane VKCLOUD10, check 6): a noise made by the old upload3d,
+            the map's red key dropped, the stale-map rebuild dropped, the shared map deleted by GL, either line unnamed.
 Last line `FLYBAKESITE OK` or `FLYBAKESITE FAILED`.
 """
 import os
@@ -77,11 +83,58 @@ def check(text, label):
     return ok
 
 
+IN_KEY = 'shareWanted( "WW_VKVIEW_CLOUDIN_RED" )'
+SAY = 'WwCloudInShare::inPlaceNames( sum.inPlace )'
+FOLD = 'sum.inPlace |= st.inPlace;'
+
+
+def check_in(vol, cmap, fly, label):
+    """lane VKCLOUD10, check 6: the clouds' density inputs are made through cloudinshare.h (shared while the view is on
+    Vulkan), a shared map is dropped (never deleted) and rebuilt when stale, and both `vk` lines name the inputs read in place."""
+    n = {
+        'vol ensureVol': vol.count('WwCloudInShare::ensureVol('),
+        'vol key': vol.count(IN_KEY),
+        'vol upload3d': vol.count('upload3d'),
+        'vol fold': vol.count(FOLD),
+        'vol say': vol.count(SAY),
+        'map ensureMap': cmap.count('WwCloudInShare::ensureMap('),
+        'map key': cmap.count(IN_KEY),
+        'map stale': cmap.count('WwCloudInShare::mapStale('),
+        'map drop': cmap.count('sharedTargetDrop( mapKey() )'),
+        'fly fold': fly.count(FOLD),
+        'fly say': fly.count(SAY),
+    }
+    want = {'vol ensureVol': 2, 'vol upload3d': 0}
+    ok = all(v == want.get(k, 1) for k, v in n.items())
+    print('FLYBAKESITE %s inputs: %s: %s' % (label, ', '.join('%s %d' % kv for kv in n.items()), 'OK' if ok else 'FAIL'))
+    return ok
+
+
 def main():
     tree = sys.argv[1]
     path = os.path.join(tree, 'src', 'features', 'clouds', 'cloudfly.cpp')
     with open(path, 'r', encoding='utf-8', errors='replace', newline='') as fh:
         text = fh.read()
+    src = {}
+    for name in ('cloudvol.cpp', 'cloudmap.cpp'):
+        with open(os.path.join(tree, 'src', 'features', 'clouds', name), 'r', encoding='utf-8', errors='replace', newline='') as fh:
+            src[name] = fh.read()
+    vol, cmap = src['cloudvol.cpp'], src['cloudmap.cpp']
+    base_in = check_in(vol, cmap, text, 'base')
+    reds_in = [
+        ('noensure', (vol.replace('WwCloudInShare::ensureVol(', 'upload3d(', 1), cmap, text)),
+        ('inkey', (vol, cmap.replace(IN_KEY, 'shareWanted( nullptr )'), text)),
+        ('nostale', (vol, cmap.replace('WwCloudInShare::mapStale(', 'false && (', 1), text)),
+        ('mapdelete', (vol, cmap.replace('sharedTargetDrop( mapKey() )', 'glDeleteTextures( 1, &s.tgt.tex )'), text)),
+        ('nosay', (vol.replace(SAY, 'std::string( "?" )'), cmap, text)),
+        ('flynosay', (vol, cmap, text.replace(SAY, 'std::string( "?" )'))),
+    ]
+    fired_in = 0
+    for name, (v, m, t) in reds_in:
+        moved = (v, m, t) != (vol, cmap, text)
+        bit = moved and not check_in(v, m, t, 'red ' + name)
+        fired_in += bit
+        print('FLYBAKESITE red %s: %s' % (name, 'FAIL (fired)' if bit else ('PASS (dead)' if moved else 'TESTS NOTHING (no text replaced)')))
     base = check(text, 'base')
     reds = [
         ('glwrites', text.replace('wwFlyBakeRoute( wantVk, false,', 'wwFlyBakeRoute( wantVk, true,')),
@@ -98,8 +151,8 @@ def main():
         bit = moved and not r
         fired += bit
         print('FLYBAKESITE red %s: %s' % (name, 'FAIL (fired)' if bit else ('PASS (dead)' if moved else 'TESTS NOTHING (no text replaced)')))
-    ok = base and fired == len(reds)
-    print('FLYBAKESITE reds fired %d of %d' % (fired, len(reds)))
+    ok = base and fired == len(reds) and base_in and fired_in == len(reds_in)
+    print('FLYBAKESITE reds fired %d of %d, inputs reds fired %d of %d' % (fired, len(reds), fired_in, len(reds_in)))
     print('FLYBAKESITE %s' % ('OK' if ok else 'FAILED'))
     return 0 if ok else 1
 
