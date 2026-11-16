@@ -7,6 +7,8 @@
 #include "features/post/gametaa.h"
 #include "features/vkframe/vkpresent.h"	// lane VKFAR7: pass 4 on the Vulkan view
 #include "features/vkframe/vktaareactive.h"
+#include "features/vkframe/vkobjvel.h"	// lane VKOBJ12: step 3 on the present device
+#include "features/vkframe/vkcamvel.h"	// lane VKOBJ18: step 2 on the present device
 #include "features/particles/glparticles.h"
 #include "gl/glproperty.h"
 #include "gl/glscene.h"
@@ -144,6 +146,13 @@ struct InGpu
 	GLenum dsFormat = 0;
 	GLbitfield depthBits = 0;
 	bool ok = false;	// this frame's textures were drawn
+	bool vk = false, vkFailed = false;	// lane VKOBJ11: vel / mask / depth are shared targets; a share refused at this size
+	std::uintptr_t vkKey = 0;
+	struct CamVelTally	// lane VKOBJ18: step 2's route, this renderer's own (the `vk camvel:` line)
+	{
+		qint64 runs = 0, gl = 0, refusals = 0, passes = 0;
+		QString said;
+	} cv;
 	GLuint q[4] = { 0, 0, 0, 0 };	// two begin/end timestamp pairs
 	bool qPending[2] = { false, false };
 	int qNext = 0;
@@ -244,6 +253,12 @@ GLuint makeTex( Renderer * r, GLenum internal, GLenum format, GLenum type, int w
 
 void freeTex( Renderer * r, InGpu & g )
 {
+	if ( g.vk ) {	// lane VKOBJ11: the shared names go with their keys (GL's names too)
+		for ( std::uintptr_t k = 0; k < 3; k++ )
+			WwVkPresent::sharedTargetDrop( g.vkKey + k );
+		g.vel = g.mask = g.depth = 0;
+		g.vk = false;
+	}
 	for ( GLuint * t : { &g.vel, &g.mask, &g.depth } ) {
 		if ( *t )
 			r->fn->glDeleteTextures( 1, t );
@@ -534,16 +549,64 @@ void wwTaaInputsPass( Scene * scene )
 	}
 
 	InGpu & g = gpus()[r];
-	if ( !g.fbo || g.w != W || g.h != H || g.dsFormat != dsFormat ) {
+	/* lane VKOBJ11 (item 2 step 2): while the Vulkan view is on, vel / mask / depth are shared targets made on the present
+	 * device (the objvel route draws step 3 into them; not wired yet: GL draws every step). A refused share leaves GL's own
+	 * at that size (said once). Red WW_VKVIEW_OBJVEL_RED=1: GL's own. The view off makes the old calls. */
+	const bool vkTry = WwVkPresent::shareWanted( "WW_VKVIEW_OBJVEL_RED" )
+		&& !( g.vkFailed && g.w == W && g.h == H && g.dsFormat == dsFormat );
+	const bool vkGone = g.vk && !WwVkPresent::sharedTargetIs( g.vkKey, g.vel );
+	if ( !g.fbo || g.w != W || g.h != H || g.dsFormat != dsFormat || g.vk != vkTry || vkGone ) {
+		if ( vkGone )
+			g.vel = g.mask = g.depth = 0;	// a present shutdown took them
 		freeTex( r, g );
 		if ( !g.fbo ) {
 			fn->glGenFramebuffers( 1, &g.fbo );
 			fn->glGenFramebuffers( 1, &g.camFbo );
 			fn->glGenQueries( 4, g.q );
 		}
-		g.vel = makeTex( r, GL_RG16F, GL_RG, GL_FLOAT, W, H );
-		g.mask = makeTex( r, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, W, H );
-		g.depth = makeTex( r, dsFormat, dsFmt, dsType, W, H );
+		if ( vkTry ) {
+			static std::uintptr_t nextKey = 0x54490000u;	// "TI": 16 keys a renderer
+			if ( !g.vkKey ) {
+				g.vkKey = nextKey;
+				nextKey += 16;
+			}
+			const GLenum fmts[3] = { GL_RG16F, GL_RGBA8, dsFormat };
+			unsigned t[3] = {};
+			std::string why;
+			bool shared = true;
+			for ( int i = 0; i < 3 && shared; i++ )
+				shared = WwVkPresent::sharedTarget( g.vkKey + std::uintptr_t( i ), 0, W, H, 1, fmts[i], t[i], why );
+			if ( shared ) {
+				g.vel = t[0];
+				g.mask = t[1];
+				g.depth = t[2];
+				// the shared names come NEAREST with GL's default wrap: makeTex's state
+				for ( int i = 0; i < 3; i++ ) {
+					fn->glBindTexture( GL_TEXTURE_2D, t[i] );
+					fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+					fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+					fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+					fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+					fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+					if ( i == 2 )
+						fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE );
+				}
+				fn->glBindTexture( GL_TEXTURE_2D, 0 );
+				g.vk = true;
+				g.vkFailed = false;
+			} else {
+				for ( std::uintptr_t k = 0; k < 3; k++ )
+					WwVkPresent::sharedTargetDrop( g.vkKey + k );
+				g.vkFailed = true;
+				qInfo().noquote() << QStringLiteral( "taa inputs: %1x%2 targets stay GL's own (shared target refused: %3)" ).arg( W ).arg( H )
+					.arg( QString::fromStdString( why ) );
+			}
+		}
+		if ( !g.vk ) {
+			g.vel = makeTex( r, GL_RG16F, GL_RG, GL_FLOAT, W, H );
+			g.mask = makeTex( r, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, W, H );
+			g.depth = makeTex( r, dsFormat, dsFmt, dsType, W, H );
+		}
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.fbo );
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g.vel, 0 );
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, g.mask, 0 );
@@ -633,19 +696,66 @@ void wwTaaInputsPass( Scene * scene )
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.camFbo );
 		const GLenum one = GL_COLOR_ATTACHMENT0;
 		fn->glDrawBuffers( 1, &one );
-		auto prog = r->useProgram( "game_taa_mv.prog" );
-		if ( !prog ) {
-			ok = false;
-		} else {
-			fn->glActiveTexture( GLenum( GL_TEXTURE0 + kUnitA ) );
-			fn->glBindTexture( GL_TEXTURE_2D, g.depth );
-			prog->uni1i( "depthTex", kUnitA );
-			prog->uni4m( "reproj", toMatrix4( reproj ) );
-			prog->uni2f( "jitterNdc", jx, jy );
-			prog->uni2f( "invSize", 1.0f / float( W ), 1.0f / float( H ) );
-			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &quadAttrs, idx );
-			r->stopProgram();
-			fn->glBindTexture( GL_TEXTURE_2D, 0 );
+		/* lane VKOBJ18: while vel / depth are shared targets (g.vk) the quad runs on the present device (vkcamvel.inc, the
+		 * twins of cell_ao.vert + game_taa_mv.frag; tests/vkframe/camveldraw.sh); GL draws it only when Vulkan did not.
+		 * Red WW_VKVIEW_CAMVEL_RED=1: GL's own. */
+		WW_SWITCH_STATIC( bool, camVelRed, [] {
+			const QString v = QString::fromLatin1( wwEnv( "WW_VKVIEW_CAMVEL_RED" ) ).trimmed();
+			return !v.isEmpty() && v != QLatin1String( "0" );
+		}() );
+		std::string cvWhy = g.vk ? std::string() : std::string( "the view off" );
+		bool cvDrew = false;
+		if ( g.vk ) {
+			if ( camVelRed )
+				cvWhy = "red WW_VKVIEW_CAMVEL_RED";
+			else if ( vp[0] != 0 || vp[1] != 0 )
+				cvWhy = "a viewport origin other than 0, 0";
+			else
+				cvWhy = WwVkPresent::camVelRefusal();
+			if ( cvWhy.empty() ) {
+				WwVkPresent::CamVelRun cv;
+				std::memcpy( cv.reproj, s.camReproj.data(), sizeof( cv.reproj ) );	// as uni4m sends it
+				cv.jitterNdc[0] = jx;
+				cv.jitterNdc[1] = jy;
+				cv.invSize[0] = 1.0f / float( W );
+				cv.invSize[1] = 1.0f / float( H );
+				cv.velKey = g.vkKey;
+				cv.depthKey = g.vkKey + 2;
+				cv.w = W;
+				cv.h = H;
+				cvDrew = WwVkPresent::camVelRun( cv, cvWhy );
+			}
+			if ( !cvDrew )
+				WwVkPresent::camVelOnGl( cvWhy.c_str() );
+		}
+		if ( !cvDrew ) {
+			auto prog = r->useProgram( "game_taa_mv.prog" );
+			if ( !prog ) {
+				ok = false;
+			} else {
+				fn->glActiveTexture( GLenum( GL_TEXTURE0 + kUnitA ) );
+				fn->glBindTexture( GL_TEXTURE_2D, g.depth );
+				prog->uni1i( "depthTex", kUnitA );
+				prog->uni4m( "reproj", toMatrix4( reproj ) );
+				prog->uni2f( "jitterNdc", jx, jy );
+				prog->uni2f( "invSize", 1.0f / float( W ), 1.0f / float( H ) );
+				r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &quadAttrs, idx );
+				r->stopProgram();
+				fn->glBindTexture( GL_TEXTURE_2D, 0 );
+			}
+		}
+		// the route's line: on a change of route or reason, and every 600th pass with the counts
+		InGpu::CamVelTally & t = g.cv;
+		t.passes++;
+		( cvDrew ? t.runs : t.gl )++;
+		if ( g.vk && !cvDrew )
+			t.refusals++;
+		const QString key = cvDrew ? QStringLiteral( "vulkan" ) : QStringLiteral( "gl: " ) + QString::fromStdString( cvWhy );
+		if ( g.vk && ( key != t.said || t.passes % 600 == 0 ) ) {	// the view off: no line (as objvel's)
+			static_cast<void>( WwVkPresent::takeCamVelStat() );
+			t.said = key;
+			qInfo().noquote() << QStringLiteral( "vk camvel: runs=%1 gl=%2 refusals=%3%4" ).arg( t.runs ).arg( t.gl )
+				.arg( t.refusals ).arg( cvDrew ? QString() : QStringLiteral( " glWhy=" ) + QString::fromStdString( cvWhy ) );
 		}
 	}
 
@@ -683,6 +793,24 @@ void wwTaaInputsPass( Scene * scene )
 			const float viewSc = scene->view.scale != 0.0f ? scene->view.scale : 1.0f;
 			std::vector<Vector3> skinN, skinT, skinB;
 			int nCov = 0, nFall = 0, nSoft = 0, nVp = 0;
+			/* lane VKOBJ12: while the targets are shared (g.vk), arm 0 runs the same per-mover code but collects each mover's
+			 * draws (GL's arrays and uniform values) instead of drawing, then tries the WHOLE list on Vulkan (one crossing, GL
+			 * waits it). Any refusal draws nothing there and arm 1 is GL's loop, unchanged (the counters start again). The
+			 * mover loop below keeps its indent inside the arms. */
+			WwVkPresent::ObjVelRun vkRun;
+			std::string vkWhy;
+			if ( g.vk && ( vp[0] != 0 || vp[1] != 0 ) )
+				vkWhy = "a viewport origin other than 0, 0";
+			else if ( g.vk )
+				vkWhy = WwVkPresent::objVelRefusal();
+			const bool vkArm = g.vk && vkWhy.empty();
+			if ( g.vk && !vkArm )
+				WwVkPresent::objVelOnGl( vkWhy.c_str() );
+			bool vkDrew = false;
+			for ( int arm = vkArm ? 0 : 1; arm < 2 && !vkDrew; arm++ ) {
+			atTally = AlphaBgsmTally();
+			nCov = nFall = nSoft = nVp = 0;
+			drawnObj = 0;
 			for ( const Mover & m : movers ) {
 				const Shape * sh = m.sh;
 				const Matrix4 mv = sh->viewTrans().toMatrix4();
@@ -698,6 +826,11 @@ void wwTaaInputsPass( Scene * scene )
 				AlphaBgsmTally::note( atTally, sh->wwAlphaTested(), da.test );
 				const bool blended = !blendRed && sh->wwBlendedAsDrawn();
 				const bool based = ( da.test || blended ) && bindBase( prog, sh );
+				GLint vkBase = 0;	// lane VKOBJ12: the texture bindBase bound on BaseMap's unit (arm 0)
+				if ( arm == 0 && based ) {
+					fn->glActiveTexture( GL_TEXTURE0 );
+					fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &vkBase );
+				}
 				const bool at = da.test && based;
 				prog->uni1i( "alphaTest", at ? 1 : 0 );
 				/* lane TREELEAF3: an effect shape tests its colour pass's composed alpha (src/gl/wwfxcov.h: baseColor.a^2,
@@ -746,6 +879,63 @@ void wwTaaInputsPass( Scene * scene )
 					wwCellGrassUniforms( scene, sh->id() );	// the fade and the wind's previous + current phase
 				else
 					prog->uni3f( "wwGrassFade", 0.0f, 0.0f, 0.0f );
+				if ( arm == 0 ) {
+					// lane VKOBJ12: this mover's draws for the Vulkan route (the arrays and values GL's draws below take)
+					WwVkPresent::ObjVelDraw d;
+					const qsizetype nvA = sh->verts.size();
+					if ( m.mode == 1 ) {
+						const std::vector<Vector3> & cur = m.rec->curSkin;
+						const std::vector<Vector3> & prv = m.rec->prevSkin.size() == cur.size() ? m.rec->prevSkin : cur;
+						d.pos = qsizetype( cur.size() ) >= nvA && nvA > 0 ? &( cur.front()[0] ) : nullptr;
+						d.prev = d.pos ? &( prv.front()[0] ) : nullptr;
+						d.color = vtxA && sh->colors.size() >= nvA ? &( sh->colors.constFirst()[0] ) : nullptr;
+						d.uv = ( at || cov ) ? &( sh->coords.constFirst().constFirst()[0] ) : nullptr;
+					} else {
+						const float * attrs[16] = {};
+						const std::uint64_t amask = sh->wwVertexAttrs( attrs );
+						if ( !amask ) {	// GL's bindShape draws nothing either
+							nCov += cov ? 1 : 0;
+							drawnObj++;
+							continue;
+						}
+						d.pos = attrs[0];
+						d.color = ( amask & 0xF0ULL ) ? attrs[1] : nullptr;
+						d.uv = ( ( amask >> 28 ) & 15ULL ) ? attrs[7] : nullptr;
+					}
+					d.nv = int( nvA );
+					d.idx = reinterpret_cast<const std::uint16_t *>( sh->triangles.constData() );
+					d.nIdx = int( sh->triangles.size() * 3 );
+					const Matrix4 cj = Pjit * mv;
+					std::memcpy( d.clipJit, cj.data(), sizeof( d.clipJit ) );
+					std::memcpy( d.clipCur, m.rec->curClip.data(), sizeof( d.clipCur ) );
+					std::memcpy( d.clipPrev, m.rec->prevClip.data(), sizeof( d.clipPrev ) );
+					std::memcpy( d.modelView, mv.data(), sizeof( d.modelView ) );
+					std::memcpy( d.normalMatrix, sh->viewTrans().rotation.data(), sizeof( d.normalMatrix ) );
+					d.velMode = m.mode;
+					d.alphaTest = at ? 1 : 0;
+					d.fxMode = fx.mode;
+					d.covMode = cov ? 1 : 0;
+					d.alpha = fx.mult;
+					d.alphaThreshold = fx.threshold;
+					d.covThreshold = kCovThreshold;
+					if ( based ) {
+						const auto * bsp = sh->wwShaderLighting();
+						d.uvScale[0] = bsp->uvScale.x;
+						d.uvScale[1] = bsp->uvScale.y;
+						d.uvOffset[0] = bsp->uvOffset.x;
+						d.uvOffset[1] = bsp->uvOffset.y;
+					}
+					d.baseTex = unsigned( vkBase );
+					vkRun.draws.push_back( d );
+					if ( cov ) {	// pass 1: the reactive mark on the rest of its triangles
+						d.pass = 1;
+						d.covMode = 2;
+						vkRun.draws.push_back( d );
+					}
+					nCov += cov ? 1 : 0;
+					drawnObj++;
+					continue;
+				}
 				const qsizetype nv = sh->verts.size();
 				const bool tbnOk = tbn && sh->norms.size() >= nv && sh->tangents.size() >= nv && sh->bitangents.size() >= nv;
 				if ( m.mode == 1 && tbnOk ) {
@@ -792,6 +982,28 @@ void wwTaaInputsPass( Scene * scene )
 				}
 				nCov += cov ? 1 : 0;
 				drawnObj++;
+			}
+			if ( arm == 0 ) {
+				vkRun.velKey = g.vkKey;
+				vkRun.maskKey = g.vkKey + 1;
+				vkRun.depthKey = g.vkKey + 2;
+				vkRun.w = W;
+				vkRun.h = H;
+				vkDrew = WwVkPresent::objVelRun( vkRun, vkWhy );
+				if ( !vkDrew )
+					WwVkPresent::objVelOnGl( vkWhy.c_str() );
+			}
+			}	// the arms
+			if ( g.vk ) {	// lane VKOBJ12: the route's line (changes only, as the pass's own lines)
+				static_cast<void>( WwVkPresent::takeObjVelStat() );
+				static QString saidVk;
+				const QString c = QStringLiteral( "vk objvel: movers=%1 drawn=%2 gl=%3%4" ).arg( qint64( movers.size() ) )
+					.arg( vkDrew ? drawnObj : 0 ).arg( vkDrew ? 0 : drawnObj )
+					.arg( vkDrew ? QString() : QStringLiteral( " glWhy=" ) + QString::fromStdString( vkWhy ) );
+				if ( c != saidVk ) {
+					saidVk = c;
+					qInfo().noquote() << c;
+				}
 			}
 			AlphaBgsmTally::report( atTally, "taa velocity", qint64( movers.size() ) );
 			// lane TREELEAF4: the census (changes only, as the pass's own line)

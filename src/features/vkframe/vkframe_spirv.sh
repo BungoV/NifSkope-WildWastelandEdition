@@ -287,6 +287,8 @@ fxc objcell_pbrmcellcsm_ps pbrm_cellcsm_ps ps_6_0 "$PS_SHIFT"
 # the air zones do not touch), fo4_default.vert's programs too
 fxc objcell_effectcell_ps fo4_effectcell_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_AIRZONE=1"
 fxc objcell_effectdecalcsm_ps fo4_effectdecalcsm_ps ps_6_0 "$PS_SHIFT"
+# lane VKOBJ8: fo4_effectdecal.prog (twin 10), the same decal without the cascades (the cell view's pick while no cascade map is built)
+fxc objcell_effectdecal_ps fo4_effectdecal_ps ps_6_0 "$PS_SHIFT"
 # the all-on route's RT GI variant (WW_CELL_RTDDGI + RTDDGI_CASCADES + RESTIR) of each twin (pbrm_default's code is the same)
 fxc objcell_cell_rt_ps fo4_cell_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1"
 fxc objcell_cellcsm_rt_ps fo4_cellcsm_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1"
@@ -294,6 +296,7 @@ fxc objcell_pbrmcell_rt_ps pbrm_cell_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_RTDDGI=1 
 fxc objcell_pbrmcellcsm_rt_ps pbrm_cellcsm_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1"
 fxc objcell_effectcell_rt_ps fo4_effectcell_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_AIRZONE=1 -D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1"
 fxc objcell_effectdecalcsm_rt_ps fo4_effectdecalcsm_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1"
+fxc objcell_effectdecal_rt_ps fo4_effectdecal_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1"
 # the cell frame's per-sample readback (objBlFrameSamples): its own bindings, no shift
 "$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main -Fo objbl_samples_cs.spv "$(cygpath -m "$ROOT/res/shaders/hlsl/near/objbl_samples_cs.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/near/objbl_samples_cs.hlsl")"
 python -I "$ROOT/tools/spv_header.py" objbl_samples_cs.spv vkframe_objbl_samples_cs_spv objbl_samples_cs.spv.h < /dev/null
@@ -342,4 +345,26 @@ fxp objpfx_vs pfx_view_vs vs_6_0 "$VS_SHIFT"
 fxp objpfx_cell_ps particles_cell_ps ps_6_0 "$PS_SHIFT"
 # round 5: its RT GI variant (the all-on route's WW_CELL_RTDDGI + RTDDGI_CASCADES + RESTIR, as the fxc _rt lines)
 fxp objpfx_cell_rt_ps particles_cell_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1"
+# lane VKOBJ10: taa_objvel.prog (res/shaders/hlsl/post), the TAA inputs' moving-object redraw (taainputs.cpp step 3). The program
+# has no loader defines; its pixel stage reads 1 / gl_FragCoord.w (the soft fade): -fvk-use-dx-position-w; every binding kept
+fxo() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main $4 -fspv-preserve-bindings -fvk-use-dx-position-w -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/post/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/post/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxo objvel_vs taa_objvel_vs vs_6_0 "$VS_SHIFT"
+fxo objvel_ps taa_objvel_ps ps_6_0 "$PS_SHIFT"
+# lane VKOBJ18: game_taa_mv.prog's pixel stage, the TAA inputs' camera vectors (taainputs.cpp step 2)
+fxo camvel_ps game_taa_mv_ps ps_6_0 "$PS_SHIFT"
+# lane VKOBJ15: boltstrip.prog (res/shaders/hlsl/core), the lightning strips (controllers.cpp drawPreview). No loader
+# defines; every binding kept
+fxe() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main $4 -fspv-preserve-bindings -fvk-use-dx-position-w -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/core/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/core/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxe bolt_view_vs boltstrip_vs vs_6_0 "$VS_SHIFT"
+fxe bolt_view_ps boltstrip_ps ps_6_0 "$PS_SHIFT"
+# lane VKOBJ18: game_taa_mv.prog's vertex stage (cell_ao.vert, the full-screen quad)
+fxe camvel_vs cell_ao_vs vs_6_0 "$VS_SHIFT"
 ls -la csm_view_vs.spv.h obj_depth_vs.spv.h sky_view_ps.spv.h bloom_down.spv.h bloom_hold.spv.h bloom_up.spv.h bloom_src.spv.h bloom_comb.spv.h bloom_back.spv.h tonemap.spv.h measure_q.spv.h tone_view_vs.spv.h tone_view_ps.spv.h taa_view_mv_cs.spv.h taa_view_resolve_cs.spv.h taa_view_rcas_ps.spv.h

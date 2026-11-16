@@ -198,7 +198,7 @@ struct ObjBlSampler
 };
 //! GL's texture state reads (glGetTextureParameter*, GL 4.5)
 bool objBlSamplerRead( GlProc gp, unsigned tex, ObjBlSampler & s, std::string & why );
-/* twin ids: 0-1 ObjBlShade, 2-6 ObjCellShade (VKWATER3 7 fo4_effectcell, 8 fo4_effectdecalcsm). One id per twin across
+/* twin ids: 0-1 ObjBlShade, 2-6 ObjCellShade (VKWATER3 7 fo4_effectcell, 8 fo4_effectdecalcsm; VKOBJ8 10 fo4_effectdecal). One id per twin across
  * every lane branch: tests/vkframe/twin_ids.py fails on a duplicate */
 constexpr int kObjTwinPfx = 9;  //!< twin 9 particles_cell (objPfxShade)
 struct ObjBlDraw
@@ -377,7 +377,9 @@ struct ObjBlShade
 	std::size_t nCmds = 0;
 	int red = 0;  //!< gates only: 1 objBlPipe's strict target count (a 1-buffer frame must refuse); RT GI: 9 the ReSTIR ratio /
 	              //!< 10 the atlas copied a texel on, 11 / 12 the screen GI / its key dropped to the stand-in; 8 the copy twins
-	              //!< (cellAo, cellAoDecal, cellSsr) copied a texel on
+	              //!< (cellAo, cellAoDecal, cellSsr) copied a texel on; 13 (VKOBJ21) cellSsgi dropped to the stand-in
+	const std::uint32_t * psGate = nullptr;  //!< gates only: this pixel module instead of the shipped twin (blview's plain row)
+	std::size_t psGateWords = 0;
 	int skinRed = 0;   //!< lane VKOBJ5 red `bone`: the mirrored skinningUniforms one bone on (bone i reads i + 1's transform)
 	int alphaRed = 0;  //!< lane VKOBJ5 red `flags`: the mirrored alphaFlags 0 (no alpha test, no blend bit)
 	/*! lane VKOBJ5: `rows` starts at the row GL's wwDrawBase names (a run's leader, a single draw's own row), so the
@@ -407,7 +409,7 @@ int objBlVariant( const std::string & defs, const char *& why, int red = 0 );
  * (0,0,0,1)) and its index buffer (GL_UNSIGNED_SHORT, its size). false: why (nothing drawn; GL draws the shape) */
 struct ObjCellShade
 {
-	int twin = 2;                 //!< 2 fo4_cell, 3 fo4_cellcsm, 4 pbrm_default, 5 pbrm_cell, 6 pbrm_cellcsm, 7 fo4_effectcell, 8 fo4_effectdecalcsm
+	int twin = 2;                 //!< 2 fo4_cell, 3 fo4_cellcsm, 4 pbrm_default, 5 pbrm_cell, 6 pbrm_cellcsm, 7 fo4_effectcell, 8 fo4_effectdecalcsm, 10 fo4_effectdecal
 	unsigned prog = 0;            //!< GL's current program
 	std::uintptr_t poolKey = 0;   //!< one key per route (the shape's twins are rewritten each draw)
 	std::size_t verts = 0;        //!< the shape's vertex count

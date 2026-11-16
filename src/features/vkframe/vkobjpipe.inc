@@ -19,6 +19,7 @@
 #include "features/vkframe/objpfx_cell_rt_ps.spv.h"  // round 5: its RT GI variant
 #include "features/vkframe/objcell_effectcell_ps.spv.h"   // fo4_effectcell.prog's (+ WW_CELL_AIRZONE, ships on)
 #include "features/vkframe/objcell_effectdecalcsm_ps.spv.h"  // fo4_effectdecalcsm.prog's
+#include "features/vkframe/objcell_effectdecal_ps.spv.h"  // lane VKOBJ8: fo4_effectdecal.prog's (twin 10)
 // the all-on route's RT GI variant (WW_CELL_RTDDGI + RTDDGI_CASCADES + RESTIR) of each (pbrm_default's code is the same)
 #include "features/vkframe/objcell_cell_rt_ps.spv.h"
 #include "features/vkframe/objcell_cellcsm_rt_ps.spv.h"
@@ -26,6 +27,7 @@
 #include "features/vkframe/objcell_pbrmcellcsm_rt_ps.spv.h"
 #include "features/vkframe/objcell_effectcell_rt_ps.spv.h"
 #include "features/vkframe/objcell_effectdecalcsm_rt_ps.spv.h"
+#include "features/vkframe/objcell_effectdecal_rt_ps.spv.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -2942,7 +2944,7 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 		d.texelRed = 1;
 		d.texelRedName = s.red == 9 ? "cellRestir" : "cellDdgiAtlas";
 	}
-	d.dropName = s.red == 11 ? "cellGiHalf" : s.red == 12 ? "cellGiHalfKey" : nullptr;
+	d.dropName = s.red == 11 ? "cellGiHalf" : s.red == 12 ? "cellGiHalfKey" : s.red == 13 ? "cellSsgi" : nullptr;  // VKOBJ21: 13 ssgi
 	d.copyRed = s.standInRed ? 2 : s.red == 8 ? 1 : 0;  // red copy; standin: no copy twin (the stand-in)
 	d.vs = vkframe_objbl_vs_spv;
 	d.vsWords = sizeof( vkframe_objbl_vs_spv ) / 4;
@@ -3094,6 +3096,7 @@ void objCellPs( int twin, bool rt, const std::uint32_t *& words, std::size_t & c
 		case 6: words = vkframe_objcell_pbrmcellcsm_rt_ps_spv; count = sizeof( vkframe_objcell_pbrmcellcsm_rt_ps_spv ) / 4; return;
 		case 7: words = vkframe_objcell_effectcell_rt_ps_spv; count = sizeof( vkframe_objcell_effectcell_rt_ps_spv ) / 4; return;
 		case 8: words = vkframe_objcell_effectdecalcsm_rt_ps_spv; count = sizeof( vkframe_objcell_effectdecalcsm_rt_ps_spv ) / 4; return;
+		case 10: words = vkframe_objcell_effectdecal_rt_ps_spv; count = sizeof( vkframe_objcell_effectdecal_rt_ps_spv ) / 4; return;
 		default: break;  // 4: pbrm_default's code is the same
 		}
 	switch ( twin ) {
@@ -3103,6 +3106,7 @@ void objCellPs( int twin, bool rt, const std::uint32_t *& words, std::size_t & c
 	case 6: words = vkframe_objcell_pbrmcellcsm_ps_spv; count = sizeof( vkframe_objcell_pbrmcellcsm_ps_spv ) / 4; return;
 	case 7: words = vkframe_objcell_effectcell_ps_spv; count = sizeof( vkframe_objcell_effectcell_ps_spv ) / 4; return;
 	case 8: words = vkframe_objcell_effectdecalcsm_ps_spv; count = sizeof( vkframe_objcell_effectdecalcsm_ps_spv ) / 4; return;
+	case 10: words = vkframe_objcell_effectdecal_ps_spv; count = sizeof( vkframe_objcell_effectdecal_ps_spv ) / 4; return;
 	default: words = vkframe_objcell_cell_ps_spv; count = sizeof( vkframe_objcell_cell_ps_spv ) / 4; return;
 	}
 }
@@ -3113,7 +3117,7 @@ bool objCellShade( GlProc gp, const ObjCellShade & s, std::string & why )
 		objBlOnGl( w.c_str() );
 		return why = w, false;
 	};
-	if ( s.twin < 2 || s.twin > 8 || !s.prog || !s.verts || !s.cmds || !s.nCmds )
+	if ( s.twin < 2 || ( s.twin > 8 && s.twin != 10 ) || !s.prog || !s.verts || !s.cmds || !s.nCmds )
 		return fail( "no twin, program, vertices or commands" );
 	if ( !gp )
 		return fail( "no GL entry points" );

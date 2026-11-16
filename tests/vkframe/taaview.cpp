@@ -531,10 +531,13 @@ int main( int argc, char ** argv )
 	};
 
 	// one frame: the inputs, GL's passes, the copy of GL's read slot, Vulkan's passes; red 1 = the resolve's jitter flipped,
-	// 2 = the vectors' jitter flipped (Vulkan only)
+	// 2 = the vectors' jitter flipped (Vulkan only). Lane VKOBJ14: tier 3 High or 4 Ultra (gametaa.cpp's kRcasStops per
+	// tier); Ultra reds 3 = Vulkan's resolve told High (the motion gamma), 4 = Vulkan's RCAS at High's stops, 5 = the old
+	// guard (WW_VKVIEW_TAA_TIER_RED=1: taaRun refuses every tier but High)
 	const float shiftPx = 0.7f;
+	const float kStops[5] = { 0.0f, 0.0f, 0.0f, 0.5f, 0.3f };
 	size_t compared = 0;
-	auto frame = [&]( int fi, int red, Verdict out[5] ) -> bool {
+	auto frame = [&]( int fi, int red, Verdict out[5], int tier ) -> bool {
 		const int wr = fi & 1, rd = wr ^ 1;
 		const bool noHist = fi == 0;
 		const int inputs = fi >= 6 ? 3 : 0;
@@ -614,7 +617,7 @@ int main( int argc, char ** argv )
 		u1i( pTaa, "maskTex", 6 );
 		u2f( pTaa, "invSize", 1.0f / float( W ), 1.0f / float( H ) );
 		u2f( pTaa, "jitterPx", jpx, jpy );
-		u1i( pTaa, "taa2Tier", 3 );
+		u1i( pTaa, "taa2Tier", tier );
 		u1i( pTaa, "taa2Red", 0 );
 		u1i( pTaa, "taa2NoHist", noHist ? 1 : 0 );
 		u1i( pTaa, "wwDitherOn", 1 );
@@ -629,7 +632,7 @@ int main( int argc, char ** argv )
 		f.useProgram( pRcas );
 		bindUnit( 0, GL_TEXTURE_2D, gOut );
 		u1i( pRcas, "srcTex", 0 );
-		u1f( pRcas, "rcasSharp", std::exp2( -0.5f ) );
+		u1f( pRcas, "rcasSharp", std::exp2( -kStops[tier] ) );
 		u1i( pRcas, "rcasLinear", 0 );
 		u1f( pRcas, "rcasExpose", 1.0f );
 		drawQuad();
@@ -648,7 +651,7 @@ int main( int argc, char ** argv )
 		t.wr = wr;
 		const float sgn = red == 1 ? -1.0f : 1.0f, msgn = red == 2 ? -1.0f : 1.0f;
 		const float sj[4] = { 1.0f / float( W ), 1.0f / float( H ), sgn * jpx, sgn * jpy };
-		const std::int32_t ints[4] = { 3, 0, noHist ? 1 : 0, inputs };
+		const std::int32_t ints[4] = { red == 3 ? 3 : tier, 0, noHist ? 1 : 0, inputs };
 		const std::int32_t ints2[4] = { 0, 1, dither, 0 };
 		std::memcpy( t.job.sizeJitter, sj, sizeof( sj ) );
 		std::memcpy( t.job.ints, ints, sizeof( ints ) );
@@ -659,7 +662,7 @@ int main( int argc, char ** argv )
 			std::memcpy( t.mvJob.c[c], reproj + 4 * c, sizeof( t.mvJob.c[c] ) );
 		const float mvc[4] = { msgn * offX, msgn * offY, 1.0f / float( W ), 1.0f / float( H ) };
 		std::memcpy( t.mvJob.c[4], mvc, sizeof( mvc ) );
-		t.rcasJob.c[0][0] = std::exp2( -0.5f );
+		t.rcasJob.c[0][0] = std::exp2( -kStops[red == 4 ? 3 : tier] );
 		t.rcasJob.c[0][1] = 1.0f;
 		t.cur = key + 0;
 		t.depth = key + 1;
@@ -673,7 +676,12 @@ int main( int argc, char ** argv )
 		t.mask = ( inputs & 2 ) ? gMask : 0;
 		t.velKey = key + 8;
 		t.maskKey = key + 9;
-		if ( !WwVkPresent::taaRun( t, why ) ) {
+		if ( red == 5 )
+			_putenv_s( "WW_VKVIEW_TAA_TIER_RED", "1" );
+		const bool ran = WwVkPresent::taaRun( t, why );
+		if ( red == 5 )
+			_putenv_s( "WW_VKVIEW_TAA_TIER_RED", "" );
+		if ( !ran ) {
 			std::printf( "TAAVIEW f%d: taaRun refused: %s\n", fi, why.c_str() );
 			return false;
 		}
@@ -698,7 +706,7 @@ int main( int argc, char ** argv )
 	const int kFrames = 8;
 	for ( int fi = 0; fi < kFrames; fi++ ) {
 		Verdict v[5];
-		if ( !frame( fi, 0, v ) ) {
+		if ( !frame( fi, 0, v, 3 ) ) {
 			std::printf( "TAAVIEW f%d FAIL (the frame did not run)\n", fi );
 			ok = false;
 			continue;
@@ -712,7 +720,7 @@ int main( int argc, char ** argv )
 	// the reds, each on a frame with history (must FAIL their own compare)
 	{
 		Verdict v[5];
-		const bool ran = frame( kFrames, 1, v );
+		const bool ran = frame( kFrames, 1, v, 3 );
 		const bool fails = !ran || !v[1].ok;
 		std::printf( "TAAVIEW RED %s (the resolve's jitter flipped on Vulkan: history %zu of %zu differ, %zu beyond; must FAIL)\n",
 			fails ? "FAIL" : v[1].word(), v[1].diff, v[1].total, v[1].big );
@@ -720,12 +728,54 @@ int main( int argc, char ** argv )
 	}
 	{
 		Verdict v[5];
-		const bool ran = frame( kFrames + 1, 2, v );
+		const bool ran = frame( kFrames + 1, 2, v, 3 );
 		const bool fails = !ran || !v[0].ok;
 		std::printf( "TAAVIEW RED %s (the vectors' jitter flipped on Vulkan: %zu of %zu beyond 2^-22, max %.3g; must FAIL)\n",
 			fails ? "FAIL" : v[0].word(), v[0].big, v[0].total, v[0].maxd );
 		ok = ok && fails;
 	}
+	// lane VKOBJ14: the Ultra tier (WW_TAA2=ultra, the all-on route), the same frames from no history, the same rules
+	int ultraFrames = 0;
+	for ( int fi = 0; fi < kFrames; fi++ ) {
+		Verdict v[5];
+		if ( !frame( fi, 0, v, 4 ) ) {
+			std::printf( "TAAVIEW ultra f%d FAIL (the frame did not run)\n", fi );
+			ok = false;
+			continue;
+		}
+		ultraFrames++;
+		for ( int k = 0; k < 5; k++ ) {
+			std::printf( "TAAVIEW ultra f%d%s %s %s (rule %s: %zu of %zu differ, %zu beyond, max %.3g)\n", fi, fi >= 6 ? " inputs" : "",
+				names[k], v[k].word(), v[k].rule, v[k].diff, v[k].total, v[k].big, v[k].maxd );
+			ok = ok && v[k].ok;
+		}
+	}
+	// the Ultra reds, each on a frame with history and inputs (fi 6, 7 and 6 again): must FAIL their own compare
+	{
+		Verdict v[5];
+		const bool ran = frame( 6, 3, v, 4 );
+		const bool fails = !ran || !v[1].ok || !v[2].ok || !v[3].ok;
+		std::printf( "TAAVIEW RED ultra %s (Vulkan's resolve told High: history %zu of %zu differ, %zu beyond; lock %zu; picture %zu "
+			"differ, %zu beyond; must FAIL)\n", fails ? "FAIL" : v[1].word(), v[1].diff, v[1].total, v[1].big, v[2].diff, v[3].diff, v[3].big );
+		ok = ok && fails;
+	}
+	{
+		Verdict v[5];
+		const bool ran = frame( 7, 4, v, 4 );
+		const bool fails = !ran || !v[4].ok;
+		std::printf( "TAAVIEW RED ultra %s (Vulkan's RCAS at High's 0.5 stops: view %zu of %zu differ, %zu beyond, max %.3g; must FAIL)\n",
+			fails ? "FAIL" : v[4].word(), v[4].diff, v[4].total, v[4].big, v[4].maxd );
+		ok = ok && fails;
+	}
+	{
+		Verdict v[5];
+		const bool ran = frame( 6, 5, v, 4 );
+		std::printf( "TAAVIEW RED ultra %s (the old guard, WW_VKVIEW_TAA_TIER_RED=1: taaRun %s; must FAIL)\n", ran ? "RAN" : "FAIL",
+			ran ? "drew Ultra" : "refused Ultra" );
+		ok = ok && !ran;
+	}
+	std::printf( "TAAVIEW ultra: %d of %d frames ran on Vulkan\n", ultraFrames, kFrames );
+	ok = ok && ultraFrames == kFrames;
 	const WwVkPresent::TaaStat st = WwVkPresent::takeTaaStat();
 	std::printf( "TAAVIEW stat: %d runs on Vulkan, %d failed (%s), drawing thread %.3f ms a run (max %.3f), %d pipelines built in "
 		"%.1f ms; %zu values compared\n", st.runs, st.fails, st.failWhy.c_str(), st.runs ? st.cpuMs / st.runs : 0.0, st.maxMs,

@@ -182,7 +182,8 @@ VKFRAME_FXCELL = {'objcell_vs': ('fo4_default_vs', 'vs_6_0', 'VS_SHIFT', ''), 'o
 	'objcell_cellcsm_ps': ('fo4_cellcsm_ps', 'ps_6_0', 'PS_SHIFT', ''), 'objcell_pbrm_ps': ('pbrm_default_ps', 'ps_6_0', 'PS_SHIFT', ''),
 	'objcell_pbrmcell_ps': ('pbrm_cell_ps', 'ps_6_0', 'PS_SHIFT', ''), 'objcell_pbrmcellcsm_ps': ('pbrm_cellcsm_ps', 'ps_6_0', 'PS_SHIFT', ''),
 	'objcell_effectcell_ps': ('fo4_effectcell_ps', 'ps_6_0', 'PS_SHIFT', '-D WW_CELL_AIRZONE=1'),
-	'objcell_effectdecalcsm_ps': ('fo4_effectdecalcsm_ps', 'ps_6_0', 'PS_SHIFT', '')}
+	'objcell_effectdecalcsm_ps': ('fo4_effectdecalcsm_ps', 'ps_6_0', 'PS_SHIFT', ''),
+	'objcell_effectdecal_ps': ('fo4_effectdecal_ps', 'ps_6_0', 'PS_SHIFT', '')}
 # the all-on route's RT GI variant of each twin (pbrm_default's code is the same)
 VKFRAME_FXCELL_RT = '-D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1'
 VKFRAME_FXCELL.update({'objcell_cell_rt_ps': ('fo4_cell_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXCELL_RT),
@@ -190,7 +191,9 @@ VKFRAME_FXCELL.update({'objcell_cell_rt_ps': ('fo4_cell_ps', 'ps_6_0', 'PS_SHIFT
 	'objcell_pbrmcell_rt_ps': ('pbrm_cell_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXCELL_RT),
 	'objcell_pbrmcellcsm_rt_ps': ('pbrm_cellcsm_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXCELL_RT),
 	'objcell_effectcell_rt_ps': ('fo4_effectcell_ps', 'ps_6_0', 'PS_SHIFT', '-D WW_CELL_AIRZONE=1 ' + VKFRAME_FXCELL_RT),
-	'objcell_effectdecalcsm_rt_ps': ('fo4_effectdecalcsm_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXCELL_RT)})
+	'objcell_effectdecalcsm_rt_ps': ('fo4_effectdecalcsm_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXCELL_RT),
+
+	'objcell_effectdecal_rt_ps': ('fo4_effectdecal_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXCELL_RT)})
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXCELL]
 # lane VKOBJ5 (G4 round 3): the script's `fxp` lines, particles_cell.prog's record pass, expand stage and cell-lit pixel twin
 # (res/shaders/hlsl/particles) on the app's variant
@@ -200,6 +203,14 @@ VKFRAME_FXP = {'objpfx_cs': ('pfx_view_cs', 'cs_6_0', 'VS_SHIFT', ''), 'objpfx_v
 	'objpfx_cell_ps': ('particles_cell_ps', 'ps_6_0', 'PS_SHIFT', ''),
 	'objpfx_cell_rt_ps': ('particles_cell_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXCELL_RT)}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXP]
+# lane VKOBJ10: the script's `fxo` lines, taa_objvel.prog's twins (res/shaders/hlsl/post), no loader defines
+VKFRAME_FXO = {'objvel_vs': ('taa_objvel_vs', 'vs_6_0', 'VS_SHIFT'), 'objvel_ps': ('taa_objvel_ps', 'ps_6_0', 'PS_SHIFT'),
+               'camvel_ps': ('game_taa_mv_ps', 'ps_6_0', 'PS_SHIFT')}	# lane VKOBJ18: game_taa_mv.prog's pixel stage
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXO]
+# lane VKOBJ15: the script's `fxe` lines, boltstrip.prog's twins (res/shaders/hlsl/core), no loader defines
+VKFRAME_FXE = {'bolt_view_vs': ('boltstrip_vs', 'vs_6_0', 'VS_SHIFT'), 'bolt_view_ps': ('boltstrip_ps', 'ps_6_0', 'PS_SHIFT'),
+               'camvel_vs': ('cell_ao_vs', 'vs_6_0', 'VS_SHIFT')}	# lane VKOBJ18: game_taa_mv.prog's vertex stage
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXE]
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
 DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
 
@@ -384,6 +395,20 @@ def script_ok(tree):
 	              re.findall(r'^fxp ([a-z0-9_]+) ([a-z0-9_]+) ([cvp]s_6_0) "\$([A-Z_]+)"(?: "([^"]*)")?$', vf, re.M))
 	if plines != VKFRAME_FXP:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxp lines (%s) are not this checker\'s particle twins' % ' '.join(sorted(plines)))
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main $4 -fspv-preserve-bindings -fvk-use-dx-position-w ' \
+			'-Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/post/$2.hlsl" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxo() compile line changed')
+	olines = dict((k, (f, p, s)) for k, f, p, s in
+	              re.findall(r'^fxo ([a-z0-9_]+) ([a-z0-9_]+) ([vp]s_6_0) "\$([A-Z_]+)"$', vf, re.M))
+	if olines != VKFRAME_FXO:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxo lines (%s) are not this checker\'s objvel twins' % ' '.join(sorted(olines)))
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main $4 -fspv-preserve-bindings -fvk-use-dx-position-w ' \
+			'-Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/core/$2.hlsl" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxe() compile line changed')
+	elines = dict((k, (f, p, s)) for k, f, p, s in
+	              re.findall(r'^fxe ([a-z0-9_]+) ([a-z0-9_]+) ([vp]s_6_0) "\$([A-Z_]+)"$', vf, re.M))
+	if elines != VKFRAME_FXE:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxe lines (%s) are not this checker\'s boltstrip twins' % ' '.join(sorted(elines)))
 	return bad
 
 
@@ -547,6 +572,10 @@ def main(argv):
 			if k in VKFRAME_FXT:
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXT[k] + '.hlsl')
 				hdefs = VKFRAME_FXT_ARGS
+			if k in VKFRAME_FXO:  # lane VKOBJ12 (VKMERGE1: kept from vkobj5)
+				src = os.path.join(tree, 'res/shaders/hlsl/post', VKFRAME_FXO[k][0] + '.hlsl')
+			if k in VKFRAME_FXE:  # lane VKOBJ15
+				src = os.path.join(tree, 'res/shaders/hlsl/core', VKFRAME_FXE[k][0] + '.hlsl')
 			if k in VKFRAME_FXF:  # the profile is the table's (lens_flare.hlsl holds both stages)
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXF[k][0] + '.hlsl')
 				hdefs = []
@@ -555,7 +584,7 @@ def main(argv):
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_PFX[k][0] + '.hlsl')
 				hdefs = VKFRAME_PFX[k][2].split()
 				m = re.match(r'([cvp]s_6_0)', VKFRAME_PFX[k][1])
-			elif k in VKFRAME_FXH or k in VKFRAME_FXD or k in VKFRAME_FXCELL or k in VKFRAME_FXP:
+			elif k in VKFRAME_FXH or k in VKFRAME_FXD or k in VKFRAME_FXCELL or k in VKFRAME_FXP or k in VKFRAME_FXO or k in VKFRAME_FXE:
 				m = None
 			else:
 				m = re.search(r'hlsl profile: ([cvp]s_6_[0-9])', open(src, encoding='utf-8', errors='replace').read())
@@ -583,6 +612,14 @@ def main(argv):
 				hdefs = VKFRAME_FXP_ARGS + (VKFRAME_VS_SHIFT if VKFRAME_FXP[k][2] == 'VS_SHIFT' else VKFRAME_PS_SHIFT) \
 					+ VKFRAME_FXP[k][3].split() + ['-fspv-preserve-bindings', '-fvk-use-dx-position-w']
 				m = re.match(r'(.*)', VKFRAME_FXP[k][1])
+			if k in VKFRAME_FXO:
+				hdefs = ['-HV', '2021'] + (VKFRAME_VS_SHIFT if VKFRAME_FXO[k][2] == 'VS_SHIFT' else VKFRAME_PS_SHIFT) \
+					+ ['-fspv-preserve-bindings', '-fvk-use-dx-position-w']
+				m = re.match(r'(.*)', VKFRAME_FXO[k][1])
+			if k in VKFRAME_FXE:
+				hdefs = ['-HV', '2021'] + (VKFRAME_VS_SHIFT if VKFRAME_FXE[k][2] == 'VS_SHIFT' else VKFRAME_PS_SHIFT) \
+					+ ['-fspv-preserve-bindings', '-fvk-use-dx-position-w']
+				m = re.match(r'(.*)', VKFRAME_FXE[k][1])
 			opt = [] if d == 'src/features/vkframe' else ['-O0']   # vkframe_spirv.sh builds optimised
 			r = subprocess.run([dxc, '-spirv', '-fspv-target-env=' + env, '-T', m.group(1) if m else 'ps_6_0' if k in VKFRAME_SKY or k in VKFRAME_FX or k in VKFRAME_FXK or k in VKFRAME_FXKW else 'cs_6_0', '-E', 'main']
 			                   + opt + hdefs + ['-Fo', spv, src], capture_output=True, text=True, timeout=300)

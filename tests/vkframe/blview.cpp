@@ -1143,11 +1143,26 @@ int main( int argc, char ** argv )
 	const bool colRt = twinOk && ( pfxOnly || colourGate( spvDir + "/spvrt/spirv", handles, anisoAt, aniso1H, 0, 0, std::string(), true ) );
 	const bool colCsmRt = twinOk && ( pfxOnly || colourGate( spvDir + "/spvrt/spirv", handles, anisoAt, aniso1H, 1, 0, std::string(), true ) );
 	// lane VKOBJ5 (G4): skinned (kind 1), alpha-tested (kind 2), single rigid (kind 3), own VAO (kind 4) through both bl twins,
-	// GL on the app's key as the shipped twins (VKWATER3 ruling 1); lane VKWATER3 kind 5 `ao`: GL's own cellAo must refuse
+	// GL on the app's key as the shipped twins (VKWATER3 ruling 1); lane VKWATER3 kind 5 `ao`: GL's own cellAo must refuse;
+	// lane VKOBJ19 kind 6 `fade`: the decal-fade band on the bl route (kept piece at a0, band pieces at a0 x fade)
 	bool kindOk = true;
 	for ( int tw = 0; tw < 2 && !pfxOnly; tw++ )
-		for ( int kd = 1; kd <= 5; kd++ )
+		for ( int kd = 1; kd <= 6; kd++ )
 			kindOk = ( twinOk && colourGate( spvDir + "/spvapp/spirv", handles, anisoAt, aniso1H, tw, kd ) ) && kindOk;
+	// lane VKOBJ20: the decal-fade kept placements (kind 3 singles) and bands (kind 6) on the all-on route's RT GI variant
+	for ( int tw = 0; tw < 2 && !pfxOnly; tw++ )
+		for ( const int kd : { 3, 6 } )
+			kindOk = ( twinOk && colourGate( spvDir + "/spvrt/spirv", handles, anisoAt, aniso1H, tw, kd, std::string(), true ) ) && kindOk;
+	// lane VKOBJ21: kind 7 `ssgi` (the owner's shared SSGI result on cellSsgi) on the app's key and the all-on RT key; kinds 1 skin,
+	// 2 alpha and 4 own on the RT key (appended: the rows above stay as they were)
+	for ( int tw = 0; tw < 2 && !pfxOnly; tw++ ) {
+		kindOk = ( twinOk && colourGate( spvDir + "/spvapp/spirv", handles, anisoAt, aniso1H, tw, 7 ) ) && kindOk;
+		for ( const int kd : { 7, 1, 2, 4 } )
+			kindOk = ( twinOk && colourGate( spvDir + "/spvrt/spirv", handles, anisoAt, aniso1H, tw, kd, std::string(), true ) ) && kindOk;
+	}
+	// lane VKOBJ22: kind 8 `stepb` (GPU cull step B's kept ranges, a crossing a shape) on the all-on RT key, both twins (appended)
+	for ( int tw = 0; tw < 2 && !pfxOnly; tw++ )
+		kindOk = ( twinOk && colourGate( spvDir + "/spvrt/spirv", handles, anisoAt, aniso1H, tw, 8, std::string(), true ) ) && kindOk;
 	ok = kindOk && ok;
 	ok = colOk && colCsmOk && colPlain && colCsmPlain && colRt && colCsmRt && ok;
 	if ( bc && !pfxOnly ) {  // lane VKWATER3 G4: GL's fo4_cell / fo4_cellcsm against the non-bindless twins through objCellShade
@@ -1203,6 +1218,11 @@ int main( int argc, char ** argv )
 		const bool c8s = cellGate( spvDir + "/cellset/spirv", 8, fxBc4, 1u << 2, "bc4" );
 		const bool c8rt = cellGate( spvDir + "/cellset/spirv", 8, fx, 0xFu << 9, "rt", 1u | 8u );
 		ok = c8 && c8s && c8rt && ok;
+		// lane VKOBJ8: twin 10 (fo4_effectdecal: twin 8's decal without the cascades), twin 8's fixture, rows and reds
+		const bool c10 = cellGate( spvDir + "/cellset/spirv", 10, fx, 0xBu | 1u << 4 | 1u << 8 );
+		const bool c10s = cellGate( spvDir + "/cellset/spirv", 10, fxBc4, 1u << 2, "bc4" );
+		const bool c10rt = cellGate( spvDir + "/cellset/spirv", 10, fx, 0xFu << 9, "rt", 1u | 8u );
+		ok = c10 && c10s && c10rt && ok;
 		/* lane VKWATER5: the cell route's screen terms (vars 32): GL-owned cellAo (and cellSsr on twins 2, 3, 5, 6) bound as the app binds
 		 * them; the copy red (reds bit 8) must FAIL on each. Twin 4's base variant has no cell lights (no cellAo read) */
 		const bool a2 = cellGate( spvDir + "/cellset/spirv", 2, maps, 1u << 8, "ao", 32u );
@@ -1210,7 +1230,17 @@ int main( int argc, char ** argv )
 		const bool a5 = cellGate( spvDir + "/cellset/spirv", 5, pbrm, 1u << 8, "ao", 32u );
 		const bool a6 = cellGate( spvDir + "/cellset/spirv", 6, pbrm, 1u << 8, "ao", 32u );
 		const bool a8 = cellGate( spvDir + "/cellset/spirv", 8, fx, 1u << 8, "ao", 32u );
-		ok = a2 && a3 && a5 && a6 && a8 && ok;
+		const bool a10 = cellGate( spvDir + "/cellset/spirv", 10, fx, 1u << 8, "ao", 32u );
+		ok = a2 && a3 && a5 && a6 && a8 && a10 && ok;
+		// lane VKOBJ7: GPU cull step B (vars 64): its kept ranges on Vulkan against GL's cluster commands; red droprange must FAIL
+		const bool sb2 = cellGate( spvDir + "/cellset/spirv", 2, maps, 0u, "stepb", 64u );
+		const bool sb3 = cellGate( spvDir + "/cellset/spirv", 3, maps, 0u, "stepb", 64u );
+		ok = sb2 && sb3 && ok;
+		// lane VKOBJ9: the decal-fade band (vars 128): kept pieces at a0, band pieces at a0 x fade; red fade must FAIL
+		const bool fd2 = cellGate( spvDir + "/cellset/spirv", 2, maps, 0u, "fade", 128u );
+		const bool fd3 = cellGate( spvDir + "/cellset/spirv", 3, maps, 0u, "fade", 128u );
+		const bool fd4 = cellGate( spvDir + "/cellset/spirv", 4, pbrm, 0u, "fade", 128u );
+		ok = fd2 && fd3 && fd4 && ok;
 	} else
 		std::printf( "BLVIEW cell not run (the cell twins read the texture cache's twins: MODE=bc)\n" );
 	vk().vkWaitForFences( vk().dev, 1, &gv.fence, VK_TRUE, 1000000000ull );

@@ -21,7 +21,7 @@ struct CellTwinRoute
 
 struct CellTwinPick
 {
-	int twin = 0;             //!< 2-8 objCellShade's twins, 9 particles_cell (objPfxShade), 0 none
+	int twin = 0;             //!< 2-8 and 10 objCellShade's twins, 9 particles_cell (objPfxShade), 0 none
 	bool rt = false;          //!< the RT GI variant
 	const char * no = nullptr;  //!< why GL draws it (twin 0 too: not a twin's program)
 };
@@ -36,7 +36,7 @@ inline int cellTwinOf( std::string_view prog )
 {
 	return prog == "fo4_cellcsm.prog" ? 3 : prog == "fo4_cell.prog" ? 2 : prog == "pbrm_default.prog" ? 4 : prog == "pbrm_cell.prog" ? 5
 		: prog == "pbrm_cellcsm.prog" ? 6 : prog == "fo4_effectcell.prog" ? 7 : prog == "fo4_effectdecalcsm.prog" ? 8
-		: prog == "particles_cell.prog" ? 9 : 0;
+		: prog == "particles_cell.prog" ? 9 : prog == "fo4_effectdecal.prog" ? 10 : 0;
 }
 
 inline CellTwinPick cellTwinPick( std::string_view prog, std::string_view defs, const CellTwinRoute & r )
@@ -67,11 +67,11 @@ inline CellTwinPick cellTwinPick( std::string_view prog, std::string_view defs, 
 	/* every twin takes its own keys only (lane VKOBJ5 round 7: twins 2-6 too): the base key its module compiles or the RT GI
 	 * key; any other loader define (a debug view, a red, a probe build) makes GL's program another one, which stays GL's.
 	 * fo4_effectcell's keys carry the air zones (they ship on), fo4_effectdecalcsm's with or without them (the zones' read is
-	 * not in its code); lane VKWATER3 G4: the RT GI key is the same on every twin (fo4_effectcell's with the air zones).
+	 * not in its code; lane VKOBJ8: fo4_effectdecal's too, twin 10, tests/vkframe/twinpick proves the define inert in both); lane VKWATER3 G4: the RT GI key is the same on every twin (fo4_effectcell's with the air zones).
 	 * CELLTWINPICK_RED_ANYBASE (tests/vkframe/twinpick only): the old rule, twins 2-6 take any key */
-	p.rt = t == 7 ? defs == kCellTwinRtKeyAir : defs == kCellTwinRtKey || ( t == 8 && defs == kCellTwinRtKeyAir );
+	p.rt = t == 7 ? defs == kCellTwinRtKeyAir : defs == kCellTwinRtKey || ( ( t == 8 || t == 10 ) && defs == kCellTwinRtKeyAir );
 	const bool baseKey = t == 7 ? defs == kCellTwinBaseKeyAir
-		: defs == kCellTwinBaseKey || ( t == 8 && defs == kCellTwinBaseKeyAir );
+		: defs == kCellTwinBaseKey || ( ( t == 8 || t == 10 ) && defs == kCellTwinBaseKeyAir );
 #ifdef CELLTWINPICK_RED_ANYBASE
 	const bool ownKey = t < 7 || p.rt || baseKey;
 #else

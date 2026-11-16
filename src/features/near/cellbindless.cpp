@@ -25,9 +25,6 @@
 #include <vector>
 
 bool wwFrameLog();	// gl/cellcull.cpp
-bool rtddgiCellShaderDefine();      // lane VKOBJ5 (vkBlDraw): src/features/gi/rtddgicell.cpp, WW_CELL_RTDDGI in the cell programs
-bool rtddgiRestirShaderDefine();    // WW_CELL_RESTIR
-bool rtddgiRestirGiShaderDefine();  // WW_CELL_RESTIRGI
 
 #include "features/vkframe/vkobjtex.h"	// lane VKOBJ3: the cache's BC twins in the Vulkan bindless table
 #include "features/vkframe/vkobjpipe.h"	// lane VKOBJ4: a run's multi-draw on Vulkan (WW_VKOBJ_SHADE)
@@ -609,7 +606,7 @@ int blOwnKey = 0;  // the unpooled shapes' one pool key (objBlShade waits the la
 }  // namespace
 
 bool vkBlDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * counts, const void * const * offs, GLsizei n,
-	std::size_t verts )
+	std::size_t verts, bool fadeBand )
 {
 	Ctx & c = cx();
 	QOpenGLContext * qc = QOpenGLContext::currentContext();
@@ -644,14 +641,15 @@ bool vkBlDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * coun
 				blWhy[i] = w;
 		return false;
 	};
-	/* the shipped bl twins are the code-default route; the RT GI variant (WW_CELL_RTDDGI + cascades + RESTIR / RESTIRGI) is
-	 * lane VKWATER3's: until its twin lands, such a program stays on GL with the reason in the line */
-	const char * no = ::rtddgiCellShaderDefine() ? "WW_CELL_RTDDGI in GL's program: no Vulkan twin"
-		: ::rtddgiRestirShaderDefine() ? "WW_CELL_RESTIR in GL's program: no Vulkan twin"
-		: ::rtddgiRestirGiShaderDefine() ? "WW_CELL_RESTIRGI in GL's program: no Vulkan twin" : nullptr;
-	if ( no )
+	/* lane VKOBJ20: the twin variant by GL's pixel-stage key, as the run route picks it (objBlVariant: 0 the app's base key, 1 the
+	 * all-on route's RT GI key, any other key refuses by name). Lane VKOBJ22: the RT variant takes every single, as the base does
+	 * (gated on that key by blview `colour rt` single / fade / skin / alpha / own / ssgi and step B's kept ranges, `colour rt stepb`) */
+	const char * no = nullptr;
+	const int variant = WwVkPresent::objBlVariant( prog->wwDefs, no );
+	if ( variant < 0 )
 		return refuse( no );
-	if ( rigid && gf->glIsEnabled( GL_BLEND ) )
+	// lane VKOBJ19: a decal-fade piece blends by its own alpha (GL's loose alpha, mirrored per call by objBlLoose)
+	if ( rigid && !fadeBand && gf->glIsEnabled( GL_BLEND ) )
 		return refuse( "a blended rigid shape (the opaque route only)" );
 	static std::vector<std::uint32_t> cmds;
 	cmds.clear();
@@ -665,6 +663,7 @@ bool vkBlDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * coun
 	WW_SWITCH_STATIC( QString, redOwnName, wwEnv( "WW_VKVIEW_OBJOWN_RED" ).trimmed() );
 	WwVkPresent::ObjBlShade s;
 	s.twin = twin;
+	s.rt = variant == 1;
 	s.prog = prog->id;
 	if ( own ) {
 		s.poolKey = reinterpret_cast<std::uintptr_t>( &blOwnKey );
@@ -736,7 +735,7 @@ namespace WwBl
 namespace
 {
 long long cellTried = 0, cellDrawn = 0, pbrmTried = 0, pbrmDrawn = 0;	// pbrm: pbrm_default / pbrm_cell / pbrm_cellcsm (twins 4-6, `vk objpbrm:`)
-long long fxTried = 0, fxDrawn = 0;	// fx: fo4_effectcell / fo4_effectdecalcsm (twins 7-8, `vk objfx:`)
+long long fxTried = 0, fxDrawn = 0;	// fx: fo4_effectcell / fo4_effectdecalcsm / fo4_effectdecal (twins 7, 8, 10, `vk objfx:`)
 int cellVar[4] = {}, pbrmVar[4] = {}, fxVar[4] = {};	// of the drawn: lit (the light buffer), skinned, blended, RT GI (per route)
 std::string cellWhy, pbrmWhy, fxWhy;
 
@@ -761,7 +760,7 @@ bool vkCellDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * co
 	if ( !vkShadeOn() || !prog || n <= 0 || geo.on )
 		return false;
 	const int twin = cellTwinOf( prog->name );
-	if ( twin < 2 || twin > 8 )
+	if ( twin < 2 || ( twin > 8 && twin != 10 ) )
 		return false;
 	const bool fx = twin >= 7;
 	const bool pbrm = twin >= 4 && !fx;

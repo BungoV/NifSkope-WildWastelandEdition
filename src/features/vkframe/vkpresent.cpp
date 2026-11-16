@@ -775,8 +775,11 @@ bool cfRecord( std::string & why );  // lane VKFAR2 (vkcloudfront.inc): fxWork's
 bool precipRecord( std::string & why );  // lane VKFAR2 (vkprecip.inc): fxWork's kind 8, rain / snow
 bool underRecord( std::string & why );  // lane VKWATER4 (vkunder.inc): fxWork's kind 10, the underwater fog
 bool taRecord( std::string & why );  // lane VKFAR7 (vktaareactive.inc): fxWork's kind 11, the TAA mask's reactive pass
+bool boltRecord( std::string & why );  // lane VKOBJ15 (vkbolt.inc): fxWork's kind 17, the lightning strips' preview
 void waterDrop();
 void underDrop();  // lane VKWATER4 (vkunder.inc)
+void objVelDrop();  // lane VKOBJ12 (vkobjvel.inc)
+void camVelDrop();  // lane VKOBJ18 (vkcamvel.inc)
 void objDrop();  // lane VKOBJ1
 void blFree();  // lane VKOBJ2
 void fogDrop();  // lane VKFAR2 (vkfog.inc): the air's integrate
@@ -3874,6 +3877,8 @@ void shutdown()
 	fxDrop();   // lane VKAIR1: the air's and the clouds' crossing semaphores and framebuffers
 	waterDrop();  // lane VKWATER3: the water draw's buffers (GL's names); pipelines and samplers stay with the device
 	underDrop();  // lane VKWATER4 (L7): the underwater draw's framebuffer, depth view and host buffer
+	objVelDrop();  // lane VKOBJ12: the TAA inputs' step 3 framebuffer and host buffers
+	camVelDrop();  // lane VKOBJ18: the TAA inputs' step 2 framebuffer and host buffers
 }
 
 bool viewBegin( int w, int h, int samples, GlProc gp, std::string & why )
@@ -4694,6 +4699,17 @@ bool taaRun( const TaaRun & t, std::string & why )
 		return refuse( "the device lacks shaderStorageImageExtendedFormats (the vectors' RG32F store)" );
 	if ( t.wr < 0 || t.wr > 1 )
 		return refuse( "a history index out of 0..1" );
+	/* lane VKOBJ14: High and Ultra (the all-on route) draw here; the resolve reads the tier from the job and the RCAS its
+	 * stops from rcasJob. Low / Medium copy back without RCAS (GL). Red WW_VKVIEW_TAA_TIER_RED=1: the old High-only guard. */
+	{
+		const char * tr = std::getenv( "WW_VKVIEW_TAA_TIER_RED" );
+		const bool oldGuard = tr && tr[0] == '1';
+		if ( oldGuard ? t.job.ints[0] != 3 : ( t.job.ints[0] < 3 || t.job.ints[0] > 4 ) )
+			return refuse( oldGuard ? "the tier is not High (red WW_VKVIEW_TAA_TIER_RED=1: the old guard)"
+				: "the tier is not High or Ultra (" + std::to_string( t.job.ints[0] ) + ")" );
+		if ( !( t.rcasJob.c[0][0] > 0.0f ) )
+			return refuse( "no RCAS strength (High and Ultra sharpen)" );
+	}
 	// lane VKPOST2: the merged crossing takes the colour from the view (GL skipped its blit) behind the deferred tone pass
 	Tone & T = tone();
 	const bool merge = t.colorFromView;
@@ -5640,7 +5656,7 @@ struct Fx
 	VkFence fence = VK_NULL_HANDLE;
 	bool pending = false;
 	// this run's job, written by the drawing thread before the hand
-	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1), 3 the far cards (lane VKFAR2), 4 the water draw (lane VKWATER3), 6 the fog bloom (lane VKFAR2), 8 rain / snow (lane VKFAR2), 9 the far ground (lane VKFAR3), 10 the underwater fog (lane VKWATER4), 11 the TAA mask's reactive pass (lane VKFAR7)
+	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1), 3 the far cards (lane VKFAR2), 4 the water draw (lane VKWATER3), 6 the fog bloom (lane VKFAR2), 8 rain / snow (lane VKFAR2), 9 the far ground (lane VKFAR3), 10 the underwater fog (lane VKWATER4), 11 the TAA mask's reactive pass (lane VKFAR7), 17 the lightning strips' preview (lane VKOBJ15)
 	VkFramebuffer fbAir = VK_NULL_HANDLE, fbM = VK_NULL_HANDLE, fbR = VK_NULL_HANDLE;
 	int w = 0, h = 0, vp[4] = {}, stencilRef = 1, march = kFxMarch, resolve = kFxResolve, mw = 0, mh = 0, hw = 0, hh = 0;
 	bool blend = false, skipMarch = false;
@@ -6105,6 +6121,11 @@ bool fxWork( std::string & why )
 		}
 	} else if ( F.kind == 11 ) {  // lane VKFAR7: the TAA mask's reactive pass
 		if ( !taRecord( why ) ) {
+			v.vkEndCommandBuffer( F.cmd );
+			return false;
+		}
+	} else if ( F.kind == 17 ) {  // lane VKOBJ15: the lightning strips' preview
+		if ( !boltRecord( why ) ) {
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
 		}
@@ -9629,3 +9650,6 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 #include "features/vkframe/vkunder.inc"  // lane VKWATER4 (L7): the underwater fog on the view
 #include "features/vkframe/vktaareactive.inc"  // lane VKFAR7: the TAA mask's reactive pass (taainputs.cpp pass 4)
 #include "features/vkframe/vklamp.inc"  // lane VKLAMP1: the lamps' plain shadow cubes (celllamps.cpp)
+#include "features/vkframe/vkobjvel.inc"  // lane VKOBJ12: the TAA inputs' step 3 (taa_objvel) on the view
+#include "features/vkframe/vkcamvel.inc"  // lane VKOBJ18: the TAA inputs' step 2 (game_taa_mv, the camera's vectors) on the view
+#include "features/vkframe/vkbolt.inc"  // lane VKOBJ15: the lightning strips' preview (census row 146)

@@ -31,6 +31,7 @@ BSD License - see nifskope.h
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 
 /* ---- lane SSGI1: screen-space GI (cellssgi.h, res/shaders/features/gi/cell_ssgi.frag) ---- */
 namespace
@@ -121,6 +122,10 @@ struct SsgiGpu
 	bool ready = false;
 	int frame = 0;
 	int unit = -1;
+	// lane VKOBJ21: the result as a shared target while the view is on Vulkan (finShare); a heap key (the hash moves its values)
+	std::shared_ptr<char> finKey = std::make_shared<char>( 0 );
+	bool finShared = false;
+	int finRefW = 0, finRefH = 0;	// a size the present device refused (not tried again until the size or the view moves)
 	// lane SSGI2FRAMES: a harness run's temporal state belongs to the view (or path frame), not to how many paints ran
 	struct Key { const void * doc; quint64 gen; int w, h, path, quality, red, shapes; float p0, p1, R[9], T[3]; };
 	struct Snap { int cur, frame; bool have, eHave; float R[9], T[3]; };
@@ -171,6 +176,54 @@ void alloc( NifSkopeOpenGLContext::GLFunctions * fn, Target & t, int w, int h, i
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, t.tex3, 0 );
 	t.w = w;
 	t.h = h;
+}
+
+/* lane VKOBJ21: while the view is on Vulkan the result (fin) is a shared target of the present device, so the cell twins read
+ * cellSsgi in place (red WW_VKVIEW_SSGI_RED=1, or a refusal: GL's own, as before; the twins then refuse those draws: "GL
+ * textures with no twin"). Runs before alloc( fin ), which then keeps it; the view off leaves the old calls as they were */
+void finShare( NifSkopeOpenGLContext::GLFunctions * fn, SsgiGpu & g, int w, int h )
+{
+	const std::uintptr_t key = reinterpret_cast<std::uintptr_t>( g.finKey.get() );
+	const bool want = WwVkPresent::shareWanted( "WW_VKVIEW_SSGI_RED" );
+	if ( g.finShared && ( !want || !WwVkPresent::sharedTargetIs( key, g.fin.tex ) || g.fin.w != w || g.fin.h != h ) ) {
+		WwVkPresent::sharedTargetDrop( key );	// the present device's name: dropped there, not deleted here
+		g.fin.tex = 0;
+		g.fin.w = g.fin.h = 0;
+		g.finShared = false;
+		std::fprintf( stderr, "vk ssgi: the result back to GL's (%s)\n", want ? "a new size or a present shutdown" : "the view off or the red" );
+	}
+	if ( !want )
+		g.finRefW = g.finRefH = 0;
+	if ( !want || g.finShared || ( g.finRefW == w && g.finRefH == h ) )
+		return;
+	unsigned t = 0;
+	std::string why;
+	if ( !WwVkPresent::sharedTarget( key, 0, w, h, 1, GL_RGBA16F, t, why ) ) {
+		WwVkPresent::sharedTargetDrop( key );
+		g.finRefW = w;
+		g.finRefH = h;
+		std::fprintf( stderr, "vk ssgi: the result stays GL's at %dx%d (%s)\n", w, h, why.c_str() );
+		return;
+	}
+	g.finRefW = g.finRefH = 0;
+	if ( g.fin.tex )
+		fn->glDeleteTextures( 1, &g.fin.tex );
+	fn->glBindTexture( GL_TEXTURE_2D, t );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	if ( !g.fin.fbo )
+		fn->glGenFramebuffers( 1, &g.fin.fbo );
+	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.fin.fbo );
+	fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t, 0 );
+	g.fin.tex = t;
+	g.fin.w = w;
+	g.fin.h = h;
+	g.finShared = true;
+	std::fprintf( stderr, "vk ssgi: the result shared %dx%d\n", w, h );
 }
 
 // lane SSGI2: EA's FAST spatiotemporal blue noise (res/ssgi, BSD-3; the sheet FO4CS's cast reads), 64 frames of 128 x 128
@@ -317,6 +370,7 @@ void wwCellSsgiPass( Scene * scene, bool run )
 	alloc( fn, g.cast, ww, wh, 0, false );
 	alloc( fn, g.acc[0], ww, wh, newBlur ? 2 : 1, false );
 	alloc( fn, g.acc[1], ww, wh, newBlur ? 2 : 1, false );
+	finShare( fn, g, ww, wh );	// lane VKOBJ21
 	alloc( fn, g.fin, ww, wh, 0, true );
 	if ( newBlur ) {
 		alloc( fn, g.qraw, qw, qh, 1, false );

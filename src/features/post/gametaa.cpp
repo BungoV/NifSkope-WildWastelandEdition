@@ -754,14 +754,14 @@ bool taaResolveImpl( Scene * scene, const LinearIn * lin )
 	const GLenum histFilter = s.redHist8Nearest ? GLenum( GL_NEAREST ) : GLenum( GL_LINEAR );
 	// lane POSTFX3: before the tone map t0 takes the linear frame's own format (the red's multisample blit needs it), t_out half floats
 	const GLenum curFormat = linear ? lin->format : GLenum( GL_RGBA8 ), outFormat = linear ? GLenum( GL_RGBA16F ) : GLenum( GL_RGBA8 );
-	/* lane VKSHARE1: the Modern resolve at High on the present device while the view is on Vulkan (WW_VKVIEW=1; red
+	/* lane VKSHARE1: the Modern resolve at High (lane VKOBJ14: and Ultra) on the present device while the view is on Vulkan (WW_VKVIEW=1; red
 	 * WW_VKVIEW_TAA_RED=1): its targets are shared, GL blits into them as before, then WwVkPresent::taaRun draws the vectors,
 	 * the resolve and the RCAS copy-back. Every other tier and shape stays on GL with its reason in the route line. */
 	const char * vkNo = nullptr;
 	const bool vkAsked = s.taa2 > 0 && WwVkPresent::shareWanted( "WW_VKVIEW_TAA_RED" );
 	if ( vkAsked ) {
-		if ( s.taa2 != 3 )
-			vkNo = "the tier is not High (only the default tier runs on Vulkan)";
+		if ( s.taa2 < 3 )
+			vkNo = "the tier is Low or Medium (High and Ultra run on Vulkan)";	// lane VKOBJ14: Ultra too
 		else if ( linear )
 			vkNo = "the resolve runs before the tone map (WW_TAA2_LINEAR=1)";
 		else if ( s.taa2Red )
@@ -1231,7 +1231,7 @@ bool taaResolveImpl( Scene * scene, const LinearIn * lin )
 				std::memcpy( t.mvJob.c[c], t.job.reproj + 4 * c, sizeof( t.mvJob.c[c] ) );
 			const float mvc[4] = { s.offX, s.offY, 1.0f / float( W ), 1.0f / float( H ) };
 			std::memcpy( t.mvJob.c[4], mvc, sizeof( mvc ) );
-			t.rcasJob.c[0][0] = std::exp2( -kRcasStops[3] );
+			t.rcasJob.c[0][0] = std::exp2( -kRcasStops[s.taa2] );	// lane VKOBJ14: the tier's stops (Ultra 0.3)
 			t.rcasJob.c[0][1] = expose;
 			t.cur = g.vkKey + 0;
 			t.depth = g.vkKey + 1;

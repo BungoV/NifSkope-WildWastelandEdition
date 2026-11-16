@@ -572,7 +572,12 @@ void BSShape::drawShapes( NodeList * secondPass )
 			fadeCounts.push_back( GLsizei( fadeKeep[k + 1] * 3 ) );
 			fadeOffsets.push_back( (const void *) ( size_t( fadeKeep[k] ) * 6 ) );
 		}
-		if ( !fadeCounts.empty() ) {
+		// lane VKOBJ9: the kept placements on a twin as the cull site tries them (vkCellDraw, then the bl twins)
+		if ( !fadeCounts.empty()
+			&& !WwBl::vkCellDraw( context->getCurrentProgram(), fadeCounts.data(), fadeOffsets.data(), GLsizei( fadeCounts.size() ),
+				size_t( verts.size() ) )
+			&& !WwBl::vkBlDraw( context->getCurrentProgram(), fadeCounts.data(), fadeOffsets.data(), GLsizei( fadeCounts.size() ),
+				size_t( verts.size() ), true ) ) {
 			WwBl::multiDrawElements( context->fn, fadeCounts.data(), fadeOffsets.data(), GLsizei( fadeCounts.size() ),
 				GLenum( context->triMode() ) );
 			PassTime::countDraw( qint64( fadeCounts.size() ) );
@@ -601,15 +606,24 @@ void BSShape::drawShapes( NodeList * secondPass )
 				glEnable( GL_BLEND );
 				glBlendFunc( GL_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA );
 			}
+			qint64 bandGl = 0;
 			for ( size_t k = 0; k < fadeAlpha.size(); k++ ) {
 				if ( viaAlpha )
 					cur->uni1f_l( la, a0 * fadeAlpha[k] );
 				else
 					context->fn->glBlendColor( 0.0f, 0.0f, 0.0f, fadeAlpha[k] );
-				WwBl::drawElements( context->fn, GLsizei( fadeBand[2 * k + 1] * 3 ), size_t( fadeBand[2 * k] ) * 6,
-					GLenum( context->triMode() ) );
+				/* lane VKOBJ9: a band draw on a non-bindless twin (vkCellDraw reads GL's loose alpha as set above); the constant-alpha
+				 * band is refused there by name (objBlFrameRead: no blend constants). Lane VKOBJ19: then the bl twins (the bl row holds
+				 * no alpha: objBlLoose reads GL's loose alpha per call, so the band's a0 x fade reaches them) */
+				const GLsizei bandCount = GLsizei( fadeBand[2 * k + 1] * 3 );
+				const void * bandOff = (const void *) ( size_t( fadeBand[2 * k] ) * 6 );
+				if ( WwBl::vkCellDraw( cur, &bandCount, &bandOff, 1, size_t( verts.size() ) )
+					|| WwBl::vkBlDraw( cur, &bandCount, &bandOff, 1, size_t( verts.size() ), true ) )
+					continue;
+				WwBl::drawElements( context->fn, bandCount, size_t( fadeBand[2 * k] ) * 6, GLenum( context->triMode() ) );
+				bandGl++;
 			}
-			PassTime::countDraw( qint64( fadeAlpha.size() ) );
+			PassTime::countDraw( bandGl );
 			if ( viaAlpha ) {
 				cur->uni1f_l( la, a0 );
 			} else {
