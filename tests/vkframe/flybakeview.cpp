@@ -13,7 +13,7 @@
 //   G  the route on Vulkan: GL_SAMPLES_PASSED == 0 around the whole route, onVk, S0 vs gv0
 // Bar (set before the first run, never widened): every arm EXACT (0 texels differ), read twice equal, no GL error.
 // Job checks (else the job cannot judge): 0 < occupancy < total, gv0 holds only 0 / 255, gv1..gv3 only 0..15, each pass
-// changes its input, slice 0 differs from slice nz - 1 and at least one adjacent slice pair differs.
+// changes its input, some slice differs from slice 0 and at least one adjacent slice pair differs.
 // Reds (each must FAIL; printed "N of M texels differ, U unwritten", moved = differ - unwritten):
 //   stuck    every slice drawn into slice 0 (FlyBakeRun.red 1): moved > 0
 //   offby1   slice k drawn into slice k + 1 (red 2): moved > 0
@@ -197,11 +197,15 @@ int main( int argc, char ** argv )
 		};
 		for ( int z = 0; z + 1 < nz; z++ )
 			adj += !sliceEq( z, z + 1 );
-		const bool ends = !sliceEq( 0, nz - 1 );
+		// red stuck needs a slice unlike slice 0 (the band fills the middle slices: slice 0 and nz - 1 may both be clear)
+		size_t notZero = 0;
+		for ( int z = 1; z < nz; z++ )
+			notZero += !sliceEq( 0, z );
+		const bool ends = notZero > 0;
 		const bool p1 = ref[1] != ref[0], p2 = ref[2] != ref[1], p3 = ref[3] != ref[2];
 		std::printf( "FLYBAKEVIEW INFO occupancy %zu of %zu cells (0 < occ < total: %s); gv0 off 0/255: %zu; gv1..3 past 15: %zu; adjacent slice pairs "
-			"that differ: %zu of %d; slice 0 vs %d %s; passes change their input: x %d y %d z %d\n",
-			occ, total, occ > 0 && occ < total ? "yes" : "NO", bad0, badS, adj, nz - 1, nz - 1, ends ? "differ" : "EQUAL", p1, p2, p3 );
+			"that differ: %zu of %d; slices unlike slice 0: %zu of %d; passes change their input: x %d y %d z %d\n",
+			occ, total, occ > 0 && occ < total ? "yes" : "NO", bad0, badS, adj, nz - 1, notZero, nz - 1, p1, p2, p3 );
 		if ( !( occ > 0 && occ < total ) || bad0 || badS || !adj || !ends || !p1 || !p2 || !p3 )
 			return fatal( "the job cannot judge the bake (see INFO)" );
 	}
