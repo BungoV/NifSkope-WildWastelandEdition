@@ -136,7 +136,8 @@ VKFRAME_FXG_ARGS = VKFRAME_SKY_ARGS + ['-fspv-preserve-bindings', '-D', 'WW_CELL
 VKFRAME_FXG = {'fargnd_view_ps': 'far-ground/fo4_cellcsmfgl_ps',
 	'reflrelight_view_ps': 'reflections/cell_reflrelight_ps',	# lane VKFAR16: the probe relight
 	'reflcap_view_ps': 'reflections/cell_reflcap_ps',	# lane VKFAR21: the probe G-buffer capture
-	'aodecal_view_ps': 'ao/cell_aodecal_ps'}	# lane VKAO3: the baked AO decals
+	'aodecal_view_ps': 'ao/cell_aodecal_ps',	# lane VKAO3: the baked AO decals
+	'volmask_view_ps': 'ao/cell_givol_ps'}	# lane VKAO4: the GI volume mask
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXG]
 # lane VKFAR16: the `fxr <name> <dir/file>` lines, fxg's flags + the all-on route's RT GI key
 VKFRAME_FXR_ARGS = VKFRAME_FXG_ARGS + ['-D', 'WW_CELL_RESTIR=1', '-D', 'WW_CELL_RTDDGI=1', '-D', 'WW_CELL_RTDDGI_CASCADES=1']
@@ -148,7 +149,8 @@ VKFRAME_FXT_ARGS = ['-fvk-b-shift', '256', '0', '-fvk-t-shift', '200', '0', '-fv
 	'-fspv-preserve-bindings']
 VKFRAME_FXT = {'fargnd_view_vs': 'core/water_view_vs', 'reflrelight_view_vs': 'reflections/cell_reflrelight_vs',
 	'reflcap_view_vs': 'reflections/cell_reflcap_vs',	# lane VKFAR21
-	'aodecal_view_vs': 'ao/cell_aodecal_vs'}	# lane VKAO3
+	'aodecal_view_vs': 'ao/cell_aodecal_vs',	# lane VKAO3
+	'volmask_view_vs': 'ao/cell_givol_vs'}	# lane VKAO4
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXT]
 # lane VKFAR2 P9: the lens-flare sprites, the script's `fxf <name> <dir/file> <profile>` lines (no shifts, no options)
 VKFRAME_FXF = {'lensflare_view_vs': ('post/lens_flare_view_vs', 'vs_6_0'), 'lensflare_view_ps': ('post/lens_flare', 'ps_6_0')}

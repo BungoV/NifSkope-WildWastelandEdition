@@ -329,6 +329,11 @@ ls -la reflcap_view_ps.spv.h reflcap_view_vs.spv.h
 fxg aodecal_view_ps ao/cell_aodecal_ps
 fxt aodecal_view_vs ao/cell_aodecal_vs
 ls -la aodecal_view_ps.spv.h aodecal_view_vs.spv.h
+# lane VKAO4: the GI volume mask (cell_givol.prog, ao.cpp giVolMaskPass, vkvolmask.inc) on fxg / fxt's shifts; no define (fxg's two
+# are inert: AoBindingsVk.hlsli has no #if). PS b31 at 31, volShapes 64, volGbuf 65 / 129; VS b31 at 287, volShapes 200
+fxg volmask_view_ps ao/cell_givol_ps
+fxt volmask_view_vs ao/cell_givol_vs
+ls -la volmask_view_ps.spv.h volmask_view_vs.spv.h
 # lane VKFAR7: the TAA mask's reactive pass (taainputs.cpp pass 4, vktaareactive.inc): pixel stage on fx()'s shifts (b31 at 31,
 # BaseMap at 64 / 128), vertex stage on fxb()'s (its b31 at 32)
 fx taareactive_view_ps post/taa_reactive_ps

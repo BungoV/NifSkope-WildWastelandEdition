@@ -9639,3 +9639,4 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 #include "features/vkframe/vkreflrelight.inc"  // lane VKFAR19: the reflection probe relight into the shared atlas
 #include "features/vkframe/vkreflcapture.inc"  // lane VKFAR22: the reflection probes' G-buffer capture into the shared cubes
 #include "features/vkframe/vkaodecal.inc"  // lane VKAO3: the baked AO decals (cellaodecalgl.cpp)
+#include "features/vkframe/vkvolmask.inc"  // lane VKAO4: the GI volume mask (ao.cpp giVolMaskPass)
