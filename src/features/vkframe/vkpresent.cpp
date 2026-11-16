@@ -85,6 +85,9 @@
 #include "features/vkframe/vkdepthmax.h"
 #include "features/vkframe/vrs_rate_view_ps.spv.h"  // lane VKSMALL3: the shading rate images (vkvrs.inc)
 #include "features/vkframe/vkvrs.h"
+#include "features/vkframe/fxres_down_view_ps.spv.h"  // lane VKSMALL5: the soft-effect layer's two passes (vkfxres.inc)
+#include "features/vkframe/fxres_comp_view_ps.spv.h"
+#include "features/vkframe/vkfxres.h"
 #include "features/vkframe/cloud_composite_view_ps.spv.h"  // lane VKFAR2 (row P8): the clouds in front (vkcloudfront.inc)
 // lane VKFAR2 (row L8 slice 1): rain / snow as a record pass + instanced quads (vkprecip.inc)
 #include "features/vkframe/precip_view_cs.spv.h"
@@ -792,6 +795,7 @@ bool csRecord( std::string & why );  // lane VKCLOUD3 (vkcloudshadow.inc): fxWor
 bool cmRecord( std::string & why );  // lane VKCLOUD4 (vkcloudmap.inc): fxWork's kind 13, the cloud map's build
 bool dmRecord( std::string & why );  // lane VKSMALL2 (vkdepthmax.inc): fxWork's kind 14, the frame's farthest depth
 bool vrsRecord( std::string & why );  // lane VKSMALL3 (vkvrs.inc): fxWork's kind 15, the shading rate images
+bool fxresRecord( std::string & why );  // lane VKSMALL5 (vkfxres.inc): fxWork's kind 16, the soft-effect layer
 void waterDrop();
 void underDrop();  // lane VKWATER4 (vkunder.inc)
 void objDrop();  // lane VKOBJ1
@@ -5656,7 +5660,7 @@ struct Fx
 	VkFence fence = VK_NULL_HANDLE;
 	bool pending = false;
 	// this run's job, written by the drawing thread before the hand
-	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1), 3 the far cards (lane VKFAR2), 4 the water draw (lane VKWATER3), 6 the fog bloom (lane VKFAR2), 8 rain / snow (lane VKFAR2), 9 the far ground (lane VKFAR3), 10 the underwater fog (lane VKWATER4), 11 the TAA mask's reactive pass (lane VKFAR7), 12 the cloud shadow map (lane VKCLOUD3), 13 the cloud map (lane VKCLOUD4), 14 the farthest depth (lane VKSMALL2), 15 the shading rate images (lane VKSMALL3)
+	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1), 3 the far cards (lane VKFAR2), 4 the water draw (lane VKWATER3), 6 the fog bloom (lane VKFAR2), 8 rain / snow (lane VKFAR2), 9 the far ground (lane VKFAR3), 10 the underwater fog (lane VKWATER4), 11 the TAA mask's reactive pass (lane VKFAR7), 12 the cloud shadow map (lane VKCLOUD3), 13 the cloud map (lane VKCLOUD4), 14 the farthest depth (lane VKSMALL2), 15 the shading rate images (lane VKSMALL3), 16 the soft-effect layer (lane VKSMALL5)
 	VkFramebuffer fbAir = VK_NULL_HANDLE, fbM = VK_NULL_HANDLE, fbR = VK_NULL_HANDLE;
 	int w = 0, h = 0, vp[4] = {}, stencilRef = 1, march = kFxMarch, resolve = kFxResolve, mw = 0, mh = 0, hw = 0, hh = 0;
 	bool blend = false, skipMarch = false;
@@ -6141,6 +6145,11 @@ bool fxWork( std::string & why )
 		}
 	} else if ( F.kind == 15 ) {  // lane VKSMALL3: the shading rate images (cellvrs.cpp wwCellVrsBuild)
 		if ( !vrsRecord( why ) ) {
+			v.vkEndCommandBuffer( F.cmd );
+			return false;
+		}
+	} else if ( F.kind == 16 ) {  // lane VKSMALL5: the soft-effect layer (cellfxres.cpp steps 1 and 3)
+		if ( !fxresRecord( why ) ) {
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
 		}
@@ -9956,3 +9965,4 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 #include "features/vkframe/vkcloudmap.inc"  // lane VKCLOUD4: the cloud map's build (cloudmap.cpp)
 #include "features/vkframe/vkdepthmax.inc"  // lane VKSMALL2: the frame's farthest depth (cellhdr.cpp depthMaxMake)
 #include "features/vkframe/vkvrs.inc"  // lane VKSMALL3: the shading rate images (cellvrs.cpp wwCellVrsBuild)
+#include "features/vkframe/vkfxres.inc"  // lane VKSMALL5: the soft-effect layer (cellfxres.cpp wwCellFxResDraw)

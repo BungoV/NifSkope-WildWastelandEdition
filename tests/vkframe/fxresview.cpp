@@ -11,6 +11,11 @@
 //   z (R32F) and the layer depth (D32F) after step 1: EXACT, every texel bit-equal.
 //   colour after step 3, per sample (unpacked to W*S x H RGBA16F): fxview Halves ok() (<= 2 ulp, <= 0.1 % past 1 ulp).
 //   stencil after step 3, per sample: EXACT.
+//   Added after run 2 (measured, not a wider tolerance): NV GL blends a fixed set of pixels per PIXEL, one value
+//   C + T x mean(dst) into every sample, where the spec (and Vulkan) blends per sample (C + T x dst_s): runs 3-4 dumped
+//   it, 1144 / 1424 pixels, every one of them with sample-varying dst, GL = C + T x mean(start) at all of them, all
+//   other written pixels bit-equal. Those pixels (GL one value, start not) leave the colour compare and get their own:
+//   Vulkan per sample at every one, and Vulkan's sample mean within 1 ulp of GL's value per channel.
 // Floors: the start state read twice is EXACT (colour + stencil, before GL's and before Vulkan's passes); GL's composite
 // changes >= 1000 colour samples and leaves >= 1000 (cov holes); it rewrites >= 1000 stencil samples and leaves >= 1000;
 // arm A's edge probe (the comp source with outC = the edge flag) counts >= 100 edge pixels and >= 100 bilinear pixels.
@@ -490,11 +495,44 @@ int main( int argc, char ** argv )
 		o.st = readSt();
 	};
 	// a run against GL's: every compare of the bar; true = all pass
-	auto judge = [&]( const char * tag, const Out & gl, const Out & vk, bool print ) {
+	auto judge = [&]( const char * tag, const Out & gl, const Out & vk, const std::vector<std::uint16_t> & start, bool print ) {
 		const long dz = bitDiffs( vk.z, gl.z ), dd = bitDiffs( vk.depth, gl.depth ), ds = bitDiffs( vk.st, gl.st );
-		const Halves hv = compareHalves( vk.col, gl.col );
-		const bool ok = vk.ran && dz == 0 && dd == 0 && ds == 0 && hv.ok();
+		// GL's per-pixel blend pixels (the header): out of the sample compare, into their own
+		std::vector<std::uint16_t> vkCol = vk.col;
+		long ppx = 0, ppxPerSample = 0;
+		double ppxWorst = 0.0;
+		if ( vk.ran && vkCol.size() == gl.col.size() && start.size() == gl.col.size() ) {
+			auto same = [&]( const std::vector<std::uint16_t> & v, size_t p ) {
+				for ( int s = 1; s < S; s++ )
+					for ( int c = 0; c < 4; c++ )
+						if ( v[p + size_t( s ) * 4 + c] != v[p + c] )
+							return false;
+				return true;
+			};
+			for ( size_t p = 0; p < gl.col.size(); p += size_t( S ) * 4 ) {
+				if ( !same( gl.col, p ) || same( start, p ) || std::equal( gl.col.begin() + p, gl.col.begin() + p + S * 4, start.begin() + p ) )
+					continue;
+				ppx++;
+				ppxPerSample += !same( vk.col, p );
+				for ( int c = 0; c < 4; c++ ) {
+					double m = 0.0;
+					for ( int s = 0; s < S; s++ )
+						m += h2f( vk.col[p + size_t( s ) * 4 + c] );
+					m /= S;
+					const std::uint16_t gh = gl.col[p + c];
+					const double g = h2f( gh ), ulp = std::fabs( double( h2f( std::uint16_t( gh + 1 ) ) ) - g );
+					ppxWorst = std::max( ppxWorst, std::fabs( m - g ) / ( ulp > 0 ? ulp : 1e-30 ) );
+				}
+				std::copy( gl.col.begin() + p, gl.col.begin() + p + S * 4, vkCol.begin() + p );
+			}
+		}
+		const bool ppxOk = ppxPerSample == ppx && ppxWorst <= 1.0;
+		const Halves hv = compareHalves( vkCol, gl.col );
+		const bool ok = vk.ran && dz == 0 && dd == 0 && ds == 0 && hv.ok() && ppxOk;
 		if ( print ) {
+			std::printf( "FXRESVIEW %s GL per-pixel blend: %ld pixels (GL one value, start samples differ), Vulkan per sample at %ld (want all), "
+						 "Vulkan's sample mean vs GL max %.3f ulp (want <= 1): %s\n",
+				tag, ppx, ppxPerSample, ppxWorst, ppxOk ? "OK" : "FAIL" );
 			std::printf( "FXRESVIEW %s z: %ld of %zu texels differ: %s\n", tag, dz, gl.z.size(), dz == 0 ? "EXACT" : "FAIL" );
 			std::printf( "FXRESVIEW %s layer depth: %ld of %zu texels differ: %s\n", tag, dd, gl.depth.size(), dd == 0 ? "EXACT" : "FAIL" );
 			std::printf( "FXRESVIEW %s colour: %zu of %zu halves differ, %zu past 1 ulp, max %d ulp: %s\n", tag, hv.diff, hv.total, hv.past1,
@@ -526,6 +564,9 @@ int main( int argc, char ** argv )
 		gl.z = readR32( L.z, w, h );
 		gl.depth = readD32( L.depth, w, h );
 		clearFill( L.layerFb, w, h, A.seed );
+		std::vector<std::uint16_t> colPre;
+		if ( std::getenv( "FXRESVIEW_DUMP" ) )
+			colPre = readCol();  // diagnostics: the frame right before GL's composite
 		glComp( L, A.scale, A.mode );
 		gl.col = readCol();
 		gl.st = readSt();
@@ -566,7 +607,20 @@ int main( int argc, char ** argv )
 		Out vk;
 		vkRun( A.scale, A.mode, A.seed, 0, 0, vk );
 		std::printf( "FXRESVIEW arm %s green: %s%s\n", A.name, vk.ran ? "ran" : "refused: ", vk.ran ? "" : vk.why.c_str() );
-		const bool g = judge( A.name, gl, vk, true );
+		if ( const char * dump = std::getenv( "FXRESVIEW_DUMP" ) ) {  // diagnostics: start, GL and Vulkan colour (W*S x H RGBA halves)
+			const std::vector<std::uint16_t> * v[4] = { &col0, &gl.col, &vk.col, &colPre };
+			static const char * const nm[4] = { "start", "gl", "vk", "pre" };
+			for ( int k = 0; k < 4; k++ ) {
+				const std::string p = std::string( dump ) + "/arm" + char( '0' + a ) + "_" + nm[k] + ".bin";
+				if ( FILE * fp = std::fopen( p.c_str(), "wb" ) ) {
+					const int hd[3] = { W, H, S };
+					std::fwrite( hd, sizeof( hd ), 1, fp );
+					std::fwrite( v[k]->data(), 2, v[k]->size(), fp );
+					std::fclose( fp );
+				}
+			}
+		}
+		const bool g = judge( A.name, gl, vk, col0, true );
 		std::printf( "FXRESVIEW arm %s green: %s\n", A.name, g ? "OK" : "FAIL" );
 		gateOk = gateOk && g;
 		if ( a == 0 ) {
@@ -581,13 +635,13 @@ int main( int argc, char ** argv )
 				seedFrame( A.seed );
 				Out rv;
 				vkRun( A.scale, A.mode, A.seed, r.down, r.comp, rv );
-				const bool pass = judge( r.what, gl, rv, false );
+				const bool pass = judge( r.what, gl, rv, col0,false );
 				const int patched = r.down == 4 ? WwVkPresent::fxresRedPatches() : -1;
 				const bool bites = rv.ran && !pass && ( r.down != 4 || patched > 0 );
 				std::printf( "FXRESVIEW %s: %s%s, patched words %d, want FAIL: %s\n", r.what, rv.ran ? "ran" : "refused: ",
 					rv.ran ? "" : rv.why.c_str(), patched, bites ? "FAIL (OK)" : "TESTS NOTHING" );
 				if ( rv.ran )
-					judge( r.what, gl, rv, true );
+					judge( r.what, gl, rv, col0,true );
 				gateOk = gateOk && bites;
 			}
 		}
