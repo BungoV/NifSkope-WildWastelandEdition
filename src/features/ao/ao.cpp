@@ -180,6 +180,10 @@ struct AoGpu
 	AoTarget gbuf;			// full size: view normal + linear depth (RGBA32F), with a depth-stencil buffer
 	GLuint gbufDepth = 0;
 	GLenum gbufFmt = 0;		// MODULES1: its format (the pre-pass's while the pre-pass feeds it)
+	GLuint gbufDepthTex = 0;	// lane VKAO3: its shared twin while the view is on Vulkan (depthShare), attached instead of it
+	int gbufDepthTexW = 0, gbufDepthTexH = 0, gbufDepthNoW = 0, gbufDepthNoH = 0;	// its shape; a shape the share refused
+	GLenum gbufDepthTexFmt = 0, gbufDepthNoFmt = 0;
+	std::shared_ptr<char> gbufDepthKey;	// its sharedTarget key (a stable address: the AoGpu moves with its hash)
 	GLuint preFbo = 0, preDs = 0;	// MODULES1: the depth pre-pass, multisampled as the linear frame
 	int preW = 0, preH = 0, preS = 0;
 	GLenum preFmt = 0;
@@ -221,6 +225,55 @@ QHash<const void *, AoGpu> & aoGpus()
 {
 	static QHash<const void *, AoGpu> g;
 	return g;
+}
+
+/* lane VKAO3: while the view is on Vulkan (red WW_VKVIEW_AODEPTH_RED=1) the opaque pass's depth-stencil is a shared texture
+ * of the present device (D24S8, or the pre-pass's D32F_S8), so the AO decals' route (vkaodecal.inc) uses it in place; every
+ * attach of it goes through depthAttach. The view off (or a refusal): gbufDepth, the renderbuffer, as before */
+bool depthShare( AoGpu & g, int W, int H, GLenum fmt )
+{
+	if ( !g.gbufDepthKey )
+		g.gbufDepthKey = std::make_shared<char>( 0 );
+	const std::uintptr_t key = reinterpret_cast<std::uintptr_t>( g.gbufDepthKey.get() );
+	const bool want = WwVkPresent::shareWanted( "WW_VKVIEW_AODEPTH_RED" ) && ( fmt == GL_DEPTH24_STENCIL8 || fmt == GL_DEPTH32F_STENCIL8 );
+	if ( g.gbufDepthTex && ( !want || !WwVkPresent::sharedTargetIs( key, g.gbufDepthTex ) || g.gbufDepthTexW != W
+		|| g.gbufDepthTexH != H || g.gbufDepthTexFmt != fmt ) ) {
+		WwVkPresent::sharedTargetDrop( key );	// the present device's name: dropped there, not deleted here
+		g.gbufDepthTex = 0;
+		g.gbufDepthOn = 0;
+		g.gbufOkKey = 0;
+	}
+	if ( !want )
+		g.gbufDepthNoW = g.gbufDepthNoH = 0;
+	if ( !want || g.gbufDepthTex )
+		return g.gbufDepthTex != 0;
+	if ( g.gbufDepthNoW == W && g.gbufDepthNoH == H && g.gbufDepthNoFmt == fmt )
+		return false;
+	unsigned t = 0;
+	std::string why;
+	if ( !WwVkPresent::sharedTarget( key, 0, W, H, 1, fmt, t, why ) || !t ) {
+		WwVkPresent::sharedTargetDrop( key );
+		g.gbufDepthNoW = W;
+		g.gbufDepthNoH = H;
+		g.gbufDepthNoFmt = fmt;
+		qInfo().noquote() << "vk aodepth: the opaque depth stays GL's renderbuffer (" << QString::fromStdString( why ) << ")";
+		return false;
+	}
+	g.gbufDepthTex = t;
+	g.gbufDepthTexW = W;
+	g.gbufDepthTexH = H;
+	g.gbufDepthTexFmt = fmt;
+	g.gbufDepthOn = 0;
+	g.gbufOkKey = 0;
+	return true;
+}
+
+void depthAttach( NifSkopeOpenGLContext::GLFunctions * fn, GLenum fb, const AoGpu & g )
+{
+	if ( g.gbufDepthTex )
+		fn->glFramebufferTexture2D( fb, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, g.gbufDepthTex, 0 );
+	else
+		fn->glFramebufferRenderbuffer( fb, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, g.gbufDepth );
 }
 
 void aoAlloc( NifSkopeOpenGLContext::GLFunctions * fn, AoTarget & t, int w, int h, GLenum ifmt, GLenum fmt, bool linear )
@@ -298,7 +351,7 @@ bool giVolMaskPass( Scene * scene, AoGpu & g, const WwCellGi * G, int W, int H, 
 	}
 	aoAlloc( fn, g.volMask, W, H, GL_R32F, GL_RED, false );
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.volMask.fbo );
-	fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, g.gbufDepth );
+	depthAttach( fn, GL_FRAMEBUFFER, g );	// lane VKAO3
 	const GLenum one = GL_COLOR_ATTACHMENT0;
 	fn->glDrawBuffers( 1, &one );
 	if ( fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE )
@@ -1103,6 +1156,7 @@ void wwCellAoPass( Scene * scene, bool run )
 			a.preNote = QStringLiteral( "geom (the pre-pass target is incomplete)" );
 	}
 	const GLenum gbufFmt = usePre ? g.preFmt : GLenum( GL_DEPTH24_STENCIL8 );
+	const bool depthTex = depthShare( g, W, H, gbufFmt );	// lane VKAO3: the shared twin while the view is on Vulkan
 
 	// the targets
 	aoAlloc( fn, g.gbuf, W, H, GL_RGBA32F, GL_RGBA, false );
@@ -1117,7 +1171,9 @@ void wwCellAoPass( Scene * scene, bool run )
 		fn->glGetRenderbufferParameteriv( GL_RENDERBUFFER, GL_RENDERBUFFER_WIDTH, &rbw );
 		fn->glGetRenderbufferParameteriv( GL_RENDERBUFFER, GL_RENDERBUFFER_HEIGHT, &rbh );
 	}
-	if ( rbw != W || rbh != H || g.gbufFmt != gbufFmt ) {
+	if ( depthTex )
+		g.gbufFmt = gbufFmt;	// lane VKAO3: the shared texture holds the depth (the renderbuffer keeps its storage)
+	else if ( rbw != W || rbh != H || g.gbufFmt != gbufFmt ) {
 		fn->glBindRenderbuffer( GL_RENDERBUFFER, g.gbufDepth );
 		fn->glRenderbufferStorage( GL_RENDERBUFFER, gbufFmt, W, H );
 		g.gbufFmt = gbufFmt;
@@ -1129,7 +1185,7 @@ void wwCellAoPass( Scene * scene, bool run )
 	fn->glBindRenderbuffer( GL_RENDERBUFFER, 0 );
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.gbuf.fbo );
 	if ( g.gbufDepthOn != g.gbuf.fbo || gbufAsk ) {
-		fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, g.gbufDepth );
+		depthAttach( fn, GL_FRAMEBUFFER, g );	// lane VKAO3
 		g.gbufDepthOn = g.gbuf.fbo;
 		g.gbufOkKey = 0;
 	}
@@ -1322,7 +1378,8 @@ void wwCellAoPass( Scene * scene, bool run )
 	}
 	// the AO decal (src/gl/cellaodecalgl.h) copies over this opaque pass, into its own target
 	if ( g.decalUnit >= 0 && wwCellAoDecalHas( scene->nifModel ) )
-		g.decal = GLuint( wwCellAoDecalRun( scene, g.gbuf.tex, g.gbufDepth, W, H ) );
+		g.decal = GLuint( wwCellAoDecalRun( scene, g.gbuf.tex, g.gbufDepthTex ? g.gbufDepthTex : g.gbufDepth, W, H, g.gbufDepthTex != 0,
+			g.gbufFmt, g.gbufDepthTex ? reinterpret_cast<std::uintptr_t>( g.gbufDepthKey.get() ) : 0 ) );	// lane VKAO3
 
 	// 2. the full-screen passes (cell_ao.frag)
 	PassTime::subBegin( PassTime::AoStages );
@@ -1537,7 +1594,8 @@ bool wwCellAoTargets( Scene * scene, WwCellAoTargets & out )
 	if ( !g.ready || g.doc != scene->nifModel )
 		return false;
 	out.gbuf = g.gbuf.tex;
-	out.depthRb = g.gbufDepth;
+	out.depthRb = g.gbufDepthTex ? g.gbufDepthTex : g.gbufDepth;	// lane VKAO3: the shared texture while the view is on Vulkan
+	out.depthTex = g.gbufDepthTex != 0;
 	out.depthFmt = g.gbufFmt;
 	out.w = g.gbuf.w;
 	out.h = g.gbuf.h;

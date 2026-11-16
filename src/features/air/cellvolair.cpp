@@ -2879,7 +2879,10 @@ static void vaPassInner( Scene * scene, bool run )
 		if ( !g.zSrc )
 			fn->glGenFramebuffers( 1, &g.zSrc );
 		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.zSrc );
-		fn->glFramebufferRenderbuffer( GL_READ_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, GLuint( ao.depthRb ) );
+		if ( ao.depthTex )	// lane VKAO3: the AO pass's shared depth texture (the view on Vulkan)
+			fn->glFramebufferTexture2D( GL_READ_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, GLuint( ao.depthRb ), 0 );
+		else
+			fn->glFramebufferRenderbuffer( GL_READ_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, GLuint( ao.depthRb ) );
 		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.zFbo );
 		fn->glBlitFramebuffer( 0, 0, ao.w, ao.h, 0, 0, ao.w, ao.h, GL_DEPTH_BUFFER_BIT, GL_NEAREST );
 		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, 0 );
