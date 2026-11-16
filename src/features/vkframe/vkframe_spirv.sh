@@ -318,6 +318,8 @@ ls -la taareactive_view_ps.spv.h taareactive_view_vs.spv.h
 fxv lamp_view_vs lights/lamp_view_vs
 fx lamp_view_ps lights/lamp_view_ps
 ls -la lamp_view_vs.spv.h lamp_view_ps.spv.h
+# lane VKCLOUD1: the cloud shadow map (cloudshadow.cpp, vkcloudshadow.inc), the readable source itself on fx()'s shifts
+fx cloud_shadowmap_view_ps clouds/cloud_shadowmap_ps
 # lane VKWATER4: the water look off (fo4_water.prog), frozen from the old fo4_water_ps FOGLEAK + FRAME_UBO spirv-cross file
 fxkw water_view_off_ps water/water_view_off_ps
 # lane VKWATER4 (L7): the camera-underwater fog (cell_underwater.prog + its per-sample _ms), frozen twins: both outputs at

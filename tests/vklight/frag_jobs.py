@@ -306,6 +306,57 @@ def cloud_jobs():
     return out
 
 
+# lane VKCLOUD1 (2026-11-16): the cloud shadow map, features/clouds/cloud_shadowmap.frag vs clouds/cloud_shadowmap_ps.hlsl
+# (the source of the app's twin, vkframe_spirv.sh `fx cloud_shadowmap_view_ps`), one job per csMode branch, 256 x 256
+# over a 48 km fit, sun 35 deg up. Bars fixed before the first run: vol (csMode 1) = MARCH_RULE (the march's own
+# cloudDensity); band (csMode 3, csSheetN 0), beer (csMode 2) and sheets (csMode 3, 2 sheets, 4 taps, hex, one sheet
+# blended) = CS_RULE, rel 1e-4 on at most 1 % of values: od = -log(mask) cancels near mask 1, so a last-bit mask moves a
+# thin od's relative value. Each job must meet a cloud on >= 5 % of its texels (min_cloud) and its reds must FAIL.
+CS_RULE = ('rel', 1e-4, 0.01)
+
+
+def cloudshadow_jobs():
+    if not CLOUDIN or not os.path.exists(os.path.join(CLOUDIN, 'cloud_inputs.json')):
+        return []
+    J = json.load(open(os.path.join(CLOUDIN, 'cloud_inputs.json')))
+    shape = np.fromfile(os.path.join(CLOUDIN, 'shape.bin'), np.uint8).reshape(128, 128, 128)
+    detail = np.fromfile(os.path.join(CLOUDIN, 'detail.bin'), np.uint8).reshape(32, 32, 32)
+    n = 256
+    el, az = np.radians(35.0), np.radians(40.0)
+    s = np.array([np.cos(el) * np.cos(az), np.cos(el) * np.sin(az), np.sin(el)])
+    e1 = np.array([-s[1], s[0], 0.0]); e1 /= np.linalg.norm(e1)
+    e2 = np.cross(s, e1)
+
+    def sheet(seed):
+        return Tex('2d', 'rgba8', (smooth(64, 64, 4, seed) * 255.0).astype(np.uint8), 'linear', 'repeat')
+    none = Tex('2d', 'rgba8', np.zeros((1, 1, 4), np.uint8), 'nearest', 'clamp')
+    T = {'cvShape': Tex('3d', 'r8', shape, 'linear', 'repeat'), 'cvDetail': Tex('3d', 'r8', detail, 'linear', 'repeat'),
+         'cvMap': Tex('2d', 'rgba32f', smooth(64, 64, 4, 17), 'linear', 'clamp'),
+         'csSheetTex': [sheet(21), sheet(22)] + [none] * 6, 'csSheetTex2': [sheet(23), sheet(24)] + [none] * 6}
+    k = KM / 20.0  # uv per world unit: a 20 km tile
+    base = dict(J['march_full'])
+    base.update({'csE1': list(e1), 'csE2': list(e2), 'csS': list(s), 'csFit': [0.0, 0.0, 48.0, 48.0 / n],
+                 'csSize': [float(n), float(n)], 'csSteps': [16], 'csFs': [1.0, 1.0, 0.25], 'csSheetN': [0],
+                 'csSheetP': [4.0, 1.0, 0.00465, 0.0], 'csUnitKm': [KM],
+                 'csSheetA': [k, 0.0, 0.0, k, 1.3 * k, 0.2 * k, -0.1 * k, 1.3 * k] + [0.0] * 24,
+                 'csSheetB': [0.1, 0.3, 2.0, 0.9, 0.7, 0.2, 6.0, 0.6] + [0.0] * 24,
+                 'csSheetC': [0.0, 3.0, 0.0, 0.0, 0.4, 2.0, 0.0, 0.0] + [0.0] * 24})
+    mapped = dict(base, **{'cvBands.mapRect': [-30.0, -30.0, 1.0 / 60.0, 1.0]})
+    hl, gl = 'clouds/cloud_shadowmap_ps.hlsl', 'clouds/cloud_shadowmap.frag'
+
+    def job(name, u, rule, reds):
+        return dict(name='cloudshadow_' + name, size=(n, n), hlsl=hl, glsl=gl, defines=[], uniforms=u, textures=T,
+                    rule=rule, reds=reds, min_cloud=n * n // 20)
+    return [job('vol', dict(base, csMode=[1]), MARCH_RULE,
+                [('od += kCvSigma * d * dh / csS.z;', 'od += kCvSigma * d * dh / csS.z * 0.98f;')]),
+            job('band', dict(mapped, csMode=[3]), CS_RULE, [('kept *= 1.0 - c;', 'kept *= 1.0 - c * 0.98f;')]),
+            job('beer', dict(mapped, csMode=[2]), CS_RULE,
+                [('float T = 1.0 - c * ( 1.0 - exp( -tau ) );', 'float T = 1.0 - c * ( 1.0 - exp( -tau * 0.98f ) );')]),
+            job('sheets', dict(mapped, csMode=[3], csSheetN=[2]), CS_RULE,
+                [('kept *= 1.0 - cover;', 'kept *= 1.0 - cover * 0.98f;'),
+                 ('csSheetC[i].x );', 'csSheetC[i].x * 0.5f );')])]
+
+
 def jobs(want, tex):
     global Tex
     Tex = tex
@@ -322,6 +373,9 @@ def jobs(want, tex):
     clouds = cloud_jobs()
     if 'clouds' in (want or []):
         want = list(want) + [j['name'] for j in clouds]
+    cs = cloudshadow_jobs()  # lane VKCLOUD1: only when named ('cloudshadow' = all of them)
+    if 'cloudshadow' in (want or []):
+        want = list(want) + [j['name'] for j in cs]
     # probes (only when named): one term off at a time, to find which one carries a difference
     full = 2 | 4 | 8 | 64 | 16384 | 65536 | 131072
     leak = ('air/volsky_view_ps.hlsl', ['WW_CELL_FOGLEAK'])
@@ -560,4 +614,4 @@ def jobs(want, tex):
         for vn, vv in RES_VARS.items():
             probes.append(dict(rs[0], name='probe_res_pv_' + vn, reds=[], gl_edit=[(gr, 'cvOut = vec4( pv, f );')],
                                vk_edit=vv + [(vr, 'cvOut = float4(pv, f);')]))
-    return [j for j in all_ if not want or j['name'] in want] + [j for j in clouds + probes if j['name'] in want]
+    return [j for j in all_ if not want or j['name'] in want] + [j for j in clouds + cs + probes if j['name'] in want]
