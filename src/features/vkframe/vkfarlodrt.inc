@@ -100,7 +100,7 @@ bool farLodRtRun( const WaterRun & r, int v, std::string & why )
 	 * whenever it ran), the RT twin (1) reads cellGiHalf / cellGiHalfKey in place, VKBUF2's shared images found by name
 	 * (vkrtbuf.h rtImgOf): each bound GL name must be the shared one. twinRun binds the shared view (farSharedOf) and writes the
 	 * descriptor sets on every run, so a remake (rtImgGen moved) needs no cache here. A name that is not shared, or not the
-	 * bound one, stays on GL by name. The DG twin (2) does not read the screen GI: refused by name. */
+	 * bound one, stays on GL by name. The DG twin (2) reads them too, but its route is not gated yet: refused by name. */
 	const FxField * fs = v == 2 ? kT_farlodDgPs : kT_farlodRtPs;
 	const int nf = v == 2 ? int( sizeof( kT_farlodDgPs ) / sizeof( kT_farlodDgPs[0] ) ) : int( sizeof( kT_farlodRtPs ) / sizeof( kT_farlodRtPs[0] ) );
 	for ( int i = 0; i < nf; i++ )
@@ -112,7 +112,7 @@ bool farLodRtRun( const WaterRun & r, int v, std::string & why )
 				continue;
 			std::string w;
 			if ( v == 2 )
-				w = "the DG twin does not read cellGiHalf / cellGiHalfKey (GL's half-rate screen GI)";
+				w = "the DG twin's read of cellGiHalf / cellGiHalfKey is not routed yet (GL's half-rate screen GI)";
 			for ( const char * nm : { "cellGiHalf", "cellGiHalfKey" } ) {
 				if ( !w.empty() )
 					break;
@@ -129,7 +129,7 @@ bool farLodRtRun( const WaterRun & r, int v, std::string & why )
 				if ( !s )
 					w = std::string( nm ) + ": GL's program has no such sampler";
 				else if ( s->tex != img.glTex )
-					w = std::string( nm ) + ": GL binds its own texture, not the shared one";
+					w = std::string( nm ) + ": the bound texture is not the shared image of that name";
 				else if ( farSharedOf( s->tex ) != img.key )
 					w = std::string( nm ) + ": the shared image is not the bound name's";
 			}

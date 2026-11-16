@@ -28,7 +28,7 @@
 // shared cellDdgiAtlas shifted one texel the same way; red key: the DG twin on the RT program, the base twin (farLodRun) on
 // the DG program (FAIL or REFUSE both count).
 // Refusal check (seed 1 of the DG key, counted): cellGiHalfOn 1 must REFUSE with the "cellGiHalfOn 1" reason (the DG twin
-// does not read the screen GI). Lane VKFAR30: on the RT key (twin 1, the all-on key) this refusal became a route, so its
+// reads the screen GI too, but its route is not gated yet). Lane VKFAR30: on the RT key (twin 1, the all-on key) this refusal became a route, so its
 // check is replaced by the all-on arm.
 // All-on arm (seed 1 of the RT key): cellGiHalf / cellGiHalfKey are VKBUF2's shared images (vkrtbuf.h rtImgShare at W x H,
 // step 1: cellGiHalfScale 1, cellGiHalfRect (0, 0, W, H); owners registered, always fresh) and GL binds THOSE names;
