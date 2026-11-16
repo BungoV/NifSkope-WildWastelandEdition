@@ -716,8 +716,13 @@ int main( int argc, char ** argv )
 			Knobs k;
 			bool * b[6] = { &k.noMask, &k.otherBlend, &k.mode0, &k.cullBack, &k.noClamp, &k.keepBit };
 			*b[r] = true;
-			const int n = moved( gl, glRun( add, k ) );
-			std::printf( "AODECALDRAW %s GL probe red %d %s: moved %d texels %s\n", armName, 1 << r, redName[r], n, n >= 50 ? "LIVE" : "TESTS NOTHING" );
+			const Pass pr = glRun( add, k );
+			const int n = moved( gl, pr );
+			int nT = 0;	// info: the target alone (the mask red's stencil effect on the AO, not only its selfId)
+			for ( size_t i = 0; i < gl.target.size(); i++ )
+				nT += gl.target[i] != pr.target[i] ? 1 : 0;
+			std::printf( "AODECALDRAW %s GL probe red %d %s: moved %d texels (target %d) %s\n", armName, 1 << r, redName[r], n, nT,
+				n >= 50 ? "LIVE" : "TESTS NOTHING" );
 			okAll = okAll && n >= 50;
 		}
 #ifdef WW_VK_AODECAL
