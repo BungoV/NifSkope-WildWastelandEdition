@@ -8963,6 +8963,7 @@ ObjStat takeObjStat()
 #include "features/vkframe/vkpost7.inc"  // lane VKFAR2 P7: DoF, motion blur and object blur in the deferred tone pass
 #include "features/vkframe/vkobjpipe.inc"  // lane VKOBJ4: the bl twins' shaded pipelines (row G4 slice 4)
 #include "features/vkframe/vkddgi.inc"  // lane VKFAR3: the DDGI probe atlas imported from bakert's device
+#include "features/vkframe/vkrtbuf.inc"  // lane VKBUF1: cellDdgiAtlas / cellRestir on the present device by name
 
 namespace
 {
