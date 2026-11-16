@@ -148,7 +148,7 @@ src/gl/glcontext.cpp|wwWarmPrograms|glDrawArrays|1	other		program warm-up: one p
 src/gl/glcontext.hpp|<file>|glDrawElements|1	other		wrapper body: NifSkopeOpenGLContext::drawShape (its callers are the sites)
 src/gl/glcontext.hpp|<file>|glDrawElements|2	other		wrapper body: NifSkopeOpenGLContext::drawShape (its callers are the sites)
 src/gl/glmarker.cpp|GLMarker::drawMarker|glDrawElements|1	other		editor: markers
-src/gl/glmesh.cpp|Mesh::drawShapes|glDrawElements|1	glonly		NiTriShape / NiTriStrips geometry (Mesh), older-format shapes
+src/gl/glmesh.cpp|Mesh::drawShapes|glDrawElements|1	other		legacy NiTriShape (non-FO4): Mesh is made only for NiTriShape / NiTriStrips / NiTriBasedGeom / NiMesh; VKOBJ17 census of 226009 vanilla FO4 + DLC NIFs: 0 such blocks (1205659 BSTriShape-family)
 src/gl/glmesh.cpp|Mesh::drawSelection|glDrawElements|1	other		editor: selection
 src/gl/glmesh.cpp|Mesh::drawSelection|glDrawArrays|1	other		editor: selection
 src/gl/glmesh.cpp|Mesh::drawSelection|glDrawElements|2	other		editor: selection
