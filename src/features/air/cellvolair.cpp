@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "features/air/cellvolair.h"
+#include "features/air/cellvolairkeys.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "wwsyncwait.h"	// lane EMPTY240 R4-2: the env strata's read-back by name
 #include "features/weather/wxoverride.h"	// lane MODULES1 item 12: live air overrides
@@ -552,6 +553,7 @@ struct VaGpu
 	bool terrOn = false;	// lane FOGTERRAIN2: the pass stood on the grid; the surfaces and particles read the same
 	float terrXf[4] = { 0, 0, 0, 0 }, terrRef = 0.0f;
 	float terrFineXf[4] = { 0, -1, 0, -1 };	// lane FOGTERRAIN3: layer 1's rows (uv -1: no fine level)
+	VaVkKeys vkKeys;	// lane VKAIR7: the shared targets' keys (a QHash move keeps them; tests/vkframe/airkeys.sh)
 };
 
 /* THE CLUSTERED LIGHTS (coordinator 10-14). The inject evaluates the placed lights once per froxel, at the middle of
@@ -2212,13 +2214,13 @@ static void vaPassInner( Scene * scene, bool run )
 	const bool half = !s.f32;	// lane PERFFIX3: RGBA16F volumes (red f32: RGBA32F, as before)
 	/* lane VKFAR2: the integrate on the present device wants the inject there too (red WW_VKVIEW_FOG_RED=1: GL's own, GL's
 	 * integrate); a red flipped live, or a shutdown that dropped the shared names, makes the volumes again */
-	const std::uintptr_t injectKey = reinterpret_cast<std::uintptr_t>( &g.inject );
+	const std::uintptr_t injectKey = g.vkKeys.at( VaVkKeys::Inject );
 	const bool fogShare = WwVkPresent::shareWanted( "WW_VKVIEW_AIR_RED" ) && WwVkPresent::shareWanted( "WW_VKVIEW_FOG_RED" );
 	if ( g.cols != cols || g.rows != rows || g.slices != kSlices || !g.inject || g.texW != texW || g.texH != texH || g.texD != texD
 		|| g.half != half || g.injectAsk != fogShare || ( g.injectShared && !WwVkPresent::sharedTargetIs( injectKey, g.inject ) ) ) {
 		/* lane VKAIR1 (row L5): while the view is on Vulkan the integrated volume is a shared target of the present
 		 * device, so the sky's air reads it there with no copy (red WW_VKVIEW_AIR_RED=1, or a refusal: GL's own, as before) */
-		const std::uintptr_t integKey = reinterpret_cast<std::uintptr_t>( &g.integ );
+		const std::uintptr_t integKey = g.vkKeys.at( VaVkKeys::Integ );
 		bool integShared = false;
 		if ( WwVkPresent::shareWanted( "WW_VKVIEW_AIR_RED" ) ) {
 			if ( g.integ && !WwVkPresent::sharedTargetIs( integKey, g.integ ) ) {
@@ -2892,7 +2894,7 @@ static void vaPassInner( Scene * scene, bool run )
 	/* lane VKAIR5: while the view is on Vulkan (WW_VKVIEW_AIRINJECT_RED unset) the tile and stage 0's depth are shared
 	 * targets of the present device: the inject's twin (vkairinject.h) draws the tile in place reading the depth in place.
 	 * A red flipped live, or a shutdown that dropped the shared names, makes them again (GL's own: the calls as before) */
-	const std::uintptr_t tileKey = reinterpret_cast<std::uintptr_t>( &g.tile ), zKey = reinterpret_cast<std::uintptr_t>( &g.zTex );
+	const std::uintptr_t tileKey = g.vkKeys.at( VaVkKeys::Tile ), zKey = g.vkKeys.at( VaVkKeys::Z );
 	const bool aiShare = WwVkPresent::shareWanted( "WW_VKVIEW_AIRINJECT_RED" );
 	if ( tileOn && ( g.tileCols != cols || g.tileRows != rows || !g.tile || g.tileShared != aiShare
 		|| ( g.tileShared && !WwVkPresent::sharedTargetIs( tileKey, g.tile ) ) ) ) {
@@ -3121,7 +3123,7 @@ static void vaPassInner( Scene * scene, bool run )
 	const bool oneSum = g.mrtOk == 1 && !( s.red & 268435456 );
 	/* lane VKFAR2: while the view is on Vulkan the integrate (stages 2 / 3) is a compute pass there (vkfog.inc,
 	 * volair_integ_cs.hlsl), one crossing a grid, into the shared volume; a refusal draws GL's integrate this frame */
-	const std::uintptr_t integKeyF = reinterpret_cast<std::uintptr_t>( &g.integ );
+	const std::uintptr_t integKeyF = g.vkKeys.at( VaVkKeys::Integ );
 	const bool fogVk = g.injectShared && WwVkPresent::sharedTargetIs( injectKey, g.inject )
 		&& WwVkPresent::sharedTargetIs( integKeyF, g.integ );
 	if ( fogShare && !fogVk )
@@ -3816,7 +3818,7 @@ bool wwVolAirShareOf( Scene * scene, WwVolAirShare & o )
 	o.on = s.on && g.ready && g.doc == scene->nifModel && g.unitsOk > 0 && g.integ != 0;
 	if ( !o.on )
 		return false;
-	o.integKey = reinterpret_cast<std::uintptr_t>( &g.integ );
+	o.integKey = g.vkKeys.at( VaVkKeys::Integ );
 	o.integTex = g.integ;
 	o.integShared = WwVkPresent::sharedTargetIs( o.integKey, g.integ );
 	o.half = g.half;
@@ -3983,7 +3985,7 @@ bool vaSkyOnVulkan( Renderer * r, NifSkopeOpenGLContext::Program * prog, VaGpu &
 		static const char * const kName[7] = { "atApTex", "volAirTerr", "volAirRainMap", "volTex", "volTile", "atSkyTransTex", "volAirNoise" };
 		static const int kType[7] = { 1, 2, 0, 1, 0, 0, 1 };
 		static char twin[7];
-		const std::uintptr_t integKey = reinterpret_cast<std::uintptr_t>( &g.integ );
+		const std::uintptr_t integKey = g.vkKeys.at( VaVkKeys::Integ );
 		bool ok = true;
 		for ( int k = 0; k < 7 && ok; k++ ) {
 			ok = WwVkPresent::fxTexOf( fn, prog->id, kName[k], kType[k], t.tex[k], why );
