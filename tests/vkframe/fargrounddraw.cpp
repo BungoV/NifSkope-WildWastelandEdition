@@ -1355,6 +1355,90 @@ int main( int argc, char ** argv )
 		arm( "the same, queued + flushed", vkTiles( 2, 3, 0, decalsSplit ), glSplit, false, 2, 3 );
 		exact( "tile 0 after the batches vs before", vkTiles( 0, 1, 0, nullptr ), one0 );
 		{
+			/* lane VKFLIGHT13: each copied GL input once a frame (vkwater.inc twinCopyKept). The app copied every non-shared input
+			 * of every far ground draw (flight 8d01173c: 74554 copies for 4969 RT draws, 0.317 ms CPU a draw). With the frame clock
+			 * on (twinCopyEpoch > 0, frame() / toneRun in the app): n single crossings in one frame copy what one run copies, the
+			 * same frame again copies nothing, a new frame copies again, a batch the same; red 8192 copies every run (n x). The
+			 * memo's skip binds the same twins: tile 0 drawn with 0 copies is EXACT against one0. Without the memo (the old app)
+			 * the counts read n x and the arm FAILS. Clock back to 0 after (the arms below copy every run, as before). */
+			auto frameNext = [&]() {
+#ifdef WW_VK_TWINCOPYMEMO
+				twinCopyEpoch()++;
+#endif
+			};
+			struct Cp
+			{
+				int copies = 0, runs = 0;
+				double ms = 0.0;
+				bool ran = true;
+			};
+			auto copiesOf = [&]( int n, int red ) {
+				Cp o;
+				before( fbFrame );
+				for ( int k = 0; k < n; k++ ) {
+					tileOn( fbFrame, 0, nullptr );
+					const WwVkPresent::WaterRun r = tileRun( red );
+					o.ran = WwVkPresent::farGroundRun( r, why ) && o.ran;
+					stateEnd();
+					const WwVkPresent::FxStat st = take();
+					o.copies += st.copies, o.runs += st.runs, o.ms += st.cpuMs;
+				}
+				runs += n;
+				return o;
+			};
+			auto batchOf = [&]() {
+				Cp o;
+				before( fbFrame );
+				std::vector<WwVkPresent::WaterRun> rs( static_cast<std::size_t>( 3 ) );
+				std::vector<const WwVkPresent::WaterRun *> ps;
+				for ( int k = 0; k < 3; k++ ) {
+					tileOn( fbFrame, k, nullptr );
+					rs[size_t( k )] = tileRun( 0 );
+					stateEnd();
+				}
+				for ( const WwVkPresent::WaterRun & r : rs )
+					ps.push_back( &r );
+				o.ran = WwVkPresent::farGroundRunN( ps.data(), 3, why );
+				const WwVkPresent::FxStat st = take();
+				WwVkPresent::takeFarGroundBatchStat();
+				o.copies = st.copies, o.runs = st.runs, o.ms = st.cpuMs;
+				runs++;
+				return o;
+			};
+			frameNext();
+			const Cp c1 = copiesOf( 1, 0 );
+			frameNext();
+			const Cp c3 = copiesOf( 3, 0 );
+			const Cp cSame = copiesOf( 1, 0 );
+			Img hit;
+			hit.c = readColor( fc );
+			hit.d = readDepth( fds, true );
+			frameNext();
+			const Cp cNext = copiesOf( 1, 0 );
+			frameNext();
+			const Cp cRed = copiesOf( 3, 8192 );
+			frameNext();
+			const Cp cB = batchOf();
+			const Cp cB2 = batchOf();
+			const int P = c1.copies;
+			const bool ran = c1.ran && c3.ran && cSame.ran && cNext.ran && cRed.ran && cB.ran && cB2.ran;
+			std::printf( "FARGROUNDDRAW copy memo: one run %d copies; 3 runs in a frame %d (%.3f ms CPU a run), the same frame again %d, a new frame %d, "
+				"red 8192 3 runs %d (%.3f ms CPU a run); a 3-tile batch %d, again in the frame %d%s\n", P, c3.copies, c3.runs ? c3.ms / c3.runs : 0.0,
+				cSame.copies, cNext.copies, cRed.copies, cRed.runs ? cRed.ms / cRed.runs : 0.0, cB.copies, cB2.copies,
+				ran ? "" : ( std::string( " REFUSED (" ) + why + ")" ).c_str() );
+			const bool memoOk = ran && P >= 3 && c3.copies == P && cSame.copies == 0 && cNext.copies == P && cB.copies == P && cB2.copies == 0;
+			const bool redOk = cRed.copies == 3 * P;
+			std::printf( "FARGROUNDDRAW copy memo: %s (bar: 3 runs %d == one run's %d, the same frame 0, a new frame %d, batch %d then 0); red 8192 "
+				"%s (%d == 3 x %d)\n", memoOk ? "ONCE A FRAME" : "NOT once a frame", c3.copies, P, cNext.copies, cB.copies,
+				redOk ? "copies every run as it must" : "does NOT copy every run", cRed.copies, P );
+			gateOk = gateOk && memoOk && redOk;
+			hit.ran = cSame.ran;
+			exact( "tile 0 drawn on the memo's twins (0 copies) vs one0", hit, one0 );
+#ifdef WW_VK_TWINCOPYMEMO
+			twinCopyEpoch() = 0;
+#endif
+		}
+		{
 			/* lane VKFLIGHT10: the obscurance g-buffer as the draw target (ao.cpp: RGBA32F + D24S8, 1 sample, both shared
 			 * while the view is on Vulkan; wwCellAoDraw: cellProbe 20, stencil ALWAYS ref 0 / 1, ops KEEP KEEP REPLACE, write
 			 * mask 0x01). Vulkan's run on the shared pair vs GL's on plain twins, the stencil prefilled 0x80. Reds: 512 the
@@ -1548,6 +1632,15 @@ int main( int argc, char ** argv )
 						pipes == tot.pipelines ? "" : " -> a pipeline was built again" );
 					if ( pipes != tot.pipelines )
 						gateOk = false;
+					/* lane VKFLIGHT13: no tone frame alive (tone().samples 0: the first frames, a resize). The g-buffer draws through
+					 * its own pass, so it must run; flight 8d01173c: the far LOD RT twin broke for good there ("the air's render pass
+					 * is not at the frame's sample count", 4421 fails). The tone frame's run after it is EXACT against the one before. */
+					const int toneSamples = tone().samples;
+					tone().samples = 0;
+					const Gb noTone = gbVk( 1, all, 0, 0 );
+					tone().samples = toneSamples;
+					gbJudge( "ref 1 with no tone frame alive (samples 0)", noTone, gl1, false );
+					exact( "tile 0 on the tone frame after the no-tone g-buffer run", vkTiles( 0, 1, 0, nullptr ), one0 );
 				}
 			}
 			WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &gbKeys[0] ) );
