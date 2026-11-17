@@ -11,6 +11,7 @@
 #include "gl/gpustage.h"	// MODULES1: static buffers filled by a GPU copy (no driver RAM copy)
 #include "gl/renderer.h"
 #include "features/exposure/cellhdr.h"	// lane VKFAR2: the shared tone frame
+#include "features/ao/ao.h"	// lane VKFLIGHT10: the AO g-buffer target
 #include "features/vkframe/vkpresent.h"	// lane VKFAR2: the far LOD rings on the Vulkan view (row G3)
 #include "features/vkframe/vkwater.h"
 #include "features/near/cellglzone.h"	// lane VKFLIGHT7: the zone names the pass of a foreign draw target
@@ -380,6 +381,8 @@ struct VkFarArm
 	GLuint prog = 0;
 	unsigned int color = 0;
 	int v = 0;	// lane VKFAR26: the twin, farLodTwinOf
+	unsigned int gbDepth = 0;	// lane VKFLIGHT10: set = the AO g-buffer's draw (color its RGBA32F), gbW x gbH
+	int gbW = 0, gbH = 0;
 };
 VkFarArm g_vkFarArm;
 char g_vkFarKeys[160];	// the twins' keys (key + slot index)
@@ -421,7 +424,8 @@ void farLodVkArm( GLFunctions * fn, NifSkopeOpenGLContext::Program * prog, int s
 		return;
 	}
 	const char * no = nullptr;
-	unsigned int color = 0;
+	unsigned int color = 0, gbDepth = 0;
+	int gbW = 0, gbH = 0;
 	const int v = farLodTwinOf( prog->wwDefs );
 	if ( splatPass > 0 )
 		no = "a splat pass (blended twin, no Vulkan twin yet)";
@@ -444,13 +448,15 @@ void farLodVkArm( GLFunctions * fn, NifSkopeOpenGLContext::Program * prog, int s
 		GLint drawFb = 0;
 		fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFb );
 		color = wwCellHdrVkToneColor( GLuint( drawFb ) );
-		if ( !color )
+		if ( !color && wwCellAoVkTarget( GLuint( drawFb ), color, gbDepth, gbW, gbH ) && v > 0 )
+			no = "the AO g-buffer with an RT GI key (its RT / DG twin draws the tone frame only)";
+		else if ( !color )
 			no = farLodTargetWhy( GLuint( drawFb ) );
 	}
 	if ( no )
 		WwVkPresent::farLodOnGl( no );
 	else
-		g_vkFarArm = VkFarArm { fn, prog->id, color, v };
+		g_vkFarArm = VkFarArm { fn, prog->id, color, v, gbDepth, gbW, gbH };
 	WwVkPresent::farLodSay( true, nullptr );
 }
 
@@ -476,6 +482,11 @@ bool farLodVkDraw( Copy & k, const std::vector<CellMeshInst::Cmd> & cmds )
 		WwVkPresent::farLodStateOf( a.fn, a.prog, r );
 	wwCellHdrFrameSize( r.w, r.h );
 	r.color = a.color;
+	if ( a.gbDepth ) {	// lane VKFLIGHT10: the AO g-buffer
+		r.rayDepth = a.gbDepth;
+		r.w = a.gbW;
+		r.h = a.gbH;
+	}
 	r.cmds.reserve( cmds.size() );
 	for ( const CellMeshInst::Cmd & m : cmds ) {
 		WwVkPresent::WaterCmd c;

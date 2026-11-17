@@ -19,6 +19,7 @@ BSD License - see nifskope.h
 #include "features/far-lod/lodtfile.h"
 #include "features/far-lod/loddecal.h"
 #include "features/exposure/cellhdr.h"	// lane VKFAR3: the shared tone frame
+#include "features/ao/ao.h"	// lane VKFLIGHT10: the AO g-buffer target
 #include "features/vkframe/vkpresent.h"	// lane VKFAR3: ring 0 on the Vulkan view (row G3)
 #include "features/vkframe/vkfarcards.h"	// lane VKGROUND5: the BC1 page pools as far twins
 #include "features/vkframe/vkwater.h"
@@ -1808,7 +1809,8 @@ bool vkDraw( Scene * scene, NifSkopeOpenGLContext::Program * prog, int block, in
 	auto fn = scene->renderer->fn;
 	const std::string_view name( prog->name );
 	const char * no = nullptr;
-	unsigned int color = 0;
+	unsigned int color = 0, gbDepth = 0;	// lane VKFLIGHT10: gbDepth set = the AO g-buffer's draw
+	int gbW = 0, gbH = 0;
 	const int v = farGroundTwinOf( prog->wwDefs );	// lane VKGROUND11
 	if ( name == "fo4_cellcsmfgc.prog" || name == "fo4_cellfgc.prog" )
 		no = "red oldpages (fo4_cellcsmfgc, FARDRAW1's decal-only pages: no Vulkan twin)";
@@ -1835,7 +1837,9 @@ bool vkDraw( Scene * scene, NifSkopeOpenGLContext::Program * prog, int block, in
 		GLint drawFb = 0;
 		fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFb );
 		color = wwCellHdrVkToneColor( GLuint( drawFb ) );
-		if ( !color )	// lane VKFLIGHT1: which one (bungo's flight: 7239 draws a window, the source unnamed)
+		if ( !color && wwCellAoVkTarget( GLuint( drawFb ), color, gbDepth, gbW, gbH ) && v > 0 )
+			no = "the AO g-buffer with an RT GI key (its RT / DG twin draws the tone frame only)";
+		else if ( !color )	// lane VKFLIGHT1: which one (bungo's flight: 7239 draws a window, the source unnamed)
 			no = wwCellHdrIsFrame( GLuint( drawFb ) ) ? "the draw target is not the shared tone frame (the linear frame, not shared this frame)"
 				: fgForeignFbWhy();
 	}
@@ -1889,8 +1893,14 @@ bool vkDraw( Scene * scene, NifSkopeOpenGLContext::Program * prog, int block, in
 	r.cmds.push_back( c );
 	r.key = reinterpret_cast<std::uintptr_t>( keys );
 	std::string why;
+	if ( gbDepth ) {	// lane VKFLIGHT10: the AO g-buffer (normal + depth, its stencil), one crossing after the queued tiles
+		r.rayDepth = gbDepth;
+		r.w = gbW;
+		r.h = gbH;
+		vkFlush();
+	}
 	// lane VKFAR4 (batching): queued (checked, its pipeline made) and drawn with the frame's other tiles in one crossing at vkFlush
-	const bool ok = WwVkPresent::farGroundQueue( r, why );
+	const bool ok = gbDepth ? WwVkPresent::farGroundRun( r, why ) : WwVkPresent::farGroundQueue( r, why );
 	if ( !ok )
 		WwVkPresent::farGroundOnGl( why.c_str() );
 	else

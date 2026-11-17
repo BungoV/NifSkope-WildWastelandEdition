@@ -2044,6 +2044,22 @@ bool wwCellAoInPass()
 	return ao().pass;
 }
 
+bool wwCellAoVkTarget( unsigned drawFb, unsigned & color, unsigned & depth, int & w, int & h )
+{
+	if ( !ao().pass || !drawFb )
+		return false;
+	for ( const AoGpu & g : aoGpus() ) {
+		if ( g.gbuf.fbo != drawFb || !g.gbufShared || !g.gbufDepthTex )
+			continue;
+		color = g.gbuf.tex;
+		depth = g.gbufDepthTex;
+		w = g.gbuf.w;
+		h = g.gbuf.h;
+		return true;
+	}
+	return false;
+}
+
 void wwCellAoPrepassShare( Scene * scene )
 {
 	AoState & a = ao();

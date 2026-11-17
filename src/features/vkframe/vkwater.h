@@ -458,6 +458,7 @@ struct WaterRun
 	int w = 0, h = 0;               //!< the target's size
 	unsigned color = 0;             //!< the tone frame's colour (toneFrameIs), or the ray target's (rayDepth set)
 	unsigned rayDepth = 0;          //!< lane VKWATER4: the water ray pass's depth twin (waterRayDepth); 0: the tone frame
+	                                //!< lane VKFLIGHT10 (twinRun): the obscurance g-buffer's depth-stencil (color its RGBA32F)
 	int variant = kWaterLook;       //!< the caller's (waterVariantOf GL's program), before waterStateOf
 	WaterCensus census;
 	WaterAttrib attr[kWaterAttribs];
@@ -474,6 +475,8 @@ struct WaterRun
 	bool scissorOn = false, cullOn = false, depthTest = true, depthMask = true, blend = false, stencil = false;
 	bool colorMask[4] = { true, true, true, true };
 	unsigned cullFace = 0x0405, frontFace = 0x0901, depthFunc = 0x0203;
+	//! lane VKFLIGHT10: GL's stencil state while its test is on (front, back): func, ref, value mask, write mask, sfail, dpfail, dppass
+	int stFront[7] = { 0x0207, 0, 0xFF, 0xFF, 0x1E00, 0x1E00, 0x1E00 }, stBack[7] = { 0x0207, 0, 0xFF, 0xFF, 0x1E00, 0x1E00, 0x1E00 };
 	bool polyOffset = false;
 	// lane VKFAR2: GL's polygon offset (factor, units), FRAMEBUFFER_SRGB, the second draw buffer (GL_NONE 0), the commands
 	float polyFactor = 0.0f, polyUnits = 0.0f;
@@ -485,7 +488,8 @@ struct WaterRun
 	                                //!< 16 water: the tessellation domain's origin upper-left (Vulkan's default, not GL's),
 	                                //!< rings (lane VKFAR2): the polygon offset dropped; 32 water: the ds loose block a vec4 off,
 	                                //!< 64 the ray depth view keyed on its VkImage handle only (lane VKWATER4), 128 the last
-	                                //!< crossing's fence wait reads VK_TIMEOUT (must refuse)
+	                                //!< crossing's fence wait reads VK_TIMEOUT (must refuse); twinRun (lane VKFLIGHT10): 512 the
+	                                //!< stencil state dropped, 4096 the colour mask ignored (1024 / 2048 are twinRunN's)
 };
 
 /* GL current, prog in use, its uniforms set, the shape's vertex array bound: GL's side of the draw into r (the census
@@ -569,6 +573,14 @@ template <class Fn> void twinStateOf( Fn * fn, unsigned prog, WaterRun & r, cons
 	r.depthTest = fn->glIsEnabled( 0x0B71 ) != 0;
 	r.blend = fn->glIsEnabled( 0x0BE2 ) != 0;
 	r.stencil = fn->glIsEnabled( 0x0B90 ) != 0;
+	if ( r.stencil ) {  // lane VKFLIGHT10: GL_STENCIL_FUNC, REF, VALUE_MASK, WRITEMASK, FAIL, PASS_DEPTH_FAIL, PASS_DEPTH_PASS (+ BACK_)
+		static const unsigned kFront[7] = { 0x0B92, 0x0B97, 0x0B93, 0x0B98, 0x0B94, 0x0B95, 0x0B96 };
+		static const unsigned kBack[7] = { 0x8800, 0x8CA3, 0x8CA4, 0x8CA5, 0x8801, 0x8802, 0x8803 };
+		for ( int k = 0; k < 7; k++ ) {
+			fn->glGetIntegerv( kFront[k], &r.stFront[k] );
+			fn->glGetIntegerv( kBack[k], &r.stBack[k] );
+		}
+	}
 	r.polyOffset = fn->glIsEnabled( 0x8037 ) != 0;  // GL_POLYGON_OFFSET_FILL
 	int cf = 0, ff = 0, df = 0;
 	fn->glGetIntegerv( 0x0B45, &cf );  // GL_CULL_FACE_MODE

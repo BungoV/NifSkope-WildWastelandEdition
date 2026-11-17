@@ -656,6 +656,15 @@ struct WaterDraw
 	WwVkPresent::FxStat st;
 	int pipelines = 0;
 	double buildMs = 0.0;
+	// lane VKFLIGHT10: the obscurance g-buffer's depth-stencil view (keyed on the handle and sharedGen(), as the water ray
+	// pass's), its framebuffer; the record's pass, framebuffer and size (the tone frame's, or the g-buffer's)
+	VkImage rayDsImg = VK_NULL_HANDLE;
+	std::uint64_t rayDsGen = 0;
+	VkImageView rayDsView = VK_NULL_HANDLE;
+	VkFramebuffer rayFb = VK_NULL_HANDLE;
+	VkRenderPass recPass = VK_NULL_HANDLE;
+	VkFramebuffer recFb = VK_NULL_HANDLE;
+	int recW = 0, recH = 0;
 	// lane VKFAR4 (batching): twinRunN's draws while its crossing records (empty otherwise: twinRun's one draw above),
 	// kTwinBatchMax sets of the same layout, the crossings / draws / crossings that found the fence pending since the take
 	struct Rec
@@ -1005,8 +1014,10 @@ VkSampler waterSampler( WaterDraw & D, const WwVkPresent::WaterSlot & s, bool co
 	return out;
 }
 
-// the pipeline for GL's state this draw (vertex layout, cull, depth, colour mask, the reds), over the air's render pass
-VkPipeline waterPipe( WaterDraw & D, const TwinSpec & P, const WwVkPresent::WaterRun & r, const VkFormat * fmt, std::string & why )
+// the pipeline for GL's state this draw (vertex layout, cull, depth, stencil, colour mask, the reds), over pass at samples
+// (the air's render pass, or the obscurance g-buffer's: lane VKFLIGHT10); a new air pass drops them all
+VkPipeline waterPipe( WaterDraw & D, const TwinSpec & P, const WwVkPresent::WaterRun & r, const VkFormat * fmt, VkRenderPass pass, int samples,
+	std::string & why )
 {
 	Vk & v = vk();
 	Fx & F = fx();
@@ -1017,7 +1028,7 @@ VkPipeline waterPipe( WaterDraw & D, const TwinSpec & P, const WwVkPresent::Wate
 		D.pipePass = F.airPass;
 		D.pipeSamples = F.airSamples;
 	}
-	std::string key;
+	std::string key = std::to_string( reinterpret_cast<std::uintptr_t>( pass ) ) + "x" + std::to_string( samples ) + " ";
 	VkVertexInputBindingDescription vb[WwVkPresent::kWaterAttribs] = {};
 	VkVertexInputAttributeDescription va[WwVkPresent::kWaterAttribs] = {};
 	for ( int i = 0; i < WwVkPresent::kWaterAttribs; i++ ) {
@@ -1045,6 +1056,16 @@ VkPipeline waterPipe( WaterDraw & D, const TwinSpec & P, const WwVkPresent::Wate
 		+ std::to_string( int( dop ) ) + " " + std::to_string( int( r.depthMask ) );
 	for ( bool m : r.colorMask )
 		key += m ? "1" : "0";
+	const bool maskOff = ( r.red & 4096 ) != 0;  // red: GL's colour mask ignored (every channel written)
+	if ( maskOff )
+		key += "M";
+	// lane VKFLIGHT10: GL's stencil test (front, back: func, ref, value mask, write mask, sfail, dpfail, dppass); red 512 drops it
+	const bool sten = r.stencil && !( r.red & 512 );
+	if ( sten ) {
+		key += " s";
+		for ( int k = 0; k < 7; k++ )
+			key += std::to_string( r.stFront[k] ) + "/" + std::to_string( r.stBack[k] ) + " ";
+	}
 	auto it = D.pipes.find( key );
 	if ( it != D.pipes.end() )
 		return it->second;
@@ -1081,14 +1102,43 @@ VkPipeline waterPipe( WaterDraw & D, const TwinSpec & P, const WwVkPresent::Wate
 		rs.depthBiasSlopeFactor = r.polyFactor;
 	}
 	VkPipelineMultisampleStateCreateInfo ms { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
-	ms.rasterizationSamples = VkSampleCountFlagBits( F.airSamples );
+	ms.rasterizationSamples = VkSampleCountFlagBits( samples );
 	VkPipelineDepthStencilStateCreateInfo ds { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
 	ds.depthTestEnable = r.depthTest ? VK_TRUE : VK_FALSE;
 	ds.depthWriteEnable = r.depthTest && r.depthMask ? VK_TRUE : VK_FALSE;
 	ds.depthCompareOp = dop;
+	if ( sten ) {
+		auto sop = []( int gl ) {
+			switch ( gl ) {
+			case 0: return VK_STENCIL_OP_ZERO;
+			case 0x1E01: return VK_STENCIL_OP_REPLACE;
+			case 0x1E02: return VK_STENCIL_OP_INCREMENT_AND_CLAMP;
+			case 0x1E03: return VK_STENCIL_OP_DECREMENT_AND_CLAMP;
+			case 0x150A: return VK_STENCIL_OP_INVERT;
+			case 0x8507: return VK_STENCIL_OP_INCREMENT_AND_WRAP;
+			case 0x8508: return VK_STENCIL_OP_DECREMENT_AND_WRAP;
+			default: return VK_STENCIL_OP_KEEP;
+			}
+		};
+		// GL's front is the pipeline's front (frontFace above follows GL's)
+		auto face = [&sop]( const int * s ) {
+			VkStencilOpState o {};
+			o.compareOp = VkCompareOp( std::clamp( s[0] - 0x0200, 0, 7 ) );
+			o.reference = std::uint32_t( s[1] );
+			o.compareMask = std::uint32_t( s[2] );
+			o.writeMask = std::uint32_t( s[3] );
+			o.failOp = sop( s[4] );
+			o.depthFailOp = sop( s[5] );
+			o.passOp = sop( s[6] );
+			return o;
+		};
+		ds.stencilTestEnable = VK_TRUE;
+		ds.front = face( r.stFront );
+		ds.back = face( r.stBack );
+	}
 	VkPipelineColorBlendAttachmentState cb {};
-	cb.colorWriteMask = ( r.colorMask[0] ? VK_COLOR_COMPONENT_R_BIT : 0 ) | ( r.colorMask[1] ? VK_COLOR_COMPONENT_G_BIT : 0 )
-		| ( r.colorMask[2] ? VK_COLOR_COMPONENT_B_BIT : 0 ) | ( r.colorMask[3] ? VK_COLOR_COMPONENT_A_BIT : 0 );
+	cb.colorWriteMask = ( r.colorMask[0] || maskOff ? VK_COLOR_COMPONENT_R_BIT : 0 ) | ( r.colorMask[1] || maskOff ? VK_COLOR_COMPONENT_G_BIT : 0 )
+		| ( r.colorMask[2] || maskOff ? VK_COLOR_COMPONENT_B_BIT : 0 ) | ( r.colorMask[3] || maskOff ? VK_COLOR_COMPONENT_A_BIT : 0 );
 	VkPipelineColorBlendStateCreateInfo cbs { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
 	cbs.attachmentCount = 1;
 	cbs.pAttachments = &cb;
@@ -1108,7 +1158,7 @@ VkPipeline waterPipe( WaterDraw & D, const TwinSpec & P, const WwVkPresent::Wate
 	gp.pColorBlendState = &cbs;
 	gp.pDynamicState = &dy;
 	gp.layout = D.layout;
-	gp.renderPass = F.airPass;
+	gp.renderPass = pass;
 	VkPipeline out = VK_NULL_HANDLE;
 	if ( v.vkCreateGraphicsPipelines( v.dev, tone().cache, 1, &gp, nullptr, &out ) != VK_SUCCESS ) {
 		why = std::string( "vkCreateGraphicsPipelines (the " ) + P.what + " draw) failed";
@@ -1127,14 +1177,14 @@ bool ringsRecord( std::string & why )
 	Vk & v = vk();
 	Fx & F = fx();
 	WaterDraw & D = F.kind == 9 ? farGroundD() : F.kind == 18 ? farGroundPD() : F.kind == 21 ? farLodRtD() : F.kind == 22 ? farLodDgD() : F.kind == 23 ? farGroundRtD() : F.kind == 24 ? farGroundDgD() : F.kind == 25 ? farGroundPRtD() : F.kind == 26 ? farGroundPDgD() : farLodD();  // BATCH1114: the water has its own copy (kind 4 never comes here); VKFAR26: 21 / 22 the rings' RT / DG twins; VKGROUND11: 23 / 24 the far ground's
-	if ( !F.fbAir || ( D.recs.empty() && !D.pipe ) ) {
+	if ( !D.recFb || !D.recPass || ( D.recs.empty() && !D.pipe ) ) {
 		why = "no framebuffer / pipeline for the water draw";
 		return false;
 	}
 	VkRenderPassBeginInfo rbi { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
-	rbi.renderPass = F.airPass;
-	rbi.framebuffer = F.fbAir;
-	rbi.renderArea = { { 0, 0 }, { std::uint32_t( F.w ), std::uint32_t( F.h ) } };
+	rbi.renderPass = D.recPass;  // lane VKFLIGHT10: the tone frame's, or the obscurance g-buffer's
+	rbi.framebuffer = D.recFb;
+	rbi.renderArea = { { 0, 0 }, { std::uint32_t( D.recW ), std::uint32_t( D.recH ) } };
 	v.vkCmdBeginRenderPass( F.cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE );
 	if ( !D.recs.empty() ) {  // lane VKFAR4: twinRunN's draws in GL's order, each with its own set and host slice
 		for ( const WaterDraw::Rec & e : D.recs ) {
@@ -1175,6 +1225,13 @@ void ringsDrop()
 		if ( !D->geo.buf && !D->host.buf )
 			continue;
 		vk().vkDeviceWaitIdle( vk().dev );
+		if ( D->rayFb )
+			vk().vkDestroyFramebuffer( vk().dev, D->rayFb, nullptr );
+		if ( D->rayDsView )
+			vk().vkDestroyImageView( vk().dev, D->rayDsView, nullptr );
+		D->rayFb = VK_NULL_HANDLE;
+		D->rayDsView = VK_NULL_HANDLE;
+		D->rayDsImg = VK_NULL_HANDLE;
 		csmBufFree( D->geo, gl().ok && D->geo.glCtx == gl().ctx );
 		csmBufFree( D->host, false );
 	}
@@ -1914,10 +1971,25 @@ static bool twinRun( WaterDraw & D, const TwinSpec & P, const WaterRun & r, std:
 		return refuse( "the present device or GL's entry points are not ready in this context" );
 	if ( const std::string no = twinDrawRefusal(); !no.empty() )
 		return refuse( no );
-	if ( !toneFrameIs( r.color ) || !T.colorView || !T.dsView )
-		return refuse( "the draw target is not the shared tone frame" );
-	if ( T.w != r.w || T.h != r.h )
-		return refuse( std::string( "the " ) + P.what + " draw's size is not the tone frame's" );
+	// lane VKFLIGHT10: the obscurance g-buffer (ao.cpp: shared RGBA32F + D24S8 / D32F_S8, 1 sample) as the target, else the tone frame
+	const bool gb = r.rayDepth != 0;
+	const Shared * rc = nullptr, * rd = nullptr;
+	if ( gb ) {
+		const std::uintptr_t ck = farSharedOf( r.color ), dk = farSharedOf( r.rayDepth );
+		rc = ck ? sharedFind( ck ) : nullptr;
+		rd = dk ? sharedFind( dk ) : nullptr;
+		if ( !rc || !rd || rc->fmt != VK_FORMAT_R32G32B32A32_SFLOAT || rc->samples != 1 || rd->samples != 1 || rc->type != 0 || rd->type != 0
+			|| ( rd->fmt != VK_FORMAT_D24_UNORM_S8_UINT && rd->fmt != VK_FORMAT_D32_SFLOAT_S8_UINT ) )
+			return refuse( "the g-buffer target is not a shared RGBA32F + depth-stencil pair, 1 sample" );
+		if ( rc->w != r.w || rc->h != r.h || rd->w != r.w || rd->h != r.h )
+			return refuse( std::string( "the " ) + P.what + " draw's size is not the g-buffer's" );
+	} else {
+		if ( !toneFrameIs( r.color ) || !T.colorView || !T.dsView )
+			return refuse( "the draw target is not the shared tone frame" );
+		if ( T.w != r.w || T.h != r.h )
+			return refuse( std::string( "the " ) + P.what + " draw's size is not the tone frame's" );
+	}
+	const unsigned tgtC = gb ? r.color : T.colorTex, tgtD = gb ? r.rayDepth : T.dsTex;
 	if ( r.census.tess )
 		return refuse( std::string( "a tessellated " ) + P.what + " program (its own twin is not in yet)" );
 	if ( r.psBytes != P.psLoose )
@@ -1927,7 +1999,7 @@ static bool twinRun( WaterDraw & D, const TwinSpec & P, const WaterRun & r, std:
 	const std::string verdict = waterVerdict( r.census, caps );
 	if ( !verdict.empty() )
 		return refuse( verdict );
-	if ( r.blend || r.stencil || ( r.polyOffset && !P.rings ) )
+	if ( r.blend || ( r.stencil && !gb ) || ( r.polyOffset && !P.rings ) )  // the g-buffer's stencil state goes into the pipeline
 		return refuse( std::string( "GL draws the " ) + P.what + " with blending / a stencil test / a polygon offset" );
 	if ( P.rings ) {
 		// the rings' program writes a second target and is linear: GL must have neither on
@@ -2023,7 +2095,7 @@ static bool twinRun( WaterDraw & D, const TwinSpec & P, const WaterRun & r, std:
 	for ( int i = 0; i < kWaterAttribs; i++ )
 		std::memcpy( host + P.constAt + 16 * i, r.attr[i].cur, 16 );
 	// the images and texel buffers: GL's names into their twins (each level), the zero ones where GL has none
-	std::vector<GLuint> texNames { T.colorTex, T.dsTex };
+	std::vector<GLuint> texNames { tgtC, tgtD };
 	std::vector<GLuint> bufNames { D.geo.gl };
 	std::vector<VkDescriptorImageInfo> ii( D.binds.size() );
 	std::vector<VkDescriptorBufferInfo> bi( D.binds.size() );
@@ -2112,7 +2184,7 @@ static bool twinRun( WaterDraw & D, const TwinSpec & P, const WaterRun & r, std:
 							return refuse( std::string( nm ) + ": an unbound integer input" );
 						view = D.zeroUView;
 					}
-			} else if ( s->tex == T.colorTex || s->tex == T.dsTex ) {
+			} else if ( s->tex == tgtC || s->tex == tgtD ) {
 				return refuse( std::string( nm ) + ": samples the frame it draws into" );
 			} else if ( s->baseLevel != 0 ) {
 				return refuse( std::string( nm ) + ": a base level above 0" );
@@ -2148,10 +2220,36 @@ static bool twinRun( WaterDraw & D, const TwinSpec & P, const WaterRun & r, std:
 		}
 		ws.push_back( x );
 	}
-	const VkImageView att[2] = { T.colorView, T.dsView };
-	if ( !fxFb( F.fbAir, F.airPass, att, 2, T.w, T.h ) )
-		return breakOff( "the water draw's framebuffer over the tone frame failed" );
-	D.pipe = waterPipe( D, P, r, fmt, w );
+	if ( gb ) {
+		// the depth-stencil view (sharedTarget's is depth only), keyed on the handle AND sharedGen() (a remade target can
+		// come back at the freed image's handle value); the last run waited
+		if ( rd->img != D.rayDsImg || D.rayDsGen != sharedGen() ) {
+			if ( D.rayDsView )
+				v.vkDestroyImageView( v.dev, D.rayDsView, nullptr );
+			D.rayDsGen = sharedGen();
+			D.rayDsView = imageView( rd->img, VK_IMAGE_VIEW_TYPE_2D, rd->fmt, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT );
+			D.rayDsImg = D.rayDsView ? rd->img : VK_NULL_HANDLE;
+			if ( !D.rayDsView )
+				return breakOff( "the g-buffer's depth-stencil view failed" );
+		}
+		const VkRenderPass rp = waterRayPass( rd->fmt, w );
+		if ( !rp )
+			return breakOff( w );
+		const VkImageView att[2] = { rc->view, D.rayDsView };
+		if ( !fxFb( D.rayFb, rp, att, 2, r.w, r.h ) )
+			return breakOff( "the draw's framebuffer over the g-buffer failed" );
+		D.recPass = rp;
+		D.recFb = D.rayFb;
+	} else {
+		const VkImageView att[2] = { T.colorView, T.dsView };
+		if ( !fxFb( F.fbAir, F.airPass, att, 2, T.w, T.h ) )
+			return breakOff( "the water draw's framebuffer over the tone frame failed" );
+		D.recPass = F.airPass;
+		D.recFb = F.fbAir;
+	}
+	D.recW = r.w;
+	D.recH = r.h;
+	D.pipe = waterPipe( D, P, r, fmt, D.recPass, gb ? 1 : F.airSamples, w );
 	if ( !D.pipe )
 		return breakOff( w );
 	v.vkUpdateDescriptorSets( v.dev, std::uint32_t( ws.size() ), ws.data(), 0, nullptr );
@@ -2175,10 +2273,10 @@ static bool twinRun( WaterDraw & D, const TwinSpec & P, const WaterRun & r, std:
 		x1 = std::min( x1, r.scissor[0] + r.scissor[2] );
 		y1 = std::min( y1, r.scissor[1] + r.scissor[3] );
 	}
-	x0 = std::clamp( x0, 0, T.w );
-	y0 = std::clamp( y0, 0, T.h );
-	x1 = std::clamp( x1, 0, T.w );
-	y1 = std::clamp( y1, 0, T.h );
+	x0 = std::clamp( x0, 0, r.w );
+	y0 = std::clamp( y0, 0, r.h );
+	x1 = std::clamp( x1, 0, r.w );
+	y1 = std::clamp( y1, 0, r.h );
 	D.sc = { { x0, y0 }, { std::uint32_t( std::max( x1 - x0, 0 ) ), std::uint32_t( std::max( y1 - y0, 0 ) ) } };
 	F.kind = P.kind;  // fxWork's kind 4 water, 5 the far LOD rings (3 = VKFAR2's far cards), 9 the far ground (lane VKFAR3)
 	F.w = r.w;
@@ -2357,7 +2455,7 @@ static std::string twinReadyN( WaterDraw & D, const TwinSpec & P, const WaterRun
 		return w;
 	if ( F.airSamples != T.samples )
 		return "the air's render pass is not at the frame's sample count";
-	if ( !waterPipe( D, P, r, fmt.data(), w ) )
+	if ( !waterPipe( D, P, r, fmt.data(), F.airPass, F.airSamples, w ) )
 		return w;
 	return std::string();
 }
@@ -2624,13 +2722,17 @@ static bool twinRunN( WaterDraw & D, const TwinSpec & P, const WaterRun * const 
 	const VkImageView att[2] = { T.colorView, T.dsView };
 	if ( !fxFb( F.fbAir, F.airPass, att, 2, T.w, T.h ) )
 		return breakOff( "the water draw's framebuffer over the tone frame failed" );
+	D.recPass = F.airPass;
+	D.recFb = F.fbAir;
+	D.recW = T.w;
+	D.recH = T.h;
 	v.vkUpdateDescriptorSets( v.dev, std::uint32_t( ws.size() ), ws.data(), 0, nullptr );
 	// the draws' records (waterRecord: one render pass, in GL's order)
 	D.recs.clear();
 	for ( int d = 0; d < n; d++ ) {
 		const WaterRun & r = *rs[d];
 		WaterDraw::Rec e;
-		e.pipe = waterPipe( D, P, r, fmt.data() + size_t( d ) * kWaterAttribs, w );
+		e.pipe = waterPipe( D, P, r, fmt.data() + size_t( d ) * kWaterAttribs, F.airPass, F.airSamples, w );
 		if ( !e.pipe ) {
 			D.recs.clear();
 			return breakOff( w );

@@ -68,6 +68,9 @@ struct WwCellAoTargets
 	int w = 0, h = 0, mipW[5] = {}, mipH[5] = {};
 };
 bool wwCellAoTargets( Scene * scene, WwCellAoTargets & out );
+//! lane VKFLIGHT10: while the AO opaque pass runs into drawFb and its g-buffer is shared with the present device: the
+//! RGBA32F colour, the depth-stencil twin and their size (a far ground / far LOD twin then draws into them on Vulkan)
+bool wwCellAoVkTarget( unsigned drawFb, unsigned & color, unsigned & depth, int & w, int & h );
 
 /*! lane MODULES1: the Cell workspace's AO submenus (src/features/ao/aomenu.cpp), built into parent; changed runs after
  *  a pick (the workspace repaints). Object names CellWorkspaceAoMethod / CellWorkspaceAoQuality. */
