@@ -1697,7 +1697,8 @@ static bool vkDrawLive( Scene * scene, NifSkopeOpenGLContext::Program * prog, in
 	}
 	auto fn = scene->renderer->fn;
 	const char * no = nullptr;
-	unsigned int color = 0;
+	unsigned int color = 0, gbDepth = 0;	// lane VKFLIGHT10: gbDepth set = the AO g-buffer's draw
+	int gbW = 0, gbH = 0;
 	const int v = farGroundTwinOf( prog->wwDefs );	// lane VKGROUND18: 0 base, 1 RT, 2 DG
 	constexpr int kPagesShared = 8 | 16 | 32;	// slots 3, 4, 5: fgCells, fgPagesN, fgPagesF
 	if ( std::string_view( prog->name ) != "fo4_cellcsmfgp.prog" )
@@ -1721,6 +1722,8 @@ static bool vkDrawLive( Scene * scene, NifSkopeOpenGLContext::Program * prog, in
 		GLint drawFb = 0;
 		fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFb );
 		color = wwCellHdrVkToneColor( GLuint( drawFb ) );
+		if ( !color )
+			wwCellAoVkTarget( GLuint( drawFb ), color, gbDepth, gbW, gbH );	// lane VKFLIGHT10: or the AO g-buffer
 		if ( !color )	// lane VKFLIGHT1: which one (bungo's flight: 7239 draws a window, the source unnamed)
 			no = wwCellHdrIsFrame( GLuint( drawFb ) ) ? "the draw target is not the shared tone frame (the linear frame, not shared this frame)"
 				: fgForeignFbWhy();
@@ -1744,6 +1747,11 @@ static bool vkDrawLive( Scene * scene, NifSkopeOpenGLContext::Program * prog, in
 		WwVkPresent::farGroundLiveRtStateOf( fn, prog->id, rr, v );
 		wwCellHdrFrameSize( rr.w, rr.h );
 		rr.color = color;
+		if ( gbDepth ) {	// lane VKFLIGHT10: the AO g-buffer
+			rr.rayDepth = gbDepth;
+			rr.w = gbW;
+			rr.h = gbH;
+		}
 		WwVkPresent::WaterCmd c;
 		c.count = std::uint32_t( indexCount );
 		c.instanceCount = 1;
@@ -1766,6 +1774,11 @@ static bool vkDrawLive( Scene * scene, NifSkopeOpenGLContext::Program * prog, in
 	WwVkPresent::farGroundLiveStateOf( fn, prog->id, r );
 	wwCellHdrFrameSize( r.w, r.h );
 	r.color = color;
+	if ( gbDepth ) {	// lane VKFLIGHT10: the AO g-buffer
+		r.rayDepth = gbDepth;
+		r.w = gbW;
+		r.h = gbH;
+	}
 	WwVkPresent::WaterCmd c;
 	c.count = std::uint32_t( indexCount );
 	c.instanceCount = 1;
@@ -1837,9 +1850,9 @@ bool vkDraw( Scene * scene, NifSkopeOpenGLContext::Program * prog, int block, in
 		GLint drawFb = 0;
 		fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFb );
 		color = wwCellHdrVkToneColor( GLuint( drawFb ) );
-		if ( !color && wwCellAoVkTarget( GLuint( drawFb ), color, gbDepth, gbW, gbH ) && v > 0 )
-			no = "the AO g-buffer with an RT GI key (its RT / DG twin draws the tone frame only)";
-		else if ( !color )	// lane VKFLIGHT1: which one (bungo's flight: 7239 draws a window, the source unnamed)
+		if ( !color )
+			wwCellAoVkTarget( GLuint( drawFb ), color, gbDepth, gbW, gbH );	// lane VKFLIGHT10: or the AO g-buffer
+		if ( !color )	// lane VKFLIGHT1: which one (bungo's flight: 7239 draws a window, the source unnamed)
 			no = wwCellHdrIsFrame( GLuint( drawFb ) ) ? "the draw target is not the shared tone frame (the linear frame, not shared this frame)"
 				: fgForeignFbWhy();
 	}
@@ -1863,6 +1876,11 @@ bool vkDraw( Scene * scene, NifSkopeOpenGLContext::Program * prog, int block, in
 		WwVkPresent::farGroundRtStateOf( fn, prog->id, rr, v );
 		wwCellHdrFrameSize( rr.w, rr.h );
 		rr.color = color;
+		if ( gbDepth ) {	// lane VKFLIGHT10: the AO g-buffer
+			rr.rayDepth = gbDepth;
+			rr.w = gbW;
+			rr.h = gbH;
+		}
 		WwVkPresent::WaterCmd c;
 		c.count = std::uint32_t( indexCount );
 		c.instanceCount = 1;

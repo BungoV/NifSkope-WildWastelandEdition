@@ -1999,8 +1999,11 @@ static bool twinRun( WaterDraw & D, const TwinSpec & P, const WaterRun & r, std:
 	const std::string verdict = waterVerdict( r.census, caps );
 	if ( !verdict.empty() )
 		return refuse( verdict );
-	if ( r.blend || ( r.stencil && !gb ) || ( r.polyOffset && !P.rings ) )  // the g-buffer's stencil state goes into the pipeline
-		return refuse( std::string( "GL draws the " ) + P.what + " with blending / a stencil test / a polygon offset" );
+	// lane VKFLIGHT10: GL's stencil state goes into the pipeline (tone frame and g-buffer); each refusal names its state
+	if ( r.blend )
+		return refuse( std::string( "GL draws the " ) + P.what + " with blending" );
+	if ( r.polyOffset && !P.rings )
+		return refuse( std::string( "GL draws the " ) + P.what + " with a polygon offset" );
 	if ( P.rings ) {
 		// the rings' program writes a second target and is linear: GL must have neither on
 		if ( r.srgb )
@@ -2332,8 +2335,10 @@ static std::string twinCheckN( const TwinSpec & P, const WaterRun & r, VkFormat 
 	caps.shadedDraw = true;
 	if ( const std::string verdict = waterVerdict( r.census, caps ); !verdict.empty() )
 		return verdict;
-	if ( r.blend || r.stencil || ( r.polyOffset && !P.rings ) )
-		return std::string( "GL draws the " ) + P.what + " with blending / a stencil test / a polygon offset";
+	if ( r.blend )	// lane VKFLIGHT10: the stencil state goes into the pipeline
+		return std::string( "GL draws the " ) + P.what + " with blending";
+	if ( r.polyOffset && !P.rings )
+		return std::string( "GL draws the " ) + P.what + " with a polygon offset";
 	if ( P.rings ) {
 		if ( r.srgb )
 			return "GL_FRAMEBUFFER_SRGB is on";

@@ -448,9 +448,9 @@ void farLodVkArm( GLFunctions * fn, NifSkopeOpenGLContext::Program * prog, int s
 		GLint drawFb = 0;
 		fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFb );
 		color = wwCellHdrVkToneColor( GLuint( drawFb ) );
-		if ( !color && wwCellAoVkTarget( GLuint( drawFb ), color, gbDepth, gbW, gbH ) && v > 0 )
-			no = "the AO g-buffer with an RT GI key (its RT / DG twin draws the tone frame only)";
-		else if ( !color )
+		if ( !color )
+			wwCellAoVkTarget( GLuint( drawFb ), color, gbDepth, gbW, gbH );	// lane VKFLIGHT10: or the AO g-buffer
+		if ( !color )
 			no = farLodTargetWhy( GLuint( drawFb ) );
 	}
 	if ( no )
