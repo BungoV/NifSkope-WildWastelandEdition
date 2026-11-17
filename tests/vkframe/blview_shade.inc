@@ -625,6 +625,7 @@ struct TexelFix
 	std::uint32_t lightB = ~0u, clusterB = ~0u;
 	bool rgbRefused = false;
 	std::string rgbWhy;
+	bool smallOk = false;  // lane VKFLIGHT13: the RG8 / R8 arm
 };
 TexelFix tx;
 
@@ -664,6 +665,47 @@ bool texelBuild( std::string & why )
 		std::vector<unsigned> names;
 		tx.rgbRefused = !objBlTexelCopy( glProc, tx.rgbTex, names, tx.rgbWhy ) && names.empty();
 	}
+	/* lane VKFLIGHT13: RG8 / R8 texel buffers (the flight of 612669db: the opaque pass refused "a texel buffer: farStream: GL
+	 * internal format 0x822B has no texel twin"). BAR: each copied (no refusal), its twin R8G8 / R8 UNORM over the whole range,
+	 * the twin's bytes read back equal to GL's. Before the fix both refuse and the texel line FAILS. */
+	{
+		void( WINAPI * getSub )( GLuint, std::intptr_t, std::ptrdiff_t, void * ) = nullptr;
+		if ( !load( getSub, "glGetNamedBufferSubData" ) )
+			return why = "a GL entry point is missing", false;
+		struct Small
+		{
+			const char * name;
+			GLenum glFmt;
+			VkFormat vk;
+			int bytes;
+		};
+		const Small smalls[2] = { { "RG8", 0x822B, VK_FORMAT_R8G8_UNORM, 96 }, { "R8", 0x8229, VK_FORMAT_R8_UNORM, 64 } };
+		tx.smallOk = true;
+		for ( const Small & s : smalls ) {
+			GLuint b = 0, t = 0;
+			createBuffers( 1, &b );
+			namedBufferData( b, s.bytes, clusterAll.data(), 0x88E4 );
+			ux.createTextures( 0x8C2A, 1, &t );
+			textureBuffer( t, s.glFmt, b );
+			std::vector<unsigned> names;
+			std::string w;
+			const bool copied = objBlTexelCopy( glProc, t, names, w );
+			const OpTexel & tw = opS().texTwins[t];
+			std::size_t differ = ~std::size_t( 0 );
+			if ( copied && !names.empty() ) {
+				std::vector<std::uint8_t> got( std::size_t( s.bytes ), 0 );
+				getSub( names.back(), 0, std::ptrdiff_t( got.size() ), got.data() );
+				differ = 0;
+				for ( std::size_t k = 0; k < got.size(); k++ )
+					differ += got[k] != clusterAll[k];
+			}
+			const bool ok = copied && tw.fmt == s.vk && tw.range == VkDeviceSize( s.bytes ) && differ == 0;
+			std::printf( "BLVIEW texel %s %s (copied %d, twin format %d want %d, range %llu of %d, %lld bytes differ read back)%s%s\n", s.name,
+				ok ? "OK" : "FAIL", int( copied ), int( tw.fmt ), int( s.vk ), static_cast<unsigned long long>( tw.range ), s.bytes,
+				differ == ~std::size_t( 0 ) ? -1ll : static_cast<long long>( differ ), w.empty() ? "" : ": ", w.c_str() );
+			tx.smallOk = tx.smallOk && ok;
+		}
+	}
 	const std::string vs = "#version 460 core\nvoid main() { gl_Position = vec4( 0.0 ); }\n";
 	const std::string fs = "#version 460 core\nlayout ( binding = 7 ) uniform samplerBuffer cellLights;\n"
 		"layout ( binding = 8 ) uniform isamplerBuffer cellCluster;\nlayout ( location = 0 ) out vec4 o;\n"
@@ -698,7 +740,7 @@ struct TexelOut
 	bool good() const
 	{
 		return bind.texelGl == 2 && bind.texelShared == 2 && bind.texelRefused == 0 && bind.glBufs.size() == 2 && placed && differ == 0
-			&& tx.rgbRefused && prepped && prep.texelsGl == 2 && ran;
+			&& tx.rgbRefused && tx.smallOk && prepped && prep.texelsGl == 2 && ran;
 	}
 };
 
