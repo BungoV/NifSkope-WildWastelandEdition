@@ -1163,6 +1163,10 @@ int main( int argc, char ** argv )
 	// lane VKOBJ22: kind 8 `stepb` (GPU cull step B's kept ranges, a crossing a shape) on the all-on RT key, both twins (appended)
 	for ( int tw = 0; tw < 2 && !pfxOnly; tw++ )
 		kindOk = ( twinOk && colourGate( spvDir + "/spvrt/spirv", handles, anisoAt, aniso1H, tw, 8, std::string(), true ) ) && kindOk;
+	// lane VKFLIGHT12: kind 9 `copy` (GL's own frame inputs of the flight's opaque refusal through copy twins) on the app's key, both
+	// twins (appended)
+	for ( int tw = 0; tw < 2 && !pfxOnly; tw++ )
+		kindOk = ( twinOk && colourGate( spvDir + "/spvapp/spirv", handles, anisoAt, aniso1H, tw, 9 ) ) && kindOk;
 	ok = kindOk && ok;
 	ok = colOk && colCsmOk && colPlain && colCsmPlain && colRt && colCsmRt && ok;
 	if ( bc && !pfxOnly ) {  // lane VKWATER3 G4: GL's fo4_cell / fo4_cellcsm against the non-bindless twins through objCellShade

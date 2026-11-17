@@ -76,7 +76,7 @@
 static int gColTwin = 0;  // colPrintf: 1 prints `BLVIEW colourcsm` for `BLVIEW colour`
 static const char * gColTag = "";  // the plain row: `BLVIEW colour plain`; the RT row: `BLVIEW colour rt`
 static int gColKind = 0;  // lane VKOBJ5: 1 ` skin`, 2 ` alpha`, 3 ` single`, 4 ` own` after it; lane VKWATER3: 5 ` ao`; VKOBJ19: 6 ` fade`
-static const char * kColKindName[9] = { "", " skin", " alpha", " single", " own", " ao", " fade", " ssgi", " stepb" };  // VKOBJ21: 7 ` ssgi`; VKOBJ22: 8 ` stepb`
+static const char * kColKindName[10] = { "", " skin", " alpha", " single", " own", " ao", " fade", " ssgi", " stepb", " copy" };  // VKOBJ21: 7 ` ssgi`; VKOBJ22: 8 ` stepb`; VKFLIGHT12: 9 ` copy`
 /* lane VKWATER3 (manager ruling 11-15, the AO note; stated before its first run, never widened): kind 5 `ao` runs the main arm
  * on the app's key with a GL R32F texture on cellAo (half the view, a ramp in y and a 7-texel saw in x, bilinear, clamped),
  * cellAoOn 1, cellAoRect the frame. GL probe: cellAoOn 0 moves GL's colour on >= 20 % of the covered pixels. Ruling item 3:
@@ -84,6 +84,16 @@ static const char * kColKindName[9] = { "", " skin", " alpha", " single", " own"
  * bytes (half the view, 4 bytes a texel). Reds: standin (ObjBlShade.standInRed: no copy twin, the old stand-in) and copy (red 26 =
  * objBlShade's 8: copied from one texel on in x) must FAIL. Check: the same texture on cellSsgi (GL's own, no twin) must refuse
  * naming cellSsgi (`REFUSED OK`). */
+/* lane VKFLIGHT12 (11-17; stated before its first run, never widened): kind 9 `copy` is the flight's opaque refusal "GL textures with
+ * no twin": GL's own frame inputs, in the formats their owners make, on the names the bl twin reads: cellIsLut (3D RGBA8), cellIsBloom
+ * (RGBA16F, half the view), atApTex (3D RGBA16F), RefractionSrc (RGBA16F), waterInfoIndex / Atlas / Bodies (RG32UI / R32UI / RGBA32F),
+ * LandLodDiff / Outer (2D array BC1), LandLodNoise (2D array BC5), LandLodDetail (2D array RGBA8), CubeMap (cube RGBA8). Image space on
+ * (cellIsOn 1, cellIsLinear 0, LUT and bloom on), hasCubeMap 1. The main arm's form and bars (depth EXACT or BOUND, colour EXACT or BOUND
+ * 4e-3 of max(1, |GL|), lit >= 0.9 of covered, one crossing, 0 failed). Check: one copy of each bound input (copies == the bound count
+ * > 0, bytes == their sum), copyKB / copyMs printed. GL probes: cellIsLutOn 0 and cellIsBloomOn 0 each move GL's colour on >= 20 % of
+ * the covered pixels. Reds standin (25: no copy twins, the stand-ins) and copy (26: each input copied from one texel / block on in x)
+ * must FAIL with Vulkan's colour moved. Check: RGB10_A2 on LandLodDetail (no twin format) must refuse naming LandLodDetail and
+ * "no copy twin" (`REFUSED OK`). */
 /* lane VKOBJ19 (11-16; stated before its first run, never widened): kind 6 `fade` is bsshape.cpp's decal-fade band on the bl route
  * (vkBlDraw tried in the band loop). Kind 3's singles (a crossing a piece, its shape's row, rowsAtBase), alphaFlags 8 (the blend
  * bit only: rigid, no test, no skin), GL_BLEND on with SRC_ALPHA / ONE_MINUS_SRC_ALPHA, each shape's alpha a0 = 1, 0.9, 0.8 in turn.
@@ -559,6 +569,103 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			return false;
 		}
 	}
+	// lane VKFLIGHT12 kind 9: GL's own frame inputs in their owners' formats on the names the flight's opaque pass refused
+	struct CpIn
+	{
+		const char * name;
+		GLenum target, fmt, dfmt, dtype;
+		int w, h, d;
+		std::uint64_t bytes;  // one copy (one level: MAX_LEVEL 0)
+	};
+	const CpIn kCp[12] = {
+		{ "cellIsLut", 0x806F, 0x8058, 0x1908, 0x1401, 16, 16, 16, 16u * 16u * 16u * 4u },  // 3D RGBA8 (celllights.cpp)
+		{ "cellIsBloom", 0x0DE1, 0x881A, 0x1908, 0x1406, kSW / 2, kSH / 2, 1, std::uint64_t( kSW / 2 ) * std::uint64_t( kSH / 2 ) * 8u },
+		{ "atApTex", 0x806F, 0x881A, 0x1908, 0x1406, 8, 8, 8, 8u * 8u * 8u * 8u },  // 3D RGBA16F (atmosphere.cpp)
+		{ "RefractionSrc", 0x0DE1, 0x881A, 0x1908, 0x1406, 32, 32, 1, 32u * 32u * 8u },  // glscene.cpp
+		{ "waterInfoIndex", 0x0DE1, 0x823C, 0x8228, 0x1405, 8, 8, 1, 8u * 8u * 8u },  // RG32UI (cellwaterinfo.cpp)
+		{ "waterInfoAtlas", 0x0DE1, 0x8236, 0x8D94, 0x1405, 16, 16, 1, 16u * 16u * 4u },  // R32UI
+		{ "waterInfoBodies", 0x0DE1, 0x8814, 0x1908, 0x1406, 8, 4, 1, 8u * 4u * 16u },  // RGBA32F
+		{ "LandLodDiff", 0x8C1A, 0x83F1, 0x1908, 0x1401, 16, 16, 4, 4u * 4u * 8u * 4u },  // 2D array BC1 (renderer.cpp: the chunks' DDS)
+		{ "LandLodOuter", 0x8C1A, 0x83F1, 0x1908, 0x1401, 16, 16, 4, 4u * 4u * 8u * 4u },
+		{ "LandLodNoise", 0x8C1A, 0x8DBD, 0x1908, 0x1401, 16, 16, 2, 4u * 4u * 16u * 2u },  // 2D array BC5
+		{ "LandLodDetail", 0x8C1A, 0x8058, 0x1908, 0x1401, 16, 16, 2, 16u * 16u * 4u * 2u },  // 2D array RGBA8
+		{ "CubeMap", 0x8513, 0x8058, 0x1908, 0x1401, 8, 8, 6, 6u * 8u * 8u * 4u },  // cube RGBA8
+	};
+	GLuint cpTex[12] = {};
+	int cpUnit[12] = { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
+	int cpN = 0;
+	std::uint64_t cpBytes = 0;
+	void( WINAPI * texImage3D )( GLenum, GLint, GLint, GLsizei, GLsizei, GLsizei, GLint, GLenum, GLenum, const void * ) = nullptr;
+	if ( kind == 9 ) {
+		load( texImage3D, "glTexImage3D" );
+		GLint( WINAPI * loc )( GLuint, const char * ) = nullptr;
+		load( loc, "glGetUniformLocation" );
+		std::string bound, none;
+		for ( int k = 0; k < 12; k++ ) {
+			const CpIn & c = kCp[k];
+			GLint l = loc ? loc( prog, c.name ) : -1;
+			if ( l < 0 && reg.count( c.name ) )
+				l = reg[c.name];
+			cpUnit[k] = unitAt.count( l ) ? unitAt[l] : -1;
+			if ( cpUnit[k] < 0 ) {
+				none += std::string( " " ) + c.name;
+				continue;
+			}
+			const int comps = c.dfmt == 0x1908 ? 4 : c.dfmt == 0x8228 ? 2 : 1;
+			const std::size_t n = static_cast<std::size_t>( c.w ) * static_cast<std::size_t>( c.h ) * static_cast<std::size_t>( c.d )
+				* static_cast<std::size_t>( comps );
+			std::vector<unsigned char> b( n * ( c.dtype == 0x1401 ? 1u : 4u ) );
+			for ( std::size_t i = 0; i < n; i++ ) {
+				const std::size_t t = i / static_cast<std::size_t>( comps ), ch = i % static_cast<std::size_t>( comps );
+				if ( c.dtype == 0x1401 )
+					b[i] = static_cast<unsigned char>( ( t * 37u + ch * 91u + std::size_t( k ) * 11u ) % 256u );
+				else if ( c.dtype == 0x1406 ) {
+					const float v = ( k == 1 ? 0.25f : 1.0f ) * float( ( t * 7u + ch * 13u + std::size_t( k ) ) % 17u ) / 16.0f;
+					std::memcpy( &b[i * 4], &v, 4 );
+				} else {
+					const std::uint32_t v = std::uint32_t( ( t * 7u + ch ) % 5u );
+					std::memcpy( &b[i * 4], &v, 4 );
+				}
+			}
+			glGenTextures( 1, &cpTex[k] );
+			glBindTexture( c.target, cpTex[k] );
+			if ( c.target == 0x8513 )
+				for ( int fc = 0; fc < 6; fc++ )
+					glTexImage2D( GLenum( 0x8515 + fc ), 0, GLint( c.fmt ), c.w, c.h, 0, c.dfmt, c.dtype, b.data() + std::size_t( fc ) * ( b.size() / 6 ) );
+			else if ( c.target == 0x0DE1 )
+				glTexImage2D( c.target, 0, GLint( c.fmt ), c.w, c.h, 0, c.dfmt, c.dtype, b.data() );
+			else if ( texImage3D )
+				texImage3D( c.target, 0, GLint( c.fmt ), c.w, c.h, c.d, 0, c.dfmt, c.dtype, b.data() );
+			const GLint filt = c.dfmt == 0x1908 ? GL_LINEAR : GL_NEAREST;  // an integer texture filters NEAREST (else incomplete)
+			glTexParameteri( c.target, GL_TEXTURE_MIN_FILTER, filt );
+			glTexParameteri( c.target, GL_TEXTURE_MAG_FILTER, filt );
+			glTexParameteri( c.target, GL_TEXTURE_WRAP_S, 0x812F );  // CLAMP_TO_EDGE
+			glTexParameteri( c.target, GL_TEXTURE_WRAP_T, 0x812F );
+			glTexParameteri( c.target, 0x8072, 0x812F );  // WRAP_R
+			glTexParameteri( c.target, 0x813D, 0 );  // MAX_LEVEL
+			glBindTexture( c.target, 0 );
+			cpN++;
+			cpBytes += c.bytes;
+			bound += std::string( " " ) + c.name;
+		}
+		put( "cellIsOn", { 1 } );
+		put( "cellIsLinear", { 0 } );
+		put( "cellIsLutOn", { 1 } );
+		put( "cellIsBloomOn", { 1 } );
+		put( "cellIsBloomRect", { 0.0f, 0.0f, 1.0f / float( kSW ), 1.0f / float( kSH ) } );
+		put( "cellIsExposure", { 1.0f } );
+		put( "cellIsCine", { 1.0f, 1.0f, 1.0f } );
+		put( "cellIsTint", { 0.0f, 0.0f, 0.0f, 0.0f } );
+		put( "cellIsAdapted", { 0.25f } );
+		put( "cellIsRed", { 0 } );
+		put( "hasCubeMap", { 1 } );
+		colPrintf( "BLVIEW colour copy inputs: %d of 12 bound (%s), no unit for:%s; %llu bytes a copy of each\n", cpN, bound.c_str(),
+			none.empty() ? " none" : none.c_str(), static_cast<unsigned long long>( cpBytes ) );
+		if ( !cpTex[0] || !cpTex[1] || glGetError() != GL_NO_ERROR ) {
+			colPrintf( "BLVIEW colour FAIL (no unit for cellIsLut / cellIsBloom, or a GL error making the copy inputs)\n" );
+			return false;
+		}
+	}
 	// lane VKOBJ21 kind 7: the SSGI result as its owner makes it under the view (a shared RGBA16F target) on cellSsgi
 	static int ssgiAt = 0;
 	const std::uintptr_t ssgiKey = reinterpret_cast<std::uintptr_t>( &ssgiAt );
@@ -872,6 +979,9 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			u.bindTextures( GLuint( ownUnit ), 1, &aoTex );
 		if ( ssgiTex )
 			u.bindTextures( GLuint( ssgiUnit ), 1, &ssgiTex );
+		for ( int k = 0; k < 12; k++ )  // lane VKFLIGHT12 kind 9
+			if ( cpTex[k] )
+				u.bindTextures( GLuint( cpUnit[k] ), 1, &cpTex[k] );
 		f.bindBufferBase( 0x8A11, 0, ubo[0] );
 		f.bindBufferBase( 0x8A11, 1, ubo[1] );
 		if ( sfB ) {  // the cascade values as put() left them (a red or probe set after GL drew reaches both sides)
@@ -1140,6 +1250,30 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		colPrintf( "BLVIEW colour GL ao probe %s: cellAoOn 0 moves GL's colour on %zu of %zu covered pixels (bar >= 20 %%)\n",
 			kindReach ? "OK" : "FAIL", moved, cov );
 	}
+	if ( kind == 9 ) {  // lane VKFLIGHT12: the LUT and the bloom each reach GL's colour (else a stand-in could draw the same picture)
+		const char * cpOff[2] = { "cellIsLutOn", "cellIsBloomOn" };
+		kindReach = true;
+		for ( int k = 0; k < 2; k++ ) {
+			ColOut g2;
+			put( cpOff[k], { 0 } );
+			glDraw( g2 );
+			put( cpOff[k], { 1 } );
+			std::size_t cov = 0, moved = 0;
+			for ( std::size_t i = 0; i < gl.depth.size(); i++ ) {
+				if ( !( gl.depth[i] < 1.0f ) )
+					continue;
+				cov++;
+				bool mv = false;
+				for ( int ch = 0; ch < 4; ch++ )
+					mv = mv || gl.c0[i * 4 + ch] != g2.c0[i * 4 + ch];
+				moved += mv;
+			}
+			const bool reach = cov > 0 && double( moved ) >= 0.2 * double( cov );
+			colPrintf( "BLVIEW colour GL copy probe %s: %s 0 moves GL's colour on %zu of %zu covered pixels (bar >= 20 %%)\n", reach ? "OK" : "FAIL",
+				cpOff[k], moved, cov );
+			kindReach = kindReach && reach;
+		}
+	}
 	if ( kind == 6 ) {  // lane VKOBJ19: the band's fade reaches GL's colour (every fade 1: the bands at a0)
 		ColOut g2;
 		fadeProbe = true;
@@ -1391,14 +1525,21 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			colPrintf( "BLVIEW colour check cellSsgi in place %s (%d copies, want 0; %d shared units)\n", inPlace ? "OK" : "FAIL", rs.copies, rs.shared );
 			ok = ok && inPlace;
 		}
+		if ( kind == 9 ) {  // lane VKFLIGHT12: every bound input through its copy twin, once a frame
+			const bool copyOk = cpN > 0 && rs.copies == cpN && rs.copyBytes == cpBytes;
+			colPrintf( "BLVIEW colour check copy twins %s (%d copies, %llu bytes, want %d of %llu; copyKB %.1f copyMs %.3f)\n", copyOk ? "OK" : "FAIL",
+				rs.copies, static_cast<unsigned long long>( rs.copyBytes ), cpN, static_cast<unsigned long long>( cpBytes ),
+				double( rs.copyBytes ) / 1024.0, double( rs.copyMs ) );
+			ok = ok && copyOk;
+		}
 	}
 	const char * redName[3] = { "glow (glowMult 0 after GL drew)", "slot (each row's maps one slot on)",
 		"map (the cascade map's checker inverted after GL drew)" };
 	const char * kindRedName[5] = { " bone (bone i reads bone i + 1's transform)", " flags (the mirrored alphaFlags 0)",  // lane VKOBJ5
 		" base (rowsAtBase off: the mirrored wwDrawBase kept)", " offset (every attribute read from offset 0)",
 		" half (the halves read as 16-bit unorm)" };
-	const int redLo = kind == 0 ? 1 : kind == 4 ? 14 : kind == 5 ? 25 : kind == 6 ? 27 : kind == 7 ? 28 : kind == 8 ? 29 : 10 + kind;
-	const int redHi = kind == 0 ? ( twin ? 3 : 2 ) : kind == 4 ? 15 : kind == 5 ? 26 : kind == 6 ? 27 : kind == 7 ? 28 : kind == 8 ? 29 : 10 + kind;
+	const int redLo = kind == 0 ? 1 : kind == 4 ? 14 : kind == 5 || kind == 9 ? 25 : kind == 6 ? 27 : kind == 7 ? 28 : kind == 8 ? 29 : 10 + kind;
+	const int redHi = kind == 0 ? ( twin ? 3 : 2 ) : kind == 4 ? 15 : kind == 5 || kind == 9 ? 26 : kind == 6 ? 27 : kind == 7 ? 28 : kind == 8 ? 29 : 10 + kind;
 	for ( int r = redLo; r <= redHi; r++ ) {
 		ColOut o;
 		std::string rw;
@@ -1416,7 +1557,8 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			passes = ( dc.exact() || dc.bound() ) && ( cc.exact() || cc.bound() );
 		}
 		colPrintf( "BLVIEW RED colour%s %s (%zu values over the bound, %zu Vulkan colour values moved off the Vulkan base%s%s)\n",
-			r == 29 ? " droprange (the last kept range of each multi-range shape dropped)" : r == 28 ? " ssgi (cellSsgi dropped to the stand-in)" : r == 27 ? " fade (the band crossings at a0, unscaled)" : r == 25 ? " standin (no copy twin: GL's own cellAo texture stood in)" : r == 26 ? " copy (cellAo copied from one texel on in x)"
+			r == 29 ? " droprange (the last kept range of each multi-range shape dropped)" : r == 28 ? " ssgi (cellSsgi dropped to the stand-in)" : r == 27 ? " fade (the band crossings at a0, unscaled)" : r == 25 ? ( kind == 9 ? " standin (no copy twins: the stand-ins)" : " standin (no copy twin: GL's own cellAo texture stood in)" )
+			: r == 26 ? ( kind == 9 ? " copy (each input copied from one texel / block on in x)" : " copy (cellAo copied from one texel on in x)" )
 			: r > 10 ? kindRedName[r - 11] : redName[r - 1],
 			passes ? "PASSED" : vch ? "FAIL" : "TESTS NOTHING", over, vch, rr ? "" : "; refused: ", rr ? "" : rw.c_str() );
 		ok = ok && !passes && vch > 0;
@@ -1431,6 +1573,28 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		ownUnit = -1;
 		colPrintf( "BLVIEW colour check cellSsgi (GL's own texture, no twin) %s (%s)\n", refused ? "REFUSED OK" : "FAIL",
 			rw.empty() ? "no unit for cellSsgi, or it drew" : rw.c_str() );
+		ok = ok && refused;
+	}
+	if ( kind == 9 ) {  // lane VKFLIGHT12: a format no twin takes (RGB10_A2 on LandLodDetail) must refuse the draw, naming it
+		GLuint bad = 0;
+		const std::vector<unsigned char> bb( 16u * 16u * 4u * 2u, 128 );
+		glGenTextures( 1, &bad );
+		glBindTexture( 0x8C1A, bad );
+		if ( texImage3D )
+			texImage3D( 0x8C1A, 0, 0x8059, 16, 16, 2, 0, 0x1908, 0x1401, bb.data() );  // RGB10_A2
+		glTexParameteri( 0x8C1A, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+		glTexParameteri( 0x8C1A, 0x813D, 0 );
+		glBindTexture( 0x8C1A, 0 );
+		const GLuint keep = cpTex[10];
+		cpTex[10] = cpUnit[10] >= 0 ? bad : 0;
+		std::string rw;
+		ColOut o;
+		const bool refused = cpTex[10] && !vkRun( 0, o, rw ) && rw.find( "LandLodDetail" ) != std::string::npos
+			&& rw.find( "no copy twin" ) != std::string::npos;
+		cpTex[10] = keep;
+		glDeleteTextures( 1, &bad );
+		colPrintf( "BLVIEW colour check LandLodDetail RGB10_A2 (no twin format) %s (%s)\n", refused ? "REFUSED OK" : "FAIL",
+			rw.empty() ? "no unit for LandLodDetail, or it drew" : rw.c_str() );
 		ok = ok && refused;
 	}
 	if ( kind == 6 ) {  // lane VKOBJ19: the band's constant-alpha blend must refuse, naming the constant
@@ -1539,7 +1703,10 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			glDeleteTextures( 1, &aoTex );
 		if ( ssgiTex )
 			sharedTargetDrop( ssgiKey );
-		if ( rt || kind == 5 || kind == 6 || kind == 7 )
+		for ( GLuint & t : cpTex )  // lane VKFLIGHT12 kind 9
+			if ( t )
+				glDeleteTextures( 1, &t );
+		if ( rt || kind == 5 || kind == 6 || kind == 7 || kind == 9 )
 			colPrintf( "BLVIEW colour %s\n", ok ? "OK" : "FAILED" );
 		gColTwin = gColKind = 0;
 		gColTag = "";
