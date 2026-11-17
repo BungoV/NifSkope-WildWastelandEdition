@@ -1354,6 +1354,205 @@ int main( int argc, char ** argv )
 		arm( "tiles 1 + 2 on another fgDecal buffer", vkTiles( 1, 3, 0, decalsSplit ), glSplit, false, 2, 3 );
 		arm( "the same, queued + flushed", vkTiles( 2, 3, 0, decalsSplit ), glSplit, false, 2, 3 );
 		exact( "tile 0 after the batches vs before", vkTiles( 0, 1, 0, nullptr ), one0 );
+		{
+			/* lane VKFLIGHT10: the obscurance g-buffer as the draw target (ao.cpp: RGBA32F + D24S8, 1 sample, both shared
+			 * while the view is on Vulkan; wwCellAoDraw: cellProbe 20, stencil ALWAYS ref 0 / 1, ops KEEP KEEP REPLACE, write
+			 * mask 0x01). Vulkan's run on the shared pair vs GL's on plain twins, the stencil prefilled 0x80. Reds: 512 the
+			 * stencil state dropped, 4096 the colour mask ignored; a size one short must refuse; the tone frame after the
+			 * g-buffer runs is EXACT against the run before, and a second tone + g-buffer round builds no pipeline. */
+			const int GW = W * 3 / 4, GH = H * 3 / 4;
+			static char gbKeys[2];
+			unsigned gc = 0, gd = 0;
+			const bool gOk = WwVkPresent::sharedTarget( reinterpret_cast<std::uintptr_t>( &gbKeys[0] ), 0, GW, GH, 1, fRgba32f, gc, why )
+				&& WwVkPresent::sharedTarget( reinterpret_cast<std::uintptr_t>( &gbKeys[1] ), 0, GW, GH, 1, fD24s8, gd, why ) && gc && gd;
+			const GLuint plC = tex2d( GW, GH, fRgba32f, GL_RGBA, GL_FLOAT, nullptr, false );
+			const GLuint plD = tex2d( GW, GH, fD24s8, 0x84F9, 0x84FA, nullptr, false );
+			auto gbFbo = [&]( GLuint col, GLuint ds ) {
+				GLuint b = 0;
+				f.genFramebuffers( 1, &b );
+				f.bindFramebuffer( fFb, b );
+				f.framebufferTexture2D( fFb, fCol0, GL_TEXTURE_2D, col, 0 );
+				f.framebufferTexture2D( fFb, fDsAtt, GL_TEXTURE_2D, ds, 0 );
+				const GLenum buf0 = fCol0;
+				f.drawBuffers( 1, &buf0 );
+				return f.checkFramebufferStatus( fFb ) == fComplete ? b : 0u;
+			};
+			const GLuint fbGbVk = gOk ? gbFbo( gc, gd ) : 0u, fbGbGl = gbFbo( plC, plD );
+			using GetUi = void( WINAPI * )( GLuint, GLint, GLint * );
+			const auto getUi = reinterpret_cast<GetUi>( wglGetProcAddress( "glGetUniformiv" ) );
+			auto intOf = [&]( const char * n ) {
+				GLint v = 0;
+				const GLint l = f.getUniformLocation( pFg, n );
+				if ( getUi && l >= 0 )
+					getUi( pFg, l, &v );
+				return v;
+			};
+			const GLint probe0 = intOf( "cellProbe" ), on0 = intOf( "cellOn" );
+			if ( !fbGbVk || !fbGbGl || f.getUniformLocation( pFg, "cellProbe" ) < 0 ) {
+				std::printf( "FARGROUNDDRAW gbuf: no arm (%s)\n", !gOk ? why.c_str() : fbGbVk && fbGbGl ? "cellProbe has no location"
+					: "a framebuffer incomplete" );
+				gateOk = false;
+			} else {
+				struct Gb
+				{
+					std::vector<float> c, d;
+					std::vector<std::uint8_t> s;
+					bool ran = true;
+				};
+				auto gbBefore = [&]( GLuint fb ) {
+					f.bindFramebuffer( fFb, fb );
+					glViewport( 0, 0, GW, GH );
+					drawState0();
+					glDepthMask( GL_TRUE );
+					glStencilMask( 0xFF );
+					glClearColor( 0.3f, 0.45f, 0.7f, 0.5f );
+					glClearDepth( 1.0 );
+					glClearStencil( 0x80 );
+					glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT );
+					glClearStencil( 0 );
+					glEnable( GL_SCISSOR_TEST );
+					glScissor( 0, 0, GW / 2, GH );
+					glEnable( GL_DEPTH_TEST );
+					glDepthFunc( GL_ALWAYS );
+					f.useProgram( pSlab );
+					f.uniform1fv( f.getUniformLocation( pSlab, "zd" ), 1, &zd );
+					glDrawArrays( GL_TRIANGLES, 0, 3 );
+					drawState0();
+					glDepthFunc( GL_LESS );
+				};
+				auto gbOn = [&]( GLuint fb, int probe, int ref, const GLboolean * cm ) {
+					tileOn( fb, 0, nullptr );
+					glViewport( 0, 0, GW, GH );
+					setI( "cellOn", 1 );
+					setI( "cellProbe", probe );
+					glEnable( GL_STENCIL_TEST );
+					glStencilFunc( GL_ALWAYS, ref, 0xFF );
+					glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
+					glStencilMask( 0x01 );
+					glColorMask( cm[0], cm[1], cm[2], cm[3] );
+				};
+				auto gbOff = [&]() {
+					glStencilMask( 0xFF );
+					glStencilFunc( GL_ALWAYS, 0, 0xFF );
+					glStencilOp( GL_KEEP, GL_KEEP, GL_KEEP );
+					setI( "cellProbe", probe0 );
+					setI( "cellOn", on0 );
+					stateEnd();
+				};
+				auto gbRead = [&]( GLuint fb ) {
+					Gb o;
+					const size_t n = static_cast<size_t>( GW ) * static_cast<size_t>( GH );
+					o.c.assign( n * 4, 0.0f );
+					o.d.assign( n, 0.0f );
+					o.s.assign( n, 0 );
+					f.bindFramebuffer( fFb, fb );
+					glReadBuffer( fCol0 );
+					glPixelStorei( GL_PACK_ALIGNMENT, 1 );
+					glReadPixels( 0, 0, GW, GH, GL_RGBA, GL_FLOAT, o.c.data() );
+					glReadPixels( 0, 0, GW, GH, GL_DEPTH_COMPONENT, GL_FLOAT, o.d.data() );
+					glReadPixels( 0, 0, GW, GH, GL_STENCIL_INDEX, GL_UNSIGNED_BYTE, o.s.data() );
+					glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+					return o;
+				};
+				auto gbGl = [&]( int probe, int ref, const GLboolean * cm ) {
+					gbBefore( fbGbGl );
+					gbOn( fbGbGl, probe, ref, cm );
+					ex.drawInst( GL_TRIANGLES, GLsizei( count ), GL_UNSIGNED_SHORT, reinterpret_cast<const void *>( std::uintptr_t( idxOff ) ), 1, base, 0 );
+					gbOff();
+					return gbRead( fbGbGl );
+				};
+				auto gbVk = [&]( int ref, const GLboolean * cm, int red, int shortBy ) {
+					gbBefore( fbGbVk );
+					gbOn( fbGbVk, 20, ref, cm );
+					WwVkPresent::WaterRun r = tileRun( red );
+					r.color = gc;
+					r.rayDepth = gd;
+					r.w = GW - shortBy;
+					r.h = GH;
+					const bool ran = WwVkPresent::farGroundRun( r, why );
+					runs++;
+					take();
+					gbOff();
+					Gb o = gbRead( fbGbVk );
+					o.ran = ran;
+					return o;
+				};
+				gbBefore( fbGbGl );
+				const Gb gbBase = gbRead( fbGbGl );
+				auto gbJudge = [&]( const char * what, const Gb & vk, const Gb & gl, bool mustFail ) {
+					if ( !vk.ran ) {
+						std::printf( "FARGROUNDDRAW gbuf %s: REFUSED (%s)\n", what, why.c_str() );
+						gateOk = false;
+						return false;
+					}
+					size_t covered = 0, onlyOne = 0, depthPast = 0, colPast = 0, stDiff = 0;
+					double maxDu = 0.0, maxAbs = 0.0;
+					for ( size_t i = 0; i < gl.d.size() && i < vk.d.size(); i++ ) {
+						const bool hg = gl.d[i] != gbBase.d[i], hv = vk.d[i] != gbBase.d[i];
+						covered += hg;
+						onlyOne += hg != hv;
+						const double du = std::fabs( double( vk.d[i] ) - double( gl.d[i] ) ) * 16777215.0;
+						maxDu = std::max( maxDu, du );
+						depthPast += du > 1.0;
+						stDiff += vk.s[i] != gl.s[i];
+						for ( size_t c = 0; c < 4; c++ ) {
+							const double a = vk.c[4 * i + c], b = gl.c[4 * i + c];
+							if ( std::isnan( a ) || std::isnan( b ) ) {
+								colPast += std::isnan( a ) != std::isnan( b );
+								continue;
+							}
+							const double e = std::fabs( a - b );
+							maxAbs = std::max( maxAbs, e );
+							colPast += e > 1e-2 * std::max( 1.0, std::fabs( b ) );
+						}
+					}
+					const bool fail = !( covered > gl.d.size() / 50 && !onlyOne && !depthPast && !stDiff && colPast * 1000 <= covered * 4 );
+					std::printf( "FARGROUNDDRAW gbuf %s: %s covered %zu (one side only %zu), depth max %.0f D24 units (%zu past 1), stencil %zu differ, "
+						"colour %zu values past 1e-2 (max abs %.3g)%s\n", what, fail ? "FAIL" : "OK", covered, onlyOne, maxDu, depthPast, stDiff, colPast,
+						maxAbs, mustFail ? ( fail ? " -> red FAILS as it must" : " -> red PASSES: the gate is blind" ) : "" );
+					if ( mustFail ? !fail : fail )
+						gateOk = false;
+					return true;
+				};
+				const GLboolean all[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE }, rg[4] = { GL_TRUE, GL_TRUE, GL_FALSE, GL_FALSE };
+				const Gb gl1 = gbGl( 20, 1, all ), gl0 = gbGl( 20, 0, all ), glRg = gbGl( 20, 1, rg ), glP0 = gbGl( 0, 1, all );
+				size_t probeMoved = 0, st81 = 0, rgKept = 0;
+				for ( size_t i = 0; i < gl1.c.size(); i++ )
+					probeMoved += gl1.c[i] != glP0.c[i];
+				for ( size_t i = 0; i < gl1.s.size(); i++ )
+					st81 += gl1.s[i] == 0x81;
+				for ( size_t i = 0; i + 3 < glRg.c.size(); i += 4 )
+					rgKept += glRg.c[i + 2] == gbBase.c[i + 2] && glRg.c[i + 3] == gbBase.c[i + 3] && glRg.c[i] != gbBase.c[i];
+				std::printf( "FARGROUNDDRAW gbuf GL's own: cellProbe 20 vs 0 moves %zu values, ref 1 writes 0x81 on %zu texels, mask 1 1 0 0 keeps "
+					"blue + alpha on %zu written texels\n", probeMoved, st81, rgKept );
+				if ( probeMoved < 1000 || st81 < 1000 || rgKept < 1000 ) {
+					std::printf( "FARGROUNDDRAW gbuf: the fixture is blind to the probe, the stencil or the colour mask\n" );
+					gateOk = false;
+				}
+				if ( gbJudge( "ref 1, every channel", gbVk( 1, all, 0, 0 ), gl1, false ) ) {
+					gbJudge( "ref 0", gbVk( 0, all, 0, 0 ), gl0, false );
+					gbJudge( "colour mask 1 1 0 0", gbVk( 1, rg, 0, 0 ), glRg, false );
+					gbJudge( "red 4096 (the colour mask ignored)", gbVk( 1, rg, 4096, 0 ), glRg, true );
+					gbJudge( "red 512 (the stencil state dropped)", gbVk( 1, all, 512, 0 ), gl1, true );
+					const Gb shortW = gbVk( 1, all, 0, 1 );
+					std::printf( "FARGROUNDDRAW gbuf a size one short: %s (%s)\n", shortW.ran ? "RAN: it must refuse" : "refused as it must",
+						shortW.ran ? "" : why.c_str() );
+					if ( shortW.ran )
+						gateOk = false;
+					exact( "tile 0 on the tone frame after the g-buffer runs vs before", vkTiles( 0, 1, 0, nullptr ), one0 );
+					gbJudge( "ref 1 after a tone run", gbVk( 1, all, 0, 0 ), gl1, false );
+					const int pipes = tot.pipelines;
+					exact( "tile 0 on the tone frame, round 2", vkTiles( 0, 1, 0, nullptr ), one0 );
+					gbJudge( "ref 1, round 2", gbVk( 1, all, 0, 0 ), gl1, false );
+					std::printf( "FARGROUNDDRAW gbuf pipelines over a second tone + g-buffer round: %d -> %d%s\n", pipes, tot.pipelines,
+						pipes == tot.pipelines ? "" : " -> a pipeline was built again" );
+					if ( pipes != tot.pipelines )
+						gateOk = false;
+				}
+			}
+			WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &gbKeys[0] ) );
+			WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &gbKeys[1] ) );
+		}
 	}
 	std::printf( gateOk ? "FARGROUNDDRAW GATE OK\n" : "FARGROUNDDRAW GATE FAILED\n" );
 	return gateOk ? 0 : 1;
