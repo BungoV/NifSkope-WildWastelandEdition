@@ -69,8 +69,9 @@
  * so the read stays in the buffer) must FAIL and move: it is the defect the flag fixes. Kind 4 own: GL and Vulkan draw from a
  * shape VAO (no pool): locations 0..4 interleaved fp32 at stride 64 from byte 32 of one buffer, the uv (location 7) two
  * halves at stride 4 from byte 8 of another, the class's index buffer; Vulkan through ownVao. Bars as the main arm, 1 run.
- * Reds offset (every attribute read from offset 0) and half (the halves read as 16-bit unorm) must FAIL and move. Check:
- * location 5 disabled with current value (0.5,0,0,1) must refuse ("disabled with a current value"). The kinds run GL on the
+ * Reds offset (every attribute read from offset 0) and half (the halves read as 16-bit unorm) must FAIL and move. Check
+ * (VKFLIGHT11): location 1 off at (0.5,0.75,0.25,0.625) and location 5 off at (0,0,0,0) (the flight's rigid weights0): GL's
+ * draw moves, Vulkan BOUND to it; red 16 const (the old (0,0,0,1)) must FAIL and move. The kinds run GL on the
  * app's key, as the shipped twins (VKWATER3 ruling 1). */
 static int gColTwin = 0;  // colPrintf: 1 prints `BLVIEW colourcsm` for `BLVIEW colour`
 static const char * gColTag = "";  // the plain row: `BLVIEW colour plain`; the RT row: `BLVIEW colour rt`
@@ -1230,7 +1231,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		s.skinRed = red == 11 ? 1 : 0;   // lane VKOBJ5 red bone
 		s.alphaRed = red == 12 ? 1 : 0;  // lane VKOBJ5 red flags
 		s.ownVao = kind == 4;            // lane VKOBJ5 round 2: the VAO bound below
-		s.ownRed = red == 14 ? 1 : red == 15 ? 2 : 0;  // reds offset / half
+		s.ownRed = red == 14 ? 1 : red == 15 ? 2 : red == 16 ? 3 : 0;  // reds offset / half; VKFLIGHT11 16 const
 		s.standInRed = red == 25;        // lane VKWATER3 red standin
 		bool ran = true;
 		if ( kind == 3 ) {  // lane VKOBJ5 round 2: a crossing a shape, its one row (red 13 base: rowsAtBase off, padded rows)
@@ -1442,18 +1443,62 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			rw.empty() ? "it drew" : rw.c_str() );
 		ok = ok && refused;
 	}
-	if ( kind == 4 ) {  // lane VKOBJ5 round 2: location 5 disabled with a current value other than (0,0,0,1) must refuse
+	if ( kind == 4 ) {  // lane VKFLIGHT11 (was VKOBJ5's refusal check): a location the VAO leaves off reads GL's current value.
+		// The flight's opaque refusal: location 5 (weights0 of a rigid shape) off at (0,0,0,0). The colour (location 1) off at a
+		// value of its own moves GL's picture; Vulkan must match that GL draw, and red 16 const ((0,0,0,1) kept) must FAIL and move
 		void( WINAPI * attrib4f )( GLuint, GLfloat, GLfloat, GLfloat, GLfloat ) = nullptr;
-		std::string rw;
-		bool refused = false;
-		if ( load( attrib4f, "glVertexAttrib4f" ) ) {
-			attrib4f( 5, 0.5f, 0.0f, 0.0f, 1.0f );
-			ColOut o;
-			refused = !vkRun( 0, o, rw ) && rw.find( "disabled with a current value" ) != std::string::npos;
-			attrib4f( 5, 0.0f, 0.0f, 0.0f, 1.0f );
+		void( WINAPI * attribGet )( GLuint, GLenum, GLfloat * ) = nullptr;
+		void( WINAPI * arrOff )( GLuint, GLuint ) = nullptr;
+		void( WINAPI * arrOn )( GLuint, GLuint ) = nullptr;
+		std::string rw, rw3;
+		std::size_t gMoved = 0, vMoved = 0, over = 0, over3 = 0, both = 0;
+		bool loaded = false, vr = false, vr3 = false, pass = false, pass3 = true;
+		if ( load( attrib4f, "glVertexAttrib4f" ) && load( attribGet, "glGetVertexAttribfv" ) && load( arrOff, "glDisableVertexArrayAttrib" )
+			&& load( arrOn, "glEnableVertexArrayAttrib" ) ) {
+			loaded = true;
+			float was1[4] = {}, was5[4] = {};
+			attribGet( 1, 0x8626, was1 );  // CURRENT_VERTEX_ATTRIB
+			attribGet( 5, 0x8626, was5 );
+			arrOff( vao, 1 );
+			attrib4f( 1, 0.5f, 0.75f, 0.25f, 0.625f );
+			attrib4f( 5, 0.0f, 0.0f, 0.0f, 0.0f );
+			ColOut gc;
+			glDraw( gc );
+			for ( std::size_t i = 0; i < gc.c0.size() && i < gl.c0.size(); i++ )
+				gMoved += gc.c0[i] != gl.c0[i];
+			const ColOut keep = gl;
+			gl = gc;
+			ColOut o, o3;
+			vr = vkRun( 0, o, rw );
+			if ( vr ) {
+				const DepthCmp dc = depthCmp( o.depth, gl.depth );
+				const ColCmp cc = colCmp( o );
+				over = cc.over;
+				both = cc.both;
+				pass = ( dc.exact() || dc.bound() ) && ( cc.exact() || cc.bound() ) && cc.both >= 2000;
+			}
+			vr3 = vkRun( 16, o3, rw3 );
+			if ( vr3 ) {
+				const DepthCmp dc = depthCmp( o3.depth, gl.depth );
+				const ColCmp cc = colCmp( o3 );
+				over3 = cc.over;
+				pass3 = ( dc.exact() || dc.bound() ) && ( cc.exact() || cc.bound() );
+				for ( std::size_t i = 0; vr && i < o3.c0.size() && i < o.c0.size(); i++ )
+					vMoved += o3.c0[i] != o.c0[i];
+			}
+			gl = keep;
+			arrOn( vao, 1 );
+			attrib4f( 1, was1[0], was1[1], was1[2], was1[3] );
+			attrib4f( 5, was5[0], was5[1], was5[2], was5[3] );
 		}
-		colPrintf( "BLVIEW colour check location 5 current (0.5,0,0,1): %s (%s)\n", refused ? "REFUSED OK" : "FAIL", rw.c_str() );
-		ok = ok && refused;
+		const bool constOk = loaded && gMoved > 0 && vr && pass;
+		colPrintf( "BLVIEW colour check own const (location 1 off at (0.5,0.75,0.25,0.625), location 5 off at (0,0,0,0)): %s (GL moved %zu "
+			"colour values off the main draw; Vulkan %s%s, %zu pixels both cover, %zu values over the bound)\n", constOk ? "OK" : "FAIL", gMoved,
+			vr ? "drew" : "refused: ", vr ? "" : rw.c_str(), both, over );
+		colPrintf( "BLVIEW RED colour own const (the constant locations read (0,0,0,1)) %s (%zu values over the bound, %zu Vulkan colour values "
+			"moved off the const run%s%s)\n", vr3 && !pass3 ? ( vMoved ? "FAIL" : "TESTS NOTHING" ) : vr3 ? "PASSED" : "REFUSED", over3, vMoved,
+			vr3 ? "" : "; refused: ", vr3 ? "" : rw3.c_str() );
+		ok = ok && constOk && vr3 && !pass3 && vMoved > 0;
 	}
 	if ( rt ) {  // the RT reds (vkRun 21 .. 24)
 		const char * rtRed[4] = { "restir (the ReSTIR ratio copied from two texels on)", "atlas (the GI atlas read one texel on)",
