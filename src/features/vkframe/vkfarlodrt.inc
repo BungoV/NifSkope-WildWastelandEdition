@@ -8,6 +8,7 @@
  * tests/vkframe/farlodrtdraw.sh. */
 #include "features/vkframe/farlod_view_rt_ps.spv.h"  // vkframe_spirv.sh's fxr / fxdg lines (lane VKFAR25)
 #include "features/vkframe/farlod_view_dg_ps.spv.h"
+#define WW_VK_FARLODRTQ 1  // lane VKFLIGHT18: farLodRtQueue / farLodRtRunN (the gate's batch arm)
 
 namespace
 {
@@ -90,12 +91,9 @@ std::string farLodRtDrawRefusal( int v )
 	return D.broken ? D.brokenWhy : farlodrun::twinDrawRefusal();
 }
 
-bool farLodRtRun( const WaterRun & r, int v, std::string & why )
+// lane VKFLIGHT18: farLodRtRun's half-rate screen GI refusal, also asked at queue time (farLodRtQueue); "" draws
+static std::string farLodRtGiHalfRefusal( const WaterRun & r, int v )
 {
-	if ( v != 1 && v != 2 ) {
-		why = "no far LOD RT twin " + std::to_string( v ) + " (1 RT, 2 DG)";
-		return false;
-	}
 	/* lane VKFAR27 / VKFAR30 / VKFAR31: while GL's program reads the half-rate screen GI (cellGiHalfOn 1, set per mesh by
 	 * wwCellAoDraw whenever it ran), both twins (1 RT, 2 DG) read cellGiHalf / cellGiHalfKey in place, VKBUF2's shared images
 	 * found by name (vkrtbuf.h rtImgOf): each bound GL name must be the shared one. twinRun binds the shared view (farSharedOf)
@@ -131,14 +129,107 @@ bool farLodRtRun( const WaterRun & r, int v, std::string & why )
 				else if ( farSharedOf( s->tex ) != img.key )
 					w = std::string( nm ) + ": the shared image is not the bound name's";
 			}
-			if ( !w.empty() ) {
-				FxStat & S = farlod::farLodRtOf( v ).st;
-				S.fails++;
-				S.failWhy = why = "cellGiHalfOn 1: " + w;
-				return false;
-			}
+			if ( !w.empty() )
+				return w;
 		}
+	return std::string();
+}
+
+bool farLodRtRun( const WaterRun & r, int v, std::string & why )
+{
+	if ( v != 1 && v != 2 ) {
+		why = "no far LOD RT twin " + std::to_string( v ) + " (1 RT, 2 DG)";
+		return false;
+	}
+	if ( const std::string w = farLodRtGiHalfRefusal( r, v ); !w.empty() ) {
+		FxStat & S = farlod::farLodRtOf( v ).st;
+		S.fails++;
+		S.failWhy = why = "cellGiHalfOn 1: " + w;
+		return false;
+	}
 	return farlodrun::twinRun( farlod::farLodRtOf( v ), farlod::farLodRtSpecOf( v ), r, why );
+}
+
+/* lane VKFLIGHT18 (frame time): the rings' RT / DG twins batched as VKFLIGHT14's far ground RT. They join vkfarground.inc's
+ * FgQueue as variants 3 / 4 (one twin a batch, a twin change flushes first), so every farGroundFlush site flushes them; the
+ * draw's refusals are asked at queue time (false: why, the caller flushes and GL draws it). The tone frame only: an AO
+ * g-buffer draw (rayDepth) flushes and runs alone (twinRunN draws into the tone frame). */
+bool farLodRtRunN( const WaterRun * const * rs, int n, int v, std::string & why )
+{
+	if ( v != 1 && v != 2 ) {
+		why = "no far LOD RT twin " + std::to_string( v ) + " (1 RT, 2 DG)";
+		return false;
+	}
+	farlod::WaterDraw & D = farlod::farLodRtOf( v );
+	for ( int at = 0; at < n; ) {
+		int k = 1;
+		while ( at + k < n && k < farlod::kTwinBatchMax && farlodrun::twinSameInputs( *rs[at], *rs[at + k] ) )
+			k++;
+		if ( !farlodrun::twinRunN( D, farlod::farLodRtSpecOf( v ), rs + at, k, why ) )
+			return false;
+		at += k;
+	}
+	return true;
+}
+
+bool farLodRtQueue( const WaterRun & r, int v, std::string & why )
+{
+	FgQueue & q = fgQ();
+	if ( q.off || r.rayDepth || ( v != 1 && v != 2 ) )
+		return farGroundFlush( why ) && farLodRtRun( r, v, why );
+	if ( q.n && ( q.v != v + 2 || q.n >= farlod::kTwinBatchMax || !farlodrun::twinSameInputs( q.runs[0], r ) ) && !farGroundFlush( why ) )
+		return false;
+	if ( const std::string w = farLodRtGiHalfRefusal( r, v ); !w.empty() ) {
+		FxStat & S = farlod::farLodRtOf( v ).st;
+		S.fails++;
+		S.failWhy = why = "cellGiHalfOn 1: " + w;
+		return false;
+	}
+	if ( const std::string no = farlodrun::twinReadyN( farlod::farLodRtOf( v ), farlod::farLodRtSpecOf( v ), r, q.n == 0 ); !no.empty() ) {
+		why = no;
+		return false;
+	}
+	if ( q.runs.size() <= size_t( q.n ) )
+		q.runs.resize( size_t( q.n ) + 1 );
+	q.runs[size_t( q.n )] = r;
+	q.v = v + 2;
+	q.n++;
+	return true;
+}
+
+TwinBatchStat takeFarLodRtBatchStat( int v )
+{
+	TwinBatchStat s;
+	if ( v != 1 && v != 2 )
+		return s;
+	farlod::WaterDraw & D = farlod::farLodRtOf( v );
+	FgQueue & q = fgQ();
+	s.crossings = D.crossN;
+	s.draws = D.drawsN;
+	s.slips = D.slipN;
+	s.lost = q.lostLod;
+	s.off = q.off;
+	s.offWhy = q.offWhy;
+	D.crossN = D.drawsN = D.slipN = 0;
+	q.lostLod = 0;
+	return s;
+}
+
+// lane VKFLIGHT18: fxWork's GPU ms and timed crossings of one kind since the last take (both reset); miss: samples not ready
+void takeFxGpu( int kind, double & ms, int & n, int & miss )
+{
+	Fx & F = fx();
+	std::lock_guard<std::mutex> lk( F.gpuLock );
+	ms = F.gpuMs[kind & 31];
+	n = F.gpuN[kind & 31];
+	miss = F.gpuMiss;
+	F.gpuMs[kind & 31] = 0.0;
+	F.gpuN[kind & 31] = 0;
+}
+
+bool fxGpuTimed()
+{
+	return vk().tsPeriod > 0.0f;
 }
 
 FxStat takeFarLodRtDrawStat( int v )

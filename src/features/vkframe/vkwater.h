@@ -753,6 +753,17 @@ TwinBatchStat takeFarGroundBatchStat();
 bool farGroundRtQueue( const WaterRun & r, int v, std::string & why );
 bool farGroundRtRunN( const WaterRun * const * rs, int n, int v, std::string & why );
 TwinBatchStat takeFarGroundRtBatchStat( int v );
+/*! lane VKFLIGHT18 (frame time): the far LOD rings' RT / DG twins (v 1 / 2) in the same queue (FgQueue v 3 / 4): farLodRtQueue
+ * readies r (the half-rate refusal, twinReadyN; false: why, the caller flushes and GL draws it); an AO g-buffer draw (rayDepth)
+ * flushes and runs alone. farLodRtRunN: n draws now (gates). takeFarLodRtBatchStat( v ): that twin's crossings / draws. */
+bool farLodRtQueue( const WaterRun & r, int v, std::string & why );
+bool farLodRtRunN( const WaterRun * const * rs, int n, int v, std::string & why );
+TwinBatchStat takeFarLodRtBatchStat( int v );
+/*! lane VKFLIGHT18: fxWork's GPU time of one kind (TwinSpec kind: 5 rings, 21 / 22 rings RT / DG, 9 far ground, 23 / 24 its RT / DG)
+ * since the last take, from TOP / BOTTOM timestamps (after GL's semaphore: Vulkan's own work, not the drain); n timed crossings,
+ * miss: samples not ready at the next crossing (all kinds). fxGpuTimed: the queue has timestamps. */
+void takeFxGpu( int kind, double & ms, int & n, int & miss );
+bool fxGpuTimed();
 /*! lane VKGROUND3: far ground mode 2 (Show > Far ground: Live, cached pages; fo4_default vs + fo4_cellcsmfgp FOGLEAK +
  * FRAME_UBO ps twins; r from farGroundLiveStateOf, one command a shape) into the tone frame, one crossing. Flushes mode 1's
  * queue first. false: why (GL draws it) */

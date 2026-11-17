@@ -318,6 +318,9 @@ struct Vk
 	// lane VKAIR1: the air's stencil reference, the zero textures' clear
 	VKP( vkCmdSetStencilReference ); VKP( vkCmdClearColorImage );
 	VKP( vkCmdDrawIndexed );  // lane VKFAR2 G2: the stars' mesh and the moon's quad
+	// lane VKFLIGHT18: fxWork's crossings timed on the GPU (TOP / BOTTOM timestamps); tsPeriod 0: no timestamps on the queue
+	VKP( vkCreateQueryPool ); VKP( vkCmdResetQueryPool ); VKP( vkCmdWriteTimestamp ); VKP( vkGetQueryPoolResults );
+	float tsPeriod = 0.0f;
 	// lane VKOBJ1: GL's clip z in [-w, w] for the objects' perspective prepass (VK_EXT_depth_clip_control)
 	bool clipControl = false;
 	// lane VKFAR2 G2: GL's single-sample backdrop on a multisampled frame (VK_EXT_sample_locations: every sample at the centre)
@@ -645,6 +648,7 @@ bool makeDevice( std::string & why )
 		VkPhysicalDeviceProperties2 pp { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
 		v.vkGetPhysicalDeviceProperties2( v.phys, &pp );
 		v.maxAniso = pp.properties.limits.maxSamplerAnisotropy;
+		v.tsPeriod = pp.properties.limits.timestampComputeAndGraphics ? pp.properties.limits.timestampPeriod : 0.0f;
 		if ( pp.properties.apiVersion >= VK_API_VERSION_1_2 && v.vkGetPhysicalDeviceFeatures2 ) {
 			VkPhysicalDeviceDescriptorIndexingFeatures ix { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES };
 			VkPhysicalDeviceShaderDrawParametersFeatures dp { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES };
@@ -711,6 +715,7 @@ bool makeDevice( std::string & why )
 	LD( vkCmdBindVertexBuffers ); LD( vkCmdBindIndexBuffer ); LD( vkCmdDrawIndexedIndirect ); LD( vkCmdSetDepthBias );
 	LD( vkCmdSetStencilReference ); LD( vkCmdClearColorImage );
 	LD( vkCmdDrawIndexed );
+	LD( vkCreateQueryPool ); LD( vkCmdResetQueryPool ); LD( vkCmdWriteTimestamp ); LD( vkGetQueryPoolResults );
 #undef LD
 	if ( !v.vkGetMemoryWin32HandleKHR || !v.vkGetSemaphoreWin32HandleKHR || !v.vkCreateSwapchainKHR )
 		return fail( "the device lacks a swapchain / win32 export entry point" );
@@ -5782,6 +5787,13 @@ struct Fx
 	double buildMs = 0.0;
 	WwVkPresent::FxStat st[2];
 	std::map<std::uintptr_t, std::pair<GLuint, std::uint64_t>> still;  // twin key -> the source copied, at which sharedGen
+	// lane VKFLIGHT18: fxWork's GPU time by kind (TOP to BOTTOM of the crossing's command buffer, after GL's semaphore), read
+	// at the next fxWork (its fence waited by then; not ready: the sample is dropped and counted)
+	VkQueryPool ts = VK_NULL_HANDLE;
+	int tsKind = -1;
+	std::mutex gpuLock;
+	double gpuMs[32] = {};
+	int gpuN[32] = {}, gpuMiss = 0;
 };
 
 Fx & fx()
@@ -6192,6 +6204,38 @@ void fxDraw( FxProg & P, VkPipeline pipe, VkFramebuffer fb, VkRenderPass pass, i
 	v.vkCmdEndRenderPass( F.cmd );
 }
 
+// lane VKFLIGHT18: the last crossing's GPU ms into its kind, then this crossing's TOP timestamp (fxWork, after Begin)
+static void fxStampBegin()
+{
+	Vk & v = vk();
+	Fx & F = fx();
+	if ( !F.ts && v.tsPeriod > 0.0f && v.vkCreateQueryPool && v.vkCmdWriteTimestamp && v.vkCmdResetQueryPool && v.vkGetQueryPoolResults ) {
+		VkQueryPoolCreateInfo qi { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
+		qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
+		qi.queryCount = 2;
+		if ( v.vkCreateQueryPool( v.dev, &qi, nullptr, &F.ts ) != VK_SUCCESS ) {
+			F.ts = VK_NULL_HANDLE;
+			v.tsPeriod = 0.0f;
+		}
+	}
+	if ( !F.ts )
+		return;
+	if ( F.tsKind >= 0 ) {
+		std::uint64_t t[2] = {};
+		const bool got = v.vkGetQueryPoolResults( v.dev, F.ts, 0, 2, sizeof( t ), t, sizeof( t[0] ), VK_QUERY_RESULT_64_BIT ) == VK_SUCCESS
+			&& t[1] >= t[0];
+		std::lock_guard<std::mutex> lk( F.gpuLock );
+		if ( got ) {
+			F.gpuMs[F.tsKind & 31] += double( t[1] - t[0] ) * double( v.tsPeriod ) * 1e-6;
+			F.gpuN[F.tsKind & 31]++;
+		} else
+			F.gpuMiss++;
+		F.tsKind = -1;
+	}
+	v.vkCmdResetQueryPool( F.cmd, F.ts, 0, 2 );
+	v.vkCmdWriteTimestamp( F.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, F.ts, 0 );
+}
+
 // the worker: the air's triangle into the tone frame, or the march then the resolve, waiting GL's signal, signalling back
 bool fxWork( std::string & why )
 {
@@ -6202,6 +6246,7 @@ bool fxWork( std::string & why )
 	VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	v.vkBeginCommandBuffer( F.cmd, &bi );
+	fxStampBegin();
 	if ( F.kind == 0 ) {
 		if ( !F.fbAir ) {
 			v.vkEndCommandBuffer( F.cmd );
@@ -6303,6 +6348,8 @@ bool fxWork( std::string & why )
 		const int vr[4] = { 0, 0, F.hw, F.hh };
 		fxDraw( F.prog[F.resolve], F.prog[F.resolve].pipe[0], F.fbR, F.cloudPass, F.hw, F.hh, vr, -1 );
 	}
+	if ( F.ts )
+		v.vkCmdWriteTimestamp( F.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, F.ts, 1 );
 	if ( v.vkEndCommandBuffer( F.cmd ) != VK_SUCCESS ) {
 		why = "vkEndCommandBuffer (the air / clouds) failed";
 		return false;
@@ -6321,6 +6368,8 @@ bool fxWork( std::string & why )
 		why = "vkQueueSubmit (the air / clouds) returned " + std::to_string( int( r ) );
 		return false;
 	}
+	if ( F.ts )
+		F.tsKind = F.kind;
 	return true;
 }
 

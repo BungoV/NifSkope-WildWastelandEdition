@@ -14,6 +14,7 @@
 #include "features/ao/ao.h"	// lane VKFLIGHT10: the AO g-buffer target
 #include "features/vkframe/vkpresent.h"	// lane VKFAR2: the far LOD rings on the Vulkan view (row G3)
 #include "features/vkframe/vkwater.h"
+#include "features/far-ground/cellfarground.h"	// lane VKFLIGHT18: the far queue's flush (the rings' RT / DG twins queue)
 #include "features/near/cellglzone.h"	// lane VKFLIGHT7: the zone names the pass of a foreign draw target
 
 #include <QElapsedTimer>
@@ -467,6 +468,11 @@ bool farLodVkDraw( Copy & k, const std::vector<CellMeshInst::Cmd> & cmds )
 	g_vkFarArm = VkFarArm();
 	if ( !a.fn )
 		return false;
+	// lane VKFLIGHT18 (frame time): the tone frame's RT / DG rings queue (FgQueue v 3 / 4, farLodRtQueue: a crossing a batch,
+	// not a draw); any other Vulkan draw of the rings runs after the queued ones
+	const bool queued = a.v && !a.gbDepth;
+	if ( !queued )
+		CellFarGround::vkFlush();
 	GLint cur = 0;
 	a.fn->glGetIntegerv( GL_CURRENT_PROGRAM, &cur );
 	if ( GLuint( cur ) != a.prog ) {
@@ -499,7 +505,8 @@ bool farLodVkDraw( Copy & k, const std::vector<CellMeshInst::Cmd> & cmds )
 	}
 	r.key = reinterpret_cast<std::uintptr_t>( a.v ? g_vkFarRtKeys[a.v - 1] : g_vkFarKeys );
 	std::string why;
-	const bool ok = a.v ? WwVkPresent::farLodRtRun( r, a.v, why ) : WwVkPresent::farLodRun( r, why );
+	const bool ok = a.v ? ( queued ? WwVkPresent::farLodRtQueue( r, a.v, why ) : WwVkPresent::farLodRtRun( r, a.v, why ) )
+		: WwVkPresent::farLodRun( r, why );
 	a.fn->glBindVertexArray( 0 );
 	if ( !ok ) {
 		WwVkPresent::farLodOnGl( why.c_str() );
@@ -707,8 +714,10 @@ bool draw( NifSkopeOpenGLContext * r, Scene * scene, const CellMeshInst & d, Nif
 	}
 	vcAoUniform( prog, rowsAo ? 3 : 0 );
 	farLodVkArm( r->fn, prog, splatPass );	// lane VKFAR2: the rings on the Vulkan view, else GL's submit
-	if ( !farLodVkDraw( *k, cmds ) )
+	if ( !farLodVkDraw( *k, cmds ) ) {
+		CellFarGround::vkFlush();	// lane VKFLIGHT18: GL draws after the queued far draws
 		submit( r, *cp, *k, cmds );
+	}
 	if ( rowsAo )
 		vcAoUniform( prog, 0 );
 	if ( k->streamTex )

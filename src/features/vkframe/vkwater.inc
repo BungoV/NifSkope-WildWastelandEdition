@@ -2935,6 +2935,28 @@ void waterSay( bool wanted, const char * glWhy )
 	qInfo().noquote() << line;
 }
 
+/* lane VKFLIGHT18: "; GPU ..." for a say line: Vulkan's own GPU ms of the named fxWork kinds over the say window (timestamps
+ * after GL's semaphore: the twins' draws, not the crossing's GL drain), the timed crossings and the window's length */
+QString fxGpuSay( const int * kinds, const char * const * names, int n, double winMs )
+{
+	if ( !fxGpuTimed() )
+		return QStringLiteral( "; GPU not timed (the queue has no timestamps)" );
+	double all = 0.0;
+	int allN = 0, miss = 0;
+	QString parts;
+	for ( int i = 0; i < n; i++ ) {
+		double ms = 0.0;
+		int c = 0;
+		takeFxGpu( kinds[i], ms, c, miss );
+		all += ms;
+		allN += c;
+		parts += QStringLiteral( "%1%2 %3 ms / %4" ).arg( i ? QStringLiteral( ", " ) : QString() ).arg( QString::fromUtf8( names[i] ) )
+			.arg( ms, 0, 'f', 2 ).arg( c );
+	}
+	return QStringLiteral( "; GPU %1 ms in %2 timed crossings over %3 s (%4; %5 samples not ready since start)" ).arg( all, 0, 'f', 2 )
+		.arg( allN ).arg( winMs / 1000.0, 0, 'f', 1 ).arg( parts ).arg( miss );
+}
+
 void farLodSay( bool wanted, const char * glWhy )
 {
 	static QString said;
@@ -2951,6 +2973,7 @@ void farLodSay( bool wanted, const char * glWhy )
 	const double now = nowMs();
 	if ( now - at < 5000.0 && said.startsWith( head + QStringLiteral( "wanted" ) ) )
 		return;
+	const double winMs = at > 0.0 ? now - at : 0.0;  // lane VKFLIGHT18: the say window (GPU ms over it)
 	at = now;
 	const WaterStat st = takeFarLodGlStat();
 	const FxStat ds = takeFarLodDrawStat();
@@ -2964,7 +2987,15 @@ void farLodSay( bool wanted, const char * glWhy )
 			line += QStringLiteral( "; %1 twin: %2 draws run (%3 copies, %4 fails%5)" ).arg( v == 1 ? QStringLiteral( "RT" ) : QStringLiteral( "DG" ) )
 				.arg( rs.runs ).arg( rs.copies ).arg( rs.fails )
 				.arg( rs.failWhy.empty() ? QString() : QStringLiteral( ": " ) + QString::fromStdString( rs.failWhy ) );
+		const TwinBatchStat rb = takeFarLodRtBatchStat( v );  // lane VKFLIGHT18: the tone frame's RT / DG draws queued (FgQueue v 3 / 4)
+		if ( rb.crossings || rb.lost || rb.off )
+			line += QStringLiteral( "; %1 batched: %2 crossings for %3 draws, %4 lost, %5 fence slips%6" ).arg( v == 1 ? "RT" : "DG" )
+				.arg( rb.crossings ).arg( rb.draws ).arg( rb.lost ).arg( rb.slips )
+				.arg( rb.off ? QStringLiteral( ", off (one crossing a draw): " ) + QString::fromStdString( rb.offWhy ) : QString() );
 	}
+	static const int kGpuKinds[3] = { 5, 21, 22 };
+	static const char * const kGpuNames[3] = { "base", "RT", "DG" };
+	line += fxGpuSay( kGpuKinds, kGpuNames, 3, winMs );
 	if ( !st.glWhy.empty() )
 		line += QStringLiteral( " (blocked: %1)" ).arg( QString::fromStdString( st.glWhy ) );
 	said = line;

@@ -130,6 +130,7 @@ struct FgQueue
 	std::vector<WaterRun> runs;
 	int n = 0, lost = 0;
 	int v = 0, lostRt = 0;  // lane VKFLIGHT14: the queued runs' twin (0 base, 1 RT, 2 DG), RT / DG draws lost
+	int lostLod = 0;        // lane VKFLIGHT18: v 3 / 4 the far LOD rings' RT / DG twins (vkfarlodrt.inc), their draws lost
 	bool off = false;
 	std::string offWhy;
 };
@@ -163,9 +164,9 @@ bool farGroundFlush( std::string & why )
 		rs[size_t( i )] = &q.runs[size_t( i )];
 	const int n = q.n, v = q.v;
 	q.n = 0;
-	if ( v ? farGroundRtRunN( rs.data(), n, v, why ) : farGroundRunN( rs.data(), n, why ) )
+	if ( v >= 3 ? farLodRtRunN( rs.data(), n, v - 2, why ) : v ? farGroundRtRunN( rs.data(), n, v, why ) : farGroundRunN( rs.data(), n, why ) )
 		return true;
-	( v ? q.lostRt : q.lost ) += n;
+	( v >= 3 ? q.lostLod : v ? q.lostRt : q.lost ) += n;
 	q.off = true;
 	q.offWhy = why;
 	return false;
@@ -276,6 +277,7 @@ void farGroundSay( bool wanted, const char * glWhy )
 	const double now = nowMs();
 	if ( now - at < 5000.0 && said.startsWith( head + QStringLiteral( "wanted" ) ) )
 		return;
+	const double winMs = at > 0.0 ? now - at : 0.0;  // lane VKFLIGHT18: the say window (GPU ms over it)
 	at = now;
 	const WaterStat st = takeFarGroundGlStat();
 	const FxStat ds = takeFarGroundDrawStat();
@@ -302,6 +304,9 @@ void farGroundSay( bool wanted, const char * glWhy )
 		line += QStringLiteral( "; batched: %1 crossings for %2 draws, %3 lost, %4 fence slips%5" ).arg( bs.crossings ).arg( bs.draws )
 			.arg( bs.lost ).arg( bs.slips )
 			.arg( bs.off ? QStringLiteral( ", off (one crossing a tile): " ) + QString::fromStdString( bs.offWhy ) : QString() );
+	static const int kGpuKinds[3] = { 9, 23, 24 };
+	static const char * const kGpuNames[3] = { "base", "RT", "DG" };
+	line += fxGpuSay( kGpuKinds, kGpuNames, 3, winMs );
 	said = line;
 	qInfo().noquote() << line;
 }
