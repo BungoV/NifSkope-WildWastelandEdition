@@ -1868,8 +1868,9 @@ bool vkDraw( Scene * scene, NifSkopeOpenGLContext::Program * prog, int block, in
 		WwVkPresent::farGroundSay( true, nullptr );
 		return false;
 	}
-	if ( v > 0 ) {	// lane VKGROUND11: an RT GI key, one crossing a shape after the queued base tiles (GL's order)
-		vkFlush();
+	if ( v > 0 ) {	// lane VKGROUND11: an RT GI key; lane VKFLIGHT14: queued as the base tiles, the AO g-buffer one crossing a shape
+		if ( gbDepth )
+			vkFlush();
 		static WwVkPresent::WaterRun rr;
 		static char rtKeys[2][208];	// the RT / DG twins' keys (key + slot index; farStream at key + 200)
 		rr = WwVkPresent::WaterRun();
@@ -1889,9 +1890,11 @@ bool vkDraw( Scene * scene, NifSkopeOpenGLContext::Program * prog, int block, in
 		rr.cmds.push_back( c );
 		rr.key = reinterpret_cast<std::uintptr_t>( rtKeys[v - 1] );
 		std::string why;
-		const bool ok = WwVkPresent::farGroundRtRun( rr, v, why );
-		if ( !ok )
+		const bool ok = gbDepth ? WwVkPresent::farGroundRtRun( rr, v, why ) : WwVkPresent::farGroundRtQueue( rr, v, why );
+		if ( !ok ) {
+			vkFlush();	// the queued shapes draw before GL draws this one (GL's order)
 			WwVkPresent::farGroundOnGl( why.c_str() );	// GL draws it
+		}
 		else
 			PassTime::countDraw( 1 );
 		WwVkPresent::farGroundSay( true, nullptr );

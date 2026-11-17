@@ -129,6 +129,7 @@ struct FgQueue
 {
 	std::vector<WaterRun> runs;
 	int n = 0, lost = 0;
+	int v = 0, lostRt = 0;  // lane VKFLIGHT14: the queued runs' twin (0 base, 1 RT, 2 DG), RT / DG draws lost
 	bool off = false;
 	std::string offWhy;
 };
@@ -160,11 +161,11 @@ bool farGroundFlush( std::string & why )
 	std::vector<const WaterRun *> rs( size_t( q.n ) );
 	for ( int i = 0; i < q.n; i++ )
 		rs[size_t( i )] = &q.runs[size_t( i )];
-	const int n = q.n;
+	const int n = q.n, v = q.v;
 	q.n = 0;
-	if ( farGroundRunN( rs.data(), n, why ) )
+	if ( v ? farGroundRtRunN( rs.data(), n, v, why ) : farGroundRunN( rs.data(), n, why ) )
 		return true;
-	q.lost += n;
+	( v ? q.lostRt : q.lost ) += n;
 	q.off = true;
 	q.offWhy = why;
 	return false;
@@ -175,7 +176,7 @@ bool farGroundQueue( const WaterRun & r, std::string & why )
 	FgQueue & q = fgQ();
 	if ( q.off )
 		return farGroundRun( r, why );
-	if ( q.n && ( q.n >= farlod::kTwinBatchMax || !farlodrun::twinSameInputs( q.runs[0], r ) ) && !farGroundFlush( why ) )
+	if ( q.n && ( q.v != 0 || q.n >= farlod::kTwinBatchMax || !farlodrun::twinSameInputs( q.runs[0], r ) ) && !farGroundFlush( why ) )
 		return false;
 	if ( const std::string no = farlodrun::twinReadyN( farlod::farGroundD(), farlod::kFargndSpec, r, q.n == 0 ); !no.empty() ) {
 		why = no;
@@ -184,6 +185,7 @@ bool farGroundQueue( const WaterRun & r, std::string & why )
 	if ( q.runs.size() <= size_t( q.n ) )
 		q.runs.resize( size_t( q.n ) + 1 );
 	q.runs[size_t( q.n )] = r;
+	q.v = 0;
 	q.n++;
 	return true;
 }
@@ -287,10 +289,14 @@ void farGroundSay( bool wanted, const char * glWhy )
 	line += takeFarGroundGlWhys( 0 );
 	for ( int v = 1; v <= 2; v++ ) {  // lane VKGROUND11: the RT GI keys' twins (one crossing a tile)
 		const FxStat rs = takeFarGroundRtDrawStat( v );
+		const TwinBatchStat rb = takeFarGroundRtBatchStat( v );  // lane VKFLIGHT14: the RT / DG draws batched (submits a frame)
 		if ( rs.runs || rs.fails )
 			line += QStringLiteral( "; %1 twin: %2 draws, %3 ms CPU each, %4 copies, %5 fails%6" ).arg( v == 1 ? "RT" : "DG" ).arg( rs.runs )
 				.arg( rs.runs ? rs.cpuMs / rs.runs : 0.0, 0, 'f', 3 ).arg( rs.copies ).arg( rs.fails )
 				.arg( rs.failWhy.empty() ? QString() : QStringLiteral( ": " ) + QString::fromStdString( rs.failWhy ) );
+		if ( rb.crossings || rb.lost )
+			line += QStringLiteral( "; %1 batched: %2 crossings for %3 draws, %4 lost, %5 fence slips" ).arg( v == 1 ? "RT" : "DG" )
+				.arg( rb.crossings ).arg( rb.draws ).arg( rb.lost ).arg( rb.slips );
 	}
 	if ( bs.crossings || bs.lost || bs.off )  // lane VKFAR4: the tiles batched into crossings
 		line += QStringLiteral( "; batched: %1 crossings for %2 draws, %3 lost, %4 fence slips%5" ).arg( bs.crossings ).arg( bs.draws )

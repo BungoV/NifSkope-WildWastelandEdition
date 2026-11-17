@@ -746,6 +746,13 @@ bool farGroundFlush( std::string & why );
 int farGroundQueued();
 bool farGroundRunN( const WaterRun * const * rs, int n, std::string & why );
 TwinBatchStat takeFarGroundBatchStat();
+/*! lane VKFLIGHT14 (frame time 1b): the far ground RT / DG twin (v 1 / 2) batched as the base twin. farGroundRtQueue checks
+ * and readies r (the half-rate refusal, twinReadyN; false: why, GL draws it) into the same queue, one twin a batch (a twin
+ * change flushes first), so every farGroundFlush site flushes it. farGroundRtRunN: n draws now (gates). The AO g-buffer
+ * draws stay single (farGroundRtRun). takeFarGroundRtBatchStat( v ): that twin's crossings / draws; lost counts both twins. */
+bool farGroundRtQueue( const WaterRun & r, int v, std::string & why );
+bool farGroundRtRunN( const WaterRun * const * rs, int n, int v, std::string & why );
+TwinBatchStat takeFarGroundRtBatchStat( int v );
 /*! lane VKGROUND3: far ground mode 2 (Show > Far ground: Live, cached pages; fo4_default vs + fo4_cellcsmfgp FOGLEAK +
  * FRAME_UBO ps twins; r from farGroundLiveStateOf, one command a shape) into the tone frame, one crossing. Flushes mode 1's
  * queue first. false: why (GL draws it) */

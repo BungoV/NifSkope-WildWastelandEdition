@@ -5,6 +5,7 @@
  * a shape (no queue: the caller flushes the base twin's queue first). Included after vkfarlodrt.inc. Gate:
  * tests/vkframe/fargndrtdraw.sh. Lane VKGROUND18: mode 2 (fo4_cellcsmfgp, cached pages) the same way, kinds 25 (RT) / 26 (DG). */
 #define WW_VK_FARGNDRT 1
+#define WW_VK_FARGNDRTQ 1  // lane VKFLIGHT14: farGroundRtQueue / farGroundRtRunN (the RT gate's batch arm)
 #define WW_VK_FARGNDPRT 1
 #include "features/vkframe/fargnd_view_rt_ps.spv.h"  // vkframe_spirv.sh's fxr / fxdg lines (lane VKGROUND11)
 #include "features/vkframe/fargnd_view_dg_ps.spv.h"
@@ -193,6 +194,71 @@ bool farGroundRtRun( const WaterRun & r, int v, std::string & why )
 FxStat takeFarGroundRtDrawStat( int v )
 {
 	return farlodrun::takeTwinStat( farlod::farGroundRtOf( v ) );
+}
+
+// lane VKFLIGHT14 (frame time 1b): the RT / DG twin in vkfarground.inc's queue, one twin a batch (farGroundRunN / farGroundQueue)
+bool farGroundRtRunN( const WaterRun * const * rs, int n, int v, std::string & why )
+{
+	if ( v != 1 && v != 2 ) {
+		why = "no far ground RT twin " + std::to_string( v ) + " (1 RT, 2 DG)";
+		return false;
+	}
+	farlod::WaterDraw & D = farlod::farGroundRtOf( v );
+	for ( int at = 0; at < n; ) {
+		int k = 1;
+		while ( at + k < n && k < farlod::kTwinBatchMax && farlodrun::twinSameInputs( *rs[at], *rs[at + k] ) )
+			k++;
+		if ( !farlodrun::twinRunN( D, v == 2 ? farlod::kFargndDgSpec : farlod::kFargndRtSpec, rs + at, k, why ) )
+			return false;
+		at += k;
+	}
+	return true;
+}
+
+bool farGroundRtQueue( const WaterRun & r, int v, std::string & why )
+{
+	FgQueue & q = fgQ();
+	if ( q.off || ( v != 1 && v != 2 ) )
+		return farGroundRtRun( r, v, why );
+	if ( q.n && ( q.v != v || q.n >= farlod::kTwinBatchMax || !farlodrun::twinSameInputs( q.runs[0], r ) ) && !farGroundFlush( why ) )
+		return false;
+	const FxField * fs = v == 2 ? kT_fargndDgPs : kT_fargndRtPs;
+	const int nf = v == 2 ? int( sizeof( kT_fargndDgPs ) / sizeof( kT_fargndDgPs[0] ) ) : int( sizeof( kT_fargndRtPs ) / sizeof( kT_fargndRtPs[0] ) );
+	if ( const std::string w = farGroundGiHalfRefusal( r, fs, nf ); !w.empty() ) {
+		FxStat & S = farlod::farGroundRtOf( v ).st;
+		S.fails++;
+		S.failWhy = why = "cellGiHalfOn 1: " + w;
+		return false;
+	}
+	if ( const std::string no = farlodrun::twinReadyN( farlod::farGroundRtOf( v ), v == 2 ? farlod::kFargndDgSpec : farlod::kFargndRtSpec, r,
+			 q.n == 0 ); !no.empty() ) {
+		why = no;
+		return false;
+	}
+	if ( q.runs.size() <= size_t( q.n ) )
+		q.runs.resize( size_t( q.n ) + 1 );
+	q.runs[size_t( q.n )] = r;
+	q.v = v;
+	q.n++;
+	return true;
+}
+
+TwinBatchStat takeFarGroundRtBatchStat( int v )
+{
+	TwinBatchStat s;
+	if ( v != 1 && v != 2 )
+		return s;
+	farlod::WaterDraw & D = farlod::farGroundRtOf( v );
+	FgQueue & q = fgQ();
+	s.crossings = D.crossN;
+	s.draws = D.drawsN;
+	s.slips = D.slipN;
+	s.lost = q.lostRt;
+	s.off = q.off;
+	s.offWhy = q.offWhy;
+	D.crossN = D.drawsN = D.slipN = 0;
+	q.lostRt = 0;
+	return s;
 }
 
 // lane VKGROUND18: mode 2 (fo4_cellcsmfgp, cached pages) under the RT GI keys, one crossing a shape after mode 1's queue
