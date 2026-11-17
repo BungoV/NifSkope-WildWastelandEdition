@@ -2608,6 +2608,8 @@ ObjBlRunStat takeObjBlRunStat()
 void objCellCopiesStale()
 {
 	opS().copyMemo.clear();
+	if ( twinCopyEpoch() )
+		twinCopyEpoch()++;  // lane VKFLIGHT13: the far twins' copies of it too (vkwater.inc twinCopyKept)
 }
 
 bool objBlTargetState( GlProc gp, std::uint32_t colorCount, ObjBlTarget & t, std::string & why, int red )

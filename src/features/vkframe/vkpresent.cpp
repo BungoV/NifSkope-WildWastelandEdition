@@ -3288,6 +3288,14 @@ std::uint64_t & sharedGen()
 	return n;
 }
 
+/* lane VKFLIGHT13: the frame count the twin runners' copy memo keys on (vkwater.inc twinCopyKept). 0: no memo, every run copies
+ * (the gates' default); frame() and toneRun move it once a frame each, objCellCopiesStale (a depth grab) too */
+std::uint64_t & twinCopyEpoch()
+{
+	static std::uint64_t n = 0;
+	return n;
+}
+
 void taaFbsDrop()
 {
 	Vk & v = vk();
@@ -4432,6 +4440,7 @@ bool toneRun( const ToneRun & t, std::string & why )
 	Gl & g = gl();
 	Vk & v = vk();
 	const double t0 = nowMs();
+	twinCopyEpoch()++;  // lane VKFLIGHT13: the frame's end: the next draws copy their GL inputs again
 	toneFlush( nullptr );  // never two deferred passes
 	auto refuse = [&]( const std::string & w ) {
 		why = w;
@@ -10284,6 +10293,7 @@ void precipSay( bool wanted, const char * glWhy )
 
 bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 {
+	twinCopyEpoch()++;  // lane VKFLIGHT13: a new frame: the twins copy their GL inputs again
 	static QString said;
 	static QSize baseSize;
 	static double winAt = 0.0, winSum = 0.0, winMax = 0.0, winWait = 0.0, winState = 0.0, winBlit = 0.0, winGl = 0.0,

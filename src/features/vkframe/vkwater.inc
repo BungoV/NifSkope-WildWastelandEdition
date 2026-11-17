@@ -1897,6 +1897,50 @@ using farlod::waterSampler;
 using farlod::waterPipe;
 using farlod::kTwinBatchMax;  // lane VKFAR4: twinRunN's batch cap
 
+/* lane VKFLIGHT13: each copied GL input once a frame. The flight of 8d01173c copied every non-shared input of every far ground
+ * RT draw (74554 copies for 4969 draws, 0.317 ms CPU a draw). A twin key's copy is kept while the GL name, its shape, the twin
+ * (name, view), sharedGen(), the frame (twinCopyEpoch: frame() and toneRun move it, a depth grab too) and the draw target stay
+ * the same. Epoch 0 (the gates, unless an arm sets it): every run copies, as before. red 8192: every run copies. */
+#define WW_VK_TWINCOPYMEMO 1
+struct TwinCopyMemo
+{
+	unsigned glTex = 0, twin = 0, target = 0, glFmt = 0;
+	int w = 0, h = 0, d = 0, levels = 0;
+	VkImageView view = VK_NULL_HANDLE;
+	std::uint64_t gen = 0, epoch = 0;
+};
+std::map<std::uintptr_t, TwinCopyMemo> & twinCopyMemo()
+{
+	static std::map<std::uintptr_t, TwinCopyMemo> m;
+	return m;
+}
+TwinCopyMemo twinCopyNow( const WaterSlot & s, unsigned twin, VkImageView view, unsigned target )
+{
+	TwinCopyMemo m;
+	m.glTex = s.tex, m.twin = twin, m.target = target, m.glFmt = s.glFmt;
+	m.w = s.w, m.h = s.h, m.d = s.d, m.levels = s.levels;
+	m.view = view;
+	m.gen = sharedGen();
+	m.epoch = twinCopyEpoch();
+	return m;
+}
+bool twinCopyKept( std::uintptr_t key, const WaterSlot & s, unsigned twin, VkImageView view, unsigned target, int red )
+{
+	if ( !twinCopyEpoch() || ( red & 8192 ) )
+		return false;
+	const auto it = twinCopyMemo().find( key );
+	if ( it == twinCopyMemo().end() )
+		return false;
+	const TwinCopyMemo a = it->second, b = twinCopyNow( s, twin, view, target );
+	return a.glTex == b.glTex && a.twin == b.twin && a.target == b.target && a.glFmt == b.glFmt && a.w == b.w && a.h == b.h && a.d == b.d
+		&& a.levels == b.levels && a.view == b.view && a.gen == b.gen && a.epoch == b.epoch;
+}
+void twinCopyTook( std::uintptr_t key, const WaterSlot & s, unsigned twin, VkImageView view, unsigned target )
+{
+	if ( twinCopyEpoch() )
+		twinCopyMemo()[key] = twinCopyNow( s, twin, view, target );
+}
+
 /* lane VKFAR26: one texel-buffer input of a rings / far-ground twin (farStream, cellLights, cellRestir, cellDdgiAtlas...): GL's
  * data store copied into the keyed far-card twin every run, or a 16-byte zero one where GL binds none. The one place a shared
  * GL -> Vulkan texel-buffer lookup (lane VKBUF1) replaces the copy. red 32: the copy 64 bytes late. false: why
@@ -2045,8 +2089,10 @@ static bool twinRun( WaterDraw & D, const TwinSpec & P, const WaterRun & r, std:
 	const int samples = T.samples > 0 ? T.samples : std::max( F.airSamples, 1 );
 	if ( !fxStatic( w ) || !fxSems( w ) || !fxPasses( samples, w ) || !twinStatic( D, P, w ) )
 		return breakOff( w );
-	if ( F.airSamples != T.samples )
-		return breakOff( "the air's render pass is not at the frame's sample count" );
+	/* lane VKFLIGHT13: the g-buffer target draws through its own pass (waterRayPass), not the air's; with no tone frame alive
+	 * (T.samples 0: the first frames, a resize) this broke the far LOD RT twin for good (flight 8d01173c, 4421 fails) */
+	if ( !gb && F.airSamples != T.samples )
+		return refuse( "the air's render pass is not at the frame's sample count" );
 	// the exported buffer: every distinct vertex buffer, the elements, the GL blocks; the host one: loose blocks, zeros
 	struct Part
 	{
@@ -2208,12 +2254,15 @@ static bool twinRun( WaterDraw & D, const TwinSpec & P, const WaterRun & r, std:
 				view = sh->view;
 				static const GLenum kTarget[5] = { 0x0DE1, 0x806F, 0x8C1A, 0x8513, 0x9009 };
 				const GLenum target = kTarget[std::clamp( s->kind, 0, 4 )];
-				for ( int l = 0; l < std::max( s->levels, 1 ); l++ ) {
-					const int lw = std::max( s->w >> l, 1 ), lh = std::max( s->h >> l, 1 );
-					const int ld = waterCopyDepth( *s, l );
-					g.copyImageSubData( s->tex, target, l, 0, 0, 0, twin, target, l, 0, 0, 0, lw, lh, ld );
+				if ( !twinCopyKept( key, *s, twin, view, tgtC, r.red ) ) {  // lane VKFLIGHT13: once a frame
+					for ( int l = 0; l < std::max( s->levels, 1 ); l++ ) {
+						const int lw = std::max( s->w >> l, 1 ), lh = std::max( s->h >> l, 1 );
+						const int ld = waterCopyDepth( *s, l );
+						g.copyImageSubData( s->tex, target, l, 0, 0, 0, twin, target, l, 0, 0, 0, lw, lh, ld );
+					}
+					S.copies++;
+					twinCopyTook( key, *s, twin, view, tgtC );
 				}
-				S.copies++;
 				texNames.push_back( twin );
 			}
 			x.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
@@ -2682,12 +2731,15 @@ static bool twinRunN( WaterDraw & D, const TwinSpec & P, const WaterRun * const 
 			view = sh->view;
 			static const GLenum kTarget[5] = { 0x0DE1, 0x806F, 0x8C1A, 0x8513, 0x9009 };
 			const GLenum target = kTarget[std::clamp( s->kind, 0, 4 )];
-			for ( int l = 0; l < std::max( s->levels, 1 ); l++ ) {
-				const int lw = std::max( s->w >> l, 1 ), lh = std::max( s->h >> l, 1 );
-				const int ld = waterCopyDepth( *s, l );
-				g.copyImageSubData( s->tex, target, l, 0, 0, 0, twin, target, l, 0, 0, 0, lw, lh, ld );
+			if ( !twinCopyKept( key, *s, twin, view, T.colorTex, r0.red ) ) {  // lane VKFLIGHT13: once a frame
+				for ( int l = 0; l < std::max( s->levels, 1 ); l++ ) {
+					const int lw = std::max( s->w >> l, 1 ), lh = std::max( s->h >> l, 1 );
+					const int ld = waterCopyDepth( *s, l );
+					g.copyImageSubData( s->tex, target, l, 0, 0, 0, twin, target, l, 0, 0, 0, lw, lh, ld );
+				}
+				S.copies++;
+				twinCopyTook( key, *s, twin, view, T.colorTex );
 			}
-			S.copies++;
 			texNames.push_back( twin );
 		}
 		ty[i] = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
