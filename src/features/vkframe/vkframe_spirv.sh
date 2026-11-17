@@ -358,6 +358,22 @@ fxdg fargnd_view_dg_ps far-ground/fo4_cellcsmfgl_ps
 # lane VKGROUND18: far ground mode 2's (fo4_cellcsmfgp, cached pages) RT GI twins, the same keys and vertex stage
 fxr fargndp_view_rt_ps far-ground/fo4_cellcsmfgp_ps
 fxdg fargndp_view_dg_ps far-ground/fo4_cellcsmfgp_ps
+# lane VKFLIGHT15: the far cards' (impostor_cellinstez) RT GI twins from its readable source (the frozen farcards_view_ps is
+# the FOGLEAK key only). The loader builds the cards with no WW_FRAME_UBO: fxkr = the all-on key (+ RESTIR + RTDDGI +
+# RTDDGI_CASCADES), fxkd = the Ray-traced GI row without an RT preset (+ RTDDGI + RTDDGI_CASCADES). Their own register
+# layout (FarLodBindingsVk.hlsli: t0..t51); the vertex stage farcards_view_vs's 0 / 32 / 96 / 97 stay clear of it
+fxkr() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T ps_6_0 -E main -fvk-b-shift 0 0 -fvk-t-shift 64 0 -fvk-s-shift 128 0 -fvk-u-shift 192 0 -fspv-preserve-bindings -D WW_CELL_FOGLEAK=1 -D WW_CELL_RESTIR=1 -D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxkd() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T ps_6_0 -E main -fvk-b-shift 0 0 -fvk-t-shift 64 0 -fvk-s-shift 128 0 -fvk-u-shift 192 0 -fspv-preserve-bindings -D WW_CELL_FOGLEAK=1 -D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxkr farcards_view_rt_ps far-lod/impostor_cellinstez_ps
+fxkd farcards_view_dg_ps far-lod/impostor_cellinstez_ps
 # lane VKFAR21: the probe G-buffer capture (cell_reflcap.prog, cellreflprobe.cpp) on fxg / fxt's shifts; the loader builds it
 # with no define and fxg's two defines are inert there (ReflectionsBindingsVk.hlsli has no #if)
 fxg reflcap_view_ps reflections/cell_reflcap_ps
