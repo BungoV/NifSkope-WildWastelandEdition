@@ -1149,6 +1149,60 @@ int main( int argc, char ** argv )
 				exact ? "EXACT" : "DIFFER", cDiff, dDiff );
 			gateOk = gateOk && exact;
 		}
+		if ( getenv( "FLD_FLIGHT" ) ) {	// lane VKFLIGHT1: the flight's inputs are read (GL moves without each), RGB8 = RGBA8 for GL
+			auto glMoved = [&]( const char * what ) {
+				before( fbRef );
+				drawState( fbRef, scissor );
+				glDraw();
+				stateEnd();
+				const std::vector<std::uint16_t> c = readColor( refCol );
+				size_t moved = 0;
+				for ( size_t i = 0; i < c.size() && i < glC.size(); i++ )
+					moved += c[i] != glC[i];
+				std::printf( "FARGNDRTDRAW seed %d flight probe %s: %zu colour halves moved\n", seed, what, moved );
+				return moved;
+			};
+			for ( Smp & s : smp ) {
+				if ( s.name != "CubeMap" && s.name != "cellIsLut" )
+					continue;
+				if ( s.unbound || !s.tex ) {
+					std::printf( "FARGNDRTDRAW seed %d flight: %s is not bound (FLD_FLIGHT made nothing)\n", seed, s.name.c_str() );
+					gateOk = false;
+					continue;
+				}
+				const GLuint keep = s.tex;	// drawState binds every s.tex: unbind through it
+				s.tex = 0;
+				const size_t moved = glMoved( ( s.name + " unbound" ).c_str() );
+				s.tex = keep;
+				/* seed 1 must see the LUT (seed 2's picture is dark and misses it). The CubeMap moved 0 on both seeds, and also
+				 * through cellProbe 50 (cubeK alone): GL's far ground does not read it here, so it is info only; the
+				 * plain cube copy (farTwin type 4) is VKOBJ5's objects gate's, this arm proves the refusal is gone */
+				if ( moved < 1000 && seed == 1 && s.name == "cellIsLut" ) {
+					std::printf( "FARGNDRTDRAW seed %d flight: %s moves under 1000 halves: the arm is blind to it\n", seed, s.name.c_str() );
+					gateOk = false;
+				}
+				if ( s.rgbBytes ) {	// the other internal format from the same bytes: GL's picture must not move
+					const GLenum other = s.fmt == 0x8051 ? 0x8058 : 0x8051;
+					GLuint t2 = 0;
+					glGenTextures( 1, &t2 );
+					glBindTexture( 0x806F, t2 );
+					glTexParameteri( 0x806F, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+					glTexParameteri( 0x806F, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+					glTexParameteri( 0x806F, GL_TEXTURE_WRAP_S, 0x812F );
+					glTexParameteri( 0x806F, GL_TEXTURE_WRAP_T, 0x812F );
+					glTexParameteri( 0x806F, 0x8072, 0x812F );
+					glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
+					f.texImage3D( 0x806F, 0, GLint( other ), s.w, s.h, s.d, 0, GL_RGB, GL_UNSIGNED_BYTE, s.bytes.data() );
+					glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
+					s.tex = t2;
+					const size_t m2 = glMoved( other == 0x8058 ? "cellIsLut as RGBA8" : "cellIsLut as RGB8" );
+					s.tex = keep;
+					glDeleteTextures( 1, &t2 );
+					std::printf( "FARGNDRTDRAW seed %d flight: GL's LUT RGB8 vs RGBA8 %s\n", seed, m2 ? "DIFFER" : "EXACT" );
+					gateOk = gateOk && !m2;
+				}
+			}
+		}
 		{
 			float lo[4] = { 1e30f, 1e30f, 1e30f, 1e30f }, hi[4] = { -1e30f, -1e30f, -1e30f, -1e30f };
 			std::set<std::uint64_t> distinct;
@@ -1326,6 +1380,144 @@ int main( int argc, char ** argv )
 			std::printf( "FARGNDRTDRAW %s seed 1 copies a run: %d on the shared inputs, %d on plain ones (%s)\n", tag, copiesShared, copiesPlain,
 				fewer ? "fgGrid, fgLtex, fgAtlas read in place" : "NOT three fewer" );
 			gateOk = gateOk && fewer;
+		}
+
+		/* lane VKFLIGHT14 (frame time 1b): the RT / DG twin batched as the base twin (VKFAR4). The shape's index range in three
+		 * parts, each with its own modelViewMatrix (own host slice): a crossing each (farGroundRtRun), one crossing
+		 * (farGroundRtRunN) and farGroundRtQueue + farGroundFlush (the app's route). Batch and queue EXACT against the singles,
+		 * one crossing for three draws, every run against GL's three draws; reds on part 1 (1024 part 0's set and host slice,
+		 * 2048 the part dropped) must FAIL. Prints CPU ms a draw: singles vs one crossing. */
+		if ( seed == 1 ) {
+#if defined( WW_VK_FARGNDRT ) && defined( WW_VK_FARGNDRTQ )
+			const GLint lMvQ = f.getUniformLocation( pFg, "modelViewMatrix" );
+			float mvQ0[16] = {};
+			f.useProgram( pFg );
+			if ( lMvQ >= 0 )
+				gw.glGetUniformfv( pFg, lMvQ, mvQ0 );
+			else {
+				std::printf( "FARGNDRTDRAW %s RT batch: modelViewMatrix has no location (the parts' own host slices are not exercised)\n", tag );
+				gateOk = false;
+			}
+			float mvQ[3][16];
+			for ( int k = 0; k < 3; k++ ) {
+				std::memcpy( mvQ[k], mvQ0, sizeof( mvQ0 ) );
+				mvQ[k][12] += 24.0f * float( k ), mvQ[k][13] += 6.0f * float( k );
+			}
+			const std::uint32_t triQ = std::uint32_t( count ) / 9u * 3u;
+			const std::uint32_t partAt[4] = { 0u, triQ, 2u * triQ, std::uint32_t( count ) };
+			static char rtqKey[192];
+			auto partOn = [&]( GLuint fb, int k ) {
+				drawState( fb, false );
+				f.uniformMatrix4fv( lMvQ, 1, GL_FALSE, mvQ[k] );
+			};
+			struct PImg
+			{
+				std::vector<std::uint16_t> c;
+				std::vector<float> d;
+				bool ran = true;
+				double ms = 0.0;
+				WwVkPresent::TwinBatchStat bs;
+				std::string why;
+			};
+			PImg glQ;
+			before( fbRef );
+			for ( int k = 0; k < 3; k++ ) {
+				partOn( fbRef, k );
+				ex.drawInst( GL_TRIANGLES, GLsizei( partAt[k + 1] - partAt[k] ), GL_UNSIGNED_SHORT,
+					reinterpret_cast<const void *>( std::uintptr_t( idxOff ) + 2u * std::uintptr_t( partAt[k] ) ), 1, base, 0 );
+				stateEnd();
+			}
+			glQ.c = readColor( refCol );
+			glQ.d = readDepth( refDs, false );
+			// mode 0: a crossing a part (farGroundRtRun), 1: farGroundRtRunN, 2: farGroundRtQueue + farGroundFlush
+			auto vkParts = [&]( int mode, int red1 ) {
+				PImg o;
+				before( fbFrame );
+				( void )WwVkPresent::takeFarGroundRtBatchStat( kv );
+				std::vector<WwVkPresent::WaterRun> rs( 3 );
+				const auto t0 = std::chrono::steady_clock::now();
+				for ( int k = 0; k < 3; k++ ) {
+					partOn( fbFrame, k );
+					WwVkPresent::WaterRun & r = rs[size_t( k )];
+					WwVkPresent::farGroundRtStateOf( &gw, pFg, r, kv );
+					r.w = W, r.h = H, r.color = fc;
+					WwVkPresent::WaterCmd c;
+					c.count = partAt[k + 1] - partAt[k];
+					c.instanceCount = 1;
+					c.firstIndex = std::uint32_t( idxOff / 2 ) + partAt[k];
+					c.baseVertex = base;
+					c.baseInstance = 0;
+					r.cmds.assign( 1, c );
+					r.key = reinterpret_cast<std::uintptr_t>( rtqKey );
+					r.red = k == 1 ? red1 : 0;
+					if ( mode == 0 )
+						o.ran = WwVkPresent::farGroundRtRun( r, kv, o.why ) && o.ran;
+					if ( mode == 2 )
+						o.ran = WwVkPresent::farGroundRtQueue( r, kv, o.why ) && o.ran;
+					stateEnd();
+				}
+				if ( mode == 1 ) {
+					const WwVkPresent::WaterRun * ps[3] = { &rs[0], &rs[1], &rs[2] };
+					o.ran = WwVkPresent::farGroundRtRunN( ps, 3, kv, o.why );
+				}
+				if ( mode == 2 )
+					o.ran = WwVkPresent::farGroundFlush( o.why ) && o.ran;
+				o.ms = std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - t0 ).count() / 3.0;
+				runs++;
+				( void )WwVkPresent::takeFarGroundRtDrawStat( kv );
+				o.bs = WwVkPresent::takeFarGroundRtBatchStat( kv );
+				o.c = readColor( fc );
+				o.d = readDepth( fds, true );
+				return o;
+			};
+			auto qArm = [&]( const char * what, const PImg & vk, bool mustFail, int wantCross ) {
+				if ( !vk.ran ) {
+					std::printf( "FARGNDRTDRAW %s RT batch %s: REFUSED (%s)\n", tag, what, vk.why.c_str() );
+					gateOk = false;
+					return;
+				}
+				const Verdict v = judge( bgC, bgD, vk.c, vk.d, glQ.c, glQ.d );
+				const char * word = v.word();
+				const bool fail = std::strcmp( word, "FAIL" ) == 0;
+				const bool crossOk = vk.bs.crossings == wantCross && vk.bs.draws == ( wantCross ? 3 : 0 ) && !vk.bs.lost && !vk.bs.off;
+				std::printf( "FARGNDRTDRAW %s RT batch %s: %s covered %zu (both %zu, one side only %zu), depth max %ld D24 units (%zu past 1), "
+					"colour %zu halves differ, %zu samples past 1e-2 (max rel %.3g); %d batched crossings for %d draws, %d lost, %.4f ms CPU a draw%s\n",
+					tag, what, word, v.covered, v.both, v.onlyOne, v.maxDepthU, v.depthPast, v.halvesDiff, v.colPast, v.maxRel, vk.bs.crossings,
+					vk.bs.draws, vk.bs.lost, vk.ms, mustFail ? ( fail ? " -> red FAILS as it must" : " -> red PASSES: the gate is blind" )
+					: crossOk ? "" : " -> NOT the crossings wanted" );
+				if ( mustFail ? !fail : ( fail || !crossOk ) )
+					gateOk = false;
+			};
+			auto qExact = [&]( const char * what, const PImg & a, const PImg & b ) {
+				size_t cd = 0, dd = 0;
+				for ( size_t i = 0; i < a.c.size() && i < b.c.size(); i++ )
+					cd += a.c[i] != b.c[i];
+				for ( size_t i = 0; i < a.d.size() && i < b.d.size(); i++ )
+					dd += a.d[i] != b.d[i];
+				const bool ok = !cd && !dd && !a.c.empty() && a.c.size() == b.c.size() && a.d.size() == b.d.size() && a.ran && b.ran;
+				std::printf( "FARGNDRTDRAW %s RT batch %s: %s (%zu colour halves, %zu depth samples differ)\n", tag, what, ok ? "EXACT" : "DIFFER", cd, dd );
+				gateOk = gateOk && ok;
+			};
+			const PImg singles = vkParts( 0, 0 );
+			qArm( "3 parts, a crossing each", singles, false, 0 );
+			const PImg batch = vkParts( 1, 0 );
+			qArm( "3 parts, one crossing", batch, false, 1 );
+			qExact( "one crossing vs a crossing each", batch, singles );
+			const PImg queued = vkParts( 2, 0 );
+			qArm( "3 parts queued + flushed", queued, false, 1 );
+			qExact( "queued vs one crossing", queued, batch );
+			qArm( "red 1024 (part 1 on part 0's set and host slice)", vkParts( 1, 1024 ), true, 1 );
+			qArm( "red 2048 (part 1 dropped)", vkParts( 1, 2048 ), true, 1 );
+			qExact( "a crossing each after the batches vs before", vkParts( 0, 0 ), singles );
+			std::printf( "FARGNDRTDRAW %s RT batch CPU a draw: %.4f ms a crossing each, %.4f ms one crossing, %.4f ms queued\n", tag, singles.ms,
+				batch.ms, queued.ms );
+			f.useProgram( pFg );
+			if ( lMvQ >= 0 )
+				f.uniformMatrix4fv( lMvQ, 1, GL_FALSE, mvQ0 );
+#else
+			std::printf( "FARGNDRTDRAW %s RT batch: FAIL (no RT queue: farGroundRtQueue / farGroundRtRunN are not built, WW_VK_FARGNDRTQ undefined)\n", tag );
+			gateOk = false;
+#endif
 		}
 
 		// lane VKGROUND16, the state arm (seed 1; manager ruling 11-16, fgrt_consts): fgLtex at the app's anisotropy 8, every census
