@@ -7,6 +7,8 @@
  * 2. texel buffers both APIs see (farTexelBuffer). 3. the cards' descriptor set, reflected from their module (farCardsSet). */
 #include "features/vkframe/farcards_view_ps.spv.h"
 #include "features/vkframe/farcards_view_vs.spv.h"  // lane VKFAR2: impostor_instez_vs, its bindings 0 / 32 / 96 / 97 in the same set
+#include "features/vkframe/farcards_view_rt_ps.spv.h"  // lane VKFLIGHT17: the RT (all-on) and DG twins, t0..t51
+#include "features/vkframe/farcards_view_dg_ps.spv.h"
 namespace
 {
 constexpr GLenum kFcCubeArray = 0x9009, kFcBindingCubeArray = 0x900A, kFcDepth16 = 0x81A5;
@@ -97,14 +99,19 @@ struct FarCards
 	std::map<std::uintptr_t, std::uint64_t> twinGen;  // lane VKFAR4: sharedGen() at each key's last make (a cache of a twin keys on it)
 	std::map<std::uintptr_t, FcBuf> bufs;
 	FcDev d;
-	// 3. the far cards' set (farCardsSet)
-	VkDescriptorSetLayout setLayout = VK_NULL_HANDLE;
-	VkDescriptorPool pool = VK_NULL_HANDLE;
-	VkDescriptorSet set = VK_NULL_HANDLE;  // sets[0]
-	std::vector<VkDescriptorSet> sets;     // lane VKFAR2: one a drawn card set (kFcSets)
-	VkPipelineLayout pipeLayout = VK_NULL_HANDLE;
-	VkShaderModule ps = VK_NULL_HANDLE, vs = VK_NULL_HANDLE;
-	WwVkPresent::FarSetCounts counts;  // the pixel stage's (the vertex stage's 0 / 32 / 96 / 97 join the layout only)
+	// 3. the far cards' sets (farCardsSet), one FcVar a twin (lane VKFLIGHT17): 0 the base, 1 RT, 2 DG
+	struct FcVar
+	{
+		VkDescriptorSetLayout setLayout = VK_NULL_HANDLE;
+		VkDescriptorPool pool = VK_NULL_HANDLE;
+		VkDescriptorSet set = VK_NULL_HANDLE;  // sets[0]
+		std::vector<VkDescriptorSet> sets;     // lane VKFAR2: one a drawn card set (kFcSets)
+		VkPipelineLayout pipeLayout = VK_NULL_HANDLE;
+		VkShaderModule ps = VK_NULL_HANDLE;
+		WwVkPresent::FarSetCounts counts;  // the pixel stage's (the vertex stage's 0 / 32 / 96 / 97 join the layout only)
+	};
+	FcVar var[3];
+	VkShaderModule vs = VK_NULL_HANDLE;  // one vertex stage for the three
 	WwVkPresent::FarTwinStat st;
 	int features = -1;  // -1 unread; bit 0 textureCompressionBC, bit 1 imageCubeArray (the device enables what is offered)
 };
@@ -453,24 +460,20 @@ void fcSetFree()
 {
 	Vk & v = vk();
 	FarCards & C = farCards();
-	if ( C.ps )
-		v.vkDestroyShaderModule( v.dev, C.ps, nullptr );
 	if ( C.vs )
 		v.vkDestroyShaderModule( v.dev, C.vs, nullptr );
 	C.vs = VK_NULL_HANDLE;
-	C.sets.clear();
-	if ( C.pipeLayout )
-		v.vkDestroyPipelineLayout( v.dev, C.pipeLayout, nullptr );
-	if ( C.pool )
-		v.vkDestroyDescriptorPool( v.dev, C.pool, nullptr );  // frees the set
-	if ( C.setLayout )
-		v.vkDestroyDescriptorSetLayout( v.dev, C.setLayout, nullptr );
-	C.ps = VK_NULL_HANDLE;
-	C.pipeLayout = VK_NULL_HANDLE;
-	C.pool = VK_NULL_HANDLE;
-	C.set = VK_NULL_HANDLE;
-	C.setLayout = VK_NULL_HANDLE;
-	C.counts = WwVkPresent::FarSetCounts();
+	for ( FarCards::FcVar & P : C.var ) {
+		if ( P.ps )
+			v.vkDestroyShaderModule( v.dev, P.ps, nullptr );
+		if ( P.pipeLayout )
+			v.vkDestroyPipelineLayout( v.dev, P.pipeLayout, nullptr );
+		if ( P.pool )
+			v.vkDestroyDescriptorPool( v.dev, P.pool, nullptr );  // frees the sets
+		if ( P.setLayout )
+			v.vkDestroyDescriptorSetLayout( v.dev, P.setLayout, nullptr );
+		P = FarCards::FcVar();
+	}
 }
 }  // namespace
 
@@ -642,7 +645,7 @@ FarTwinStat farTwinStat()
 void farCardsFree( bool glAlive )
 {
 	FarCards & C = farCards();
-	if ( C.twins.empty() && C.bufs.empty() && !C.setLayout && !C.ps )
+	if ( C.twins.empty() && C.bufs.empty() && !C.vs && !C.var[0].setLayout && !C.var[1].setLayout && !C.var[2].setLayout )
 		return;
 	drain();
 	vk().vkDeviceWaitIdle( vk().dev );
@@ -913,7 +916,7 @@ bool farSetReflect( const std::uint32_t * w, std::size_t n, FarSetCounts & out, 
 	return true;
 }
 
-bool farCardsSet( FarSetCounts & out, std::string & why )
+bool farCardsSet( FarSetCounts & out, std::string & why, int vi )
 {
 	Vk & v = vk();
 	FarCards & C = farCards();
@@ -921,13 +924,22 @@ bool farCardsSet( FarSetCounts & out, std::string & why )
 		why = "no present device";
 		return false;
 	}
-	if ( C.set ) {
-		out = C.counts;
+	if ( vi < 0 || vi > 2 ) {
+		why = "no far-card twin " + std::to_string( vi ) + " (0 base, 1 RT, 2 DG)";
+		return false;
+	}
+	FarCards::FcVar & P = C.var[vi];
+	if ( P.set ) {
+		out = P.counts;
 		return true;
 	}
-	if ( !farSetReflect( vkframe_farcards_view_ps_spv, sizeof( vkframe_farcards_view_ps_spv ) / 4, C.counts, why ) )
+	// lane VKFLIGHT17: the twin's module words (farcards_view_ps FOGLEAK, _rt_ps the all-on key, _dg_ps the DG key)
+	const std::uint32_t * psW = vi == 1 ? vkframe_farcards_view_rt_ps_spv : vi == 2 ? vkframe_farcards_view_dg_ps_spv : vkframe_farcards_view_ps_spv;
+	const std::size_t psBytes = vi == 1 ? sizeof( vkframe_farcards_view_rt_ps_spv ) : vi == 2 ? sizeof( vkframe_farcards_view_dg_ps_spv )
+		: sizeof( vkframe_farcards_view_ps_spv );
+	if ( !farSetReflect( psW, psBytes / 4, P.counts, why ) )
 		return false;
-	if ( C.counts.cubeArrays && !fcFeatures( false, true, why ) )
+	if ( P.counts.cubeArrays && !fcFeatures( false, true, why ) )
 		return false;
 	// lane VKFAR2: the vertex stage (impostor_instez_vs) shares the set: b0 with the pixel stage, its own b31 at 32 and its
 	// texel buffers at 96 / 97, as vkframe_spirv.sh's fxc() places them (read from its module; anything else refuses)
@@ -942,7 +954,7 @@ bool farCardsSet( FarSetCounts & out, std::string & why )
 		return kind == 0 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : kind == 1 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
 			: kind == 2 ? VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER : VK_DESCRIPTOR_TYPE_SAMPLER;
 	};
-	for ( const FarSetSlot & s : C.counts.binds ) {
+	for ( const FarSetSlot & s : P.counts.binds ) {
 		const VkDescriptorType t = typeOf( s.kind );
 		lb.push_back( { s.binding, t, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr } );
 		sizes[t] += kFcSets;
@@ -983,23 +995,23 @@ bool farCardsSet( FarSetCounts & out, std::string & why )
 	pi.maxSets = kFcSets;
 	pi.poolSizeCount = std::uint32_t( ps.size() );
 	pi.pPoolSizes = ps.data();
-	bool ok = v.vkCreateDescriptorSetLayout( v.dev, &li, nullptr, &C.setLayout ) == VK_SUCCESS
-		&& v.vkCreateDescriptorPool( v.dev, &pi, nullptr, &C.pool ) == VK_SUCCESS;
+	bool ok = v.vkCreateDescriptorSetLayout( v.dev, &li, nullptr, &P.setLayout ) == VK_SUCCESS
+		&& v.vkCreateDescriptorPool( v.dev, &pi, nullptr, &P.pool ) == VK_SUCCESS;
 	if ( ok ) {
-		std::vector<VkDescriptorSetLayout> lays( kFcSets, C.setLayout );
-		C.sets.assign( kFcSets, VK_NULL_HANDLE );
+		std::vector<VkDescriptorSetLayout> lays( kFcSets, P.setLayout );
+		P.sets.assign( kFcSets, VK_NULL_HANDLE );
 		VkDescriptorSetAllocateInfo ai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-		ai.descriptorPool = C.pool;
+		ai.descriptorPool = P.pool;
 		ai.descriptorSetCount = kFcSets;
 		ai.pSetLayouts = lays.data();
 		VkPipelineLayoutCreateInfo pl { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
 		pl.setLayoutCount = 1;
-		pl.pSetLayouts = &C.setLayout;
-		ok = v.vkAllocateDescriptorSets( v.dev, &ai, C.sets.data() ) == VK_SUCCESS
-			&& v.vkCreatePipelineLayout( v.dev, &pl, nullptr, &C.pipeLayout ) == VK_SUCCESS
-			&& fxModule( vkframe_farcards_view_ps_spv, sizeof( vkframe_farcards_view_ps_spv ), C.ps )
-			&& fxModule( vkframe_farcards_view_vs_spv, sizeof( vkframe_farcards_view_vs_spv ), C.vs );
-		C.set = ok ? C.sets[0] : VK_NULL_HANDLE;
+		pl.pSetLayouts = &P.setLayout;
+		ok = v.vkAllocateDescriptorSets( v.dev, &ai, P.sets.data() ) == VK_SUCCESS
+			&& v.vkCreatePipelineLayout( v.dev, &pl, nullptr, &P.pipeLayout ) == VK_SUCCESS
+			&& fxModule( psW, psBytes, P.ps )
+			&& ( C.vs || fxModule( vkframe_farcards_view_vs_spv, sizeof( vkframe_farcards_view_vs_spv ), C.vs ) );
+		P.set = ok ? P.sets[0] : VK_NULL_HANDLE;
 	}
 	if ( !ok ) {
 		why = "the far cards' set layout / pool / set / pipeline layout / module failed on the present device";
@@ -1008,7 +1020,7 @@ bool farCardsSet( FarSetCounts & out, std::string & why )
 		fcSetFree();
 		return false;
 	}
-	out = C.counts;
+	out = P.counts;
 	return true;
 }
 }  // namespace WwVkPresent

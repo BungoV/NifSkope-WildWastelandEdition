@@ -2,6 +2,7 @@
 /* lane VKFAR1 round 2 (row G3, 2026-11-13): the far cards' (impostor_cellinstez) inputs on the present device
  * (vkfarcards.inc, built into vkpresent.cpp). Nothing draws the cards there yet: these are the pieces their pass needs. */
 #include "features/vkframe/vkpresent.h"  // FxField, FxStat, kFxGlobalBytes (lane VKFAR2)
+#include "features/vkframe/vkfarcardsrt_tables.h"  // lane VKFLIGHT17: kT_farcardsRt / Dg (the RT / DG twins' b31)
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -54,7 +55,7 @@ struct FarSetCounts
 bool farSetReflect( const std::uint32_t * words, std::size_t count, FarSetCounts & out, std::string & why );
 /*! the shipped far-card module (farcards_view_ps, impostor_cellinstez_ps FOGLEAK): reflected, then its set layout, pool,
  * one set, pipeline layout and shader module on the present device (once; farCardsFree releases them) */
-bool farCardsSet( FarSetCounts & out, std::string & why );
+bool farCardsSet( FarSetCounts & out, std::string & why, int v = 0 );  //!< lane VKFLIGHT17: v 0 the base, 1 RT, 2 DG
 void farCardsFree( bool glAlive );  //!< shutdown(): everything above goes with the view
 
 /* lane VKFAR2 (row G3): the far cards drawn on the present device (vkfarcardsdraw.inc): impostor_instez_vs (farcards_view_vs,
@@ -125,6 +126,10 @@ inline constexpr FxField kT_farcards[] = {
 	{ "familyPbr", 3552, 1, 1, 1, 0 }, { "cardMipCap", 3556, 1, 1, 0, 0 },
 };
 inline constexpr int kT_farcardsBytes = 3568;
+//! lane VKFLIGHT17: a set's pixel b31 holds the biggest twin's table (the RT one)
+inline constexpr int kFcLooseMax = kT_farcardsRtBytes > kT_farcardsDgBytes ? ( kT_farcardsRtBytes > kT_farcardsBytes ? kT_farcardsRtBytes
+	: kT_farcardsBytes ) : ( kT_farcardsDgBytes > kT_farcardsBytes ? kT_farcardsDgBytes : kT_farcardsBytes );
+static_assert( kFcLooseMax >= kT_farcardsBytes && kFcLooseMax >= kT_farcardsRtBytes && kFcLooseMax >= kT_farcardsDgBytes );
 //! one texture / texture buffer the cards read, as GL holds it now (fcTexOf); the sampler is built from GL's parameters
 struct FarCardTex
 {
@@ -140,9 +145,9 @@ struct FarCardTex
 struct FarCardsSet
 {
 	int count = 0;                                     //!< instances (the VS's cardBase in vsLoose places them)
-	FarCardTex sheet[4];                               //!< t16 ColourSheet, t19 NormalSheet, t20 MaskSheet, t21 EmissiveSheet
+	FarCardTex sheet[4];                               //!< t16 ColourSheet, t19 NormalSheet, t20 MaskSheet, t21 EmissiveSheet (RT / DG: t47..t50)
 	std::uint8_t vsLoose[kT_farcardsVsBytes] = {};     //!< the vertex stage's b31
-	std::uint8_t loose[kT_farcardsBytes] = {};         //!< the pixel stage's b31 as GL holds it for this set
+	std::uint8_t loose[kFcLooseMax] = {};              //!< the pixel stage's b31 as GL holds it for this set (the run's twin's table)
 };
 struct FarCardsStencil  //!< GL's stencil state at the draw (the cards do not set it)
 {
@@ -153,7 +158,8 @@ struct FarCardsRun
 {
 	int w = 0, h = 0, vp[4] = {};      //!< the tone frame's size, GL's viewport
 	unsigned color = 0;                //!< the tone frame's colour (toneFrameIs)
-	FarCardTex tex[26];                //!< the pixel stage's t0..t25 (the sheets' four come from each set)
+	FarCardTex tex[52];                //!< the pixel stage's t0..t25 (RT / DG: t0..t51; the sheets' four come from each set)
+	int v = 0;                         //!< lane VKFLIGHT17: the twin, 0 the base (FOGLEAK), 1 RT (all-on), 2 DG (GL's program key)
 	FarCardTex cardData, cardFrames;   //!< the vertex stage's texel buffers
 	FarCardsStencil stencil;
 	std::uint8_t global[kFxGlobalBytes] = {};
@@ -164,6 +170,7 @@ struct FarCardsRun
 /* GL current, the tone frame bound, impostor_cellinstez's uniforms set: the sets drawn on Vulkan, one crossing.
  * false: why; nothing drawn (GL draws them) */
 bool farCardsRun( const FarCardsRun & t, std::string & why );
+#define WW_FARCARDS_RT 1  // lane VKFLIGHT17: FarCardsRun::v and tex[52] (the gate's RT / DG arm runs on it)
 void farCardsOnGl( const char * why );
 FxStat takeFarCardsStat();
 

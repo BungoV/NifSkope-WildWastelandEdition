@@ -6,9 +6,10 @@
  * Here: one descriptor set a card set (the sheets, both stages' b31), one indexed instanced draw each. The vertex stage
  * writes GL's clip z (depth clip control, negativeOneToOne). Every sampler is GL's own state, read off the texture (a
  * compare sampler for the shadow cubes from GL_TEXTURE_COMPARE_MODE / FUNC). */
+#include "features/vkframe/vkrtbuf.h"  // lane VKFLIGHT17: the RT / DG twins' cellRestir / cellDdgiAtlas / gi-half inputs by name
 namespace
 {
-constexpr VkDeviceSize kFcSetStride = 4096, kFcSetAt = 512, kFcPsAt = 256;  // b0 at 0; set i: its VS b31, its PS b31 at +256
+constexpr VkDeviceSize kFcSetStride = 8192, kFcSetAt = 512, kFcPsAt = 256;  // b0 at 0; set i: its VS b31, its PS b31 at +256 (RT 3952 B)
 constexpr std::uintptr_t kFcSlotKey = std::uintptr_t( 0xFCA0ull << 32 );   // + t slot (sharedTarget twins, types 0 / 1 / 2)
 constexpr std::uintptr_t kFcSheetKey = std::uintptr_t( 0xFCB0ull << 32 );  // + GL name (farTwin, the sheets)
 constexpr std::uintptr_t kFcCubeKey = std::uintptr_t( 0xFCC0ull << 32 );   // + 0 the shadow cubes, + 1 the zero cube
@@ -45,6 +46,7 @@ struct FcDraw
 	void( WINAPI * clearTex )( GLuint, GLint, GLenum, GLenum, const void * ) = nullptr;                     // glClearTexImage
 	// this run's job (the drawing thread writes it before the hand, the worker records it)
 	VkPipeline pipe = VK_NULL_HANDLE;
+	int v = 0;  // lane VKFLIGHT17: the run's twin (its layout and sets)
 	std::vector<int> counts;
 	std::uint32_t stencilRef = 0;
 	WwVkPresent::FxStat st;
@@ -145,7 +147,7 @@ VkStencilOp fcStencilOp( int op )
 }
 
 // GL's state at the draw: depth LEQUAL with write (red 1: no write), no blend, no cull, GL's stencil
-bool fcPipe( const WwVkPresent::FarCardsStencil & s, int red, VkPipeline & out, std::string & why )
+bool fcPipe( const WwVkPresent::FarCardsStencil & s, int red, int tw, VkPipeline & out, std::string & why )
 {
 	Vk & v = vk();
 	Fx & F = fx();
@@ -153,7 +155,7 @@ bool fcPipe( const WwVkPresent::FarCardsStencil & s, int red, VkPipeline & out, 
 	FcDraw & D = fcDraw();
 	const std::string key = std::to_string( s.on ) + "," + std::to_string( s.func ) + "," + std::to_string( s.mask ) + ","
 		+ std::to_string( s.write ) + "," + std::to_string( s.sfail ) + "," + std::to_string( s.zfail ) + "," + std::to_string( s.zpass )
-		+ "," + std::to_string( red & 1 );
+		+ "," + std::to_string( red & 1 ) + ",v" + std::to_string( tw );
 	if ( D.pipePass != F.airPass || D.pipeSamples != F.airSamples ) {
 		for ( auto & kv : D.pipes )
 			v.vkDestroyPipeline( v.dev, kv.second, nullptr );
@@ -173,7 +175,7 @@ bool fcPipe( const WwVkPresent::FarCardsStencil & s, int red, VkPipeline & out, 
 	st[0].module = C.vs;
 	st[0].pName = "main";
 	st[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-	st[1].module = C.ps;
+	st[1].module = C.var[tw].ps;
 	st[1].pName = "main";
 	// impostor_instez_vs: vertexPosition (TEXCOORD0) location 0, multiTexCoord0 (TEXCOORD7) location 1, in declaration order
 	const VkVertexInputBindingDescription vb[2] = { { 0, 12, VK_VERTEX_INPUT_RATE_VERTEX }, { 1, 8, VK_VERTEX_INPUT_RATE_VERTEX } };
@@ -229,7 +231,7 @@ bool fcPipe( const WwVkPresent::FarCardsStencil & s, int red, VkPipeline & out, 
 	gp.pDepthStencilState = &ds;
 	gp.pColorBlendState = &cbs;
 	gp.pDynamicState = &dy;
-	gp.layout = C.pipeLayout;
+	gp.layout = C.var[tw].pipeLayout;
 	gp.renderPass = F.airPass;
 	if ( v.vkCreateGraphicsPipelines( v.dev, tone().cache, 1, &gp, nullptr, &out ) != VK_SUCCESS ) {
 		why = "vkCreateGraphicsPipelines (the far cards) failed";
@@ -475,7 +477,7 @@ bool fcRecord( std::string & why )
 	for ( std::size_t i = 0; i < D.counts.size(); i++ ) {
 		if ( D.counts[i] < 1 )
 			continue;
-		v.vkCmdBindDescriptorSets( F.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, C.pipeLayout, 0, 1, &C.sets[i], 0, nullptr );
+		v.vkCmdBindDescriptorSets( F.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, C.var[D.v].pipeLayout, 0, 1, &C.var[D.v].sets[i], 0, nullptr );
 		D.drawIndexed( F.cmd, 6, std::uint32_t( D.counts[i] ), 0, 0, 0 );  // the instance index from 0: cardBase is in b31
 	}
 	v.vkCmdEndRenderPass( F.cmd );
@@ -532,41 +534,86 @@ bool farCardsRun( const FarCardsRun & t, std::string & why )
 	std::string w;
 	FarSetCounts counts;
 	const int samples = T.samples > 0 ? T.samples : std::max( F.airSamples, 1 );
-	if ( !fxStatic( w ) || !fxSems( w ) || !fxPasses( samples, w ) || !farCardsSet( counts, w ) || !fcStatic( w ) )
+	if ( t.v < 0 || t.v > 2 )
+		return refuse( "no far-card twin " + std::to_string( t.v ) + " (0 base, 1 RT, 2 DG)" );
+	const int vi = t.v;
+	if ( !fxStatic( w ) || !fxSems( w ) || !fxPasses( samples, w ) || !farCardsSet( counts, w, vi ) || !fcStatic( w ) )
 		return breakOff( w );
 	if ( F.airSamples != T.samples )
 		return breakOff( "the far cards' pipelines are not at the frame's sample count" );
-	if ( !fcPipe( t.stencil, t.red, D.pipe, w ) )
+	if ( !fcPipe( t.stencil, t.red, vi, D.pipe, w ) )
 		return breakOff( w );
+	const FarCards::FcVar & P = C.var[vi];
 	FxNames names;
 	names.add( T.colorTex );
 	names.add( T.dsTex );
-	// the slots every set shares: t0..t25 but the sheets, and the vertex stage's two texel buffers
-	static const int kSheetSlot[4] = { 16, 19, 20, 21 };
-	auto isSheet = []( int k ) { return k == 16 || k == 19 || k == 20 || k == 21; };
-	VkImageView views[26] = {};
-	VkBufferView bviews[26] = {};
+	/* lane VKFLIGHT17: the twin's layout. Base: t0..t25, the sheets t16 / t19..t21, cellCluster (int) t6. RT / DG: t0..t51,
+	 * the sheets t47..t50, cellCluster t45; cellRestir (t7) / cellDdgiAtlas (t44) read in place by name (rtBufOf, never
+	 * copied); cellGiHalf / cellGiHalfKey (t40 / t41) the shared images by name while b31 cellGiHalfOn is set (a zero view
+	 * while it is 0); the names the RT module never reads (cellGi, cellGiSlots, cellRooms, cellShadow, cellAoDecal) a zero view
+	 * (RT only: DG reads them).
+	 * Twin keys of RT / DG slots sit at + 128 (the base's stay as they were). */
+	const int nTex = vi ? 52 : 26, intSlot = vi ? 45 : 6, keyOff = vi ? 128 : 0;
+	static const int kSheetBase[4] = { 16, 19, 20, 21 }, kSheetRt[4] = { 47, 48, 49, 50 };
+	const int * kSheetSlot = vi ? kSheetRt : kSheetBase;
+	auto isSheet = [&]( int k ) { return k == kSheetSlot[0] || k == kSheetSlot[1] || k == kSheetSlot[2] || k == kSheetSlot[3]; };
+	auto isDead = [&]( int k ) { return vi == 1 && ( k == 1 || k == 2 || k == 3 || k == 6 || k == 15 ); };
+	const int psBytes = vi == 1 ? kT_farcardsRtBytes : vi == 2 ? kT_farcardsDgBytes : kT_farcardsBytes;
+	std::int32_t giHalfOn = 0;
+	if ( vi ) {
+		const FxField * fs = vi == 1 ? kT_farcardsRt : kT_farcardsDg;
+		const int nf = vi == 1 ? int( sizeof( kT_farcardsRt ) / sizeof( kT_farcardsRt[0] ) ) : int( sizeof( kT_farcardsDg ) / sizeof( kT_farcardsDg[0] ) );
+		for ( int i = 0; i < nf; i++ )
+			if ( std::strcmp( fs[i].name, "cellGiHalfOn" ) == 0 && fs[i].offset + 4 <= psBytes )
+				std::memcpy( &giHalfOn, t.sets[0].loose + fs[i].offset, 4 );  // pass-wide: every set holds GL's one value
+	}
+	VkImageView views[52] = {};
+	VkBufferView bviews[52] = {};
 	VkBufferView vsBuf[2] = {};
-	VkSampler smp[26] = {};
+	VkSampler smp[52] = {};
 	std::map<std::uint32_t, const FarSetSlot *> bind;
 	for ( const FarSetSlot & s : counts.binds )
 		bind[s.binding] = &s;
-	for ( int k = 0; k < 26; k++ ) {
+	for ( int k = 0; k < nTex; k++ ) {
 		auto it = bind.find( std::uint32_t( 64 + k ) );
 		if ( it == bind.end() || isSheet( k ) )
 			continue;
 		const FarSetSlot & s = *it->second;
-		const FarCardTex & x = t.tex[k];
+		FarCardTex x = t.tex[k];
+		const bool giHalf = vi && ( k == 40 || k == 41 );
+		if ( isDead( k ) || ( giHalf && giHalfOn == 0 ) )
+			x.tex = 0;  // the module does not read it: a zero view of the slot's type, no copy (GL's sampling state kept)
 		bool ok = true;
-		if ( s.kind == 2 )
-			ok = fcTexel( k, x, k == 6, bviews[k], names, w );
+		if ( s.kind == 2 && vi && ( k == 7 || k == 44 ) && x.tex && x.buf ) {
+			const char * nm = k == 7 ? "cellRestir" : "cellDdgiAtlas";
+			RtBuf rb;
+			std::string bw;
+			if ( !rtBufOf( nm, rb, bw ) )
+				return refuse( std::string( nm ) + ": " + bw );
+			if ( rb.glBuf != x.buf || x.bufOff != 0 || rb.glFmt != x.glFmt )
+				return refuse( std::string( nm ) + ": GL's program reads another buffer, range or format than the shared one (never copied a run)" );
+			bviews[k] = reinterpret_cast<VkBufferView>( rb.view );
+			names.addBuf( rb.glBuf );
+		} else if ( s.kind == 2 )
+			ok = fcTexel( keyOff + k, x, k == intSlot, bviews[k], names, w );
 		else if ( s.dim == 3 && s.arrayed )
 			ok = fcCube( x, views[k], names, S.copies, w );
 		else {
 			const int want = s.dim == 2 ? 1 : s.arrayed ? 2 : 0;
 			if ( x.tex && x.type != want )
 				return refuse( "t" + std::to_string( k ) + ": GL's slot type is not the shader's" );
-			ok = fcImage( k, x, want, views[k], names, S.copies, w );
+			if ( giHalf && x.tex ) {
+				const char * nm = k == 40 ? "cellGiHalf" : "cellGiHalfKey";
+				RtImg img;
+				std::string iw;
+				if ( !rtImgOf( nm, img, iw ) )
+					return refuse( std::string( "cellGiHalfOn 1: " ) + nm + ": " + iw );
+				if ( img.glTex != x.tex )
+					return refuse( std::string( "cellGiHalfOn 1: " ) + nm + ": the bound texture is not the shared image of that name" );
+				if ( farSharedOf( x.tex ) != img.key )
+					return refuse( std::string( "cellGiHalfOn 1: " ) + nm + ": the shared image is not the bound name's" );
+			}
+			ok = fcImage( keyOff + k, x, want, views[k], names, S.copies, w );
 		}
 		if ( !ok )
 			return refuse( "the far cards' input t" + std::to_string( k ) + ": " + w );
@@ -590,8 +637,8 @@ bool farCardsRun( const FarCardsRun & t, std::string & why )
 	D.counts.assign( t.sets.size(), 0 );
 	for ( std::size_t i = 0; i < t.sets.size(); i++ ) {
 		const FarCardsSet & cs = t.sets[i];
-		VkImageView sv[26] = {};
-		VkSampler ss[26] = {};
+		VkImageView sv[52] = {};
+		VkSampler ss[52] = {};
 		for ( int j = 0; j < 4; j++ ) {
 			const int k = kSheetSlot[j];
 			if ( !bind.count( std::uint32_t( 64 + k ) ) )
@@ -607,8 +654,8 @@ bool farCardsRun( const FarCardsRun & t, std::string & why )
 			const int base = 0;
 			std::memcpy( D.uboPtr + at, &base, 4 );
 		}
-		std::memcpy( D.uboPtr + at + kFcPsAt, cs.loose, size_t( kT_farcardsBytes ) );
-		const VkDescriptorSet set = C.sets[i];
+		std::memcpy( D.uboPtr + at + kFcPsAt, cs.loose, size_t( psBytes ) );
+		const VkDescriptorSet set = P.sets[i];
 		auto ubo = [&]( std::uint32_t b, VkDeviceSize off, VkDeviceSize range ) {
 			bi.push_back( { D.ubo, off, range } );
 			VkWriteDescriptorSet x { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
@@ -636,14 +683,15 @@ bool farCardsRun( const FarCardsRun & t, std::string & why )
 		for ( const FarSetSlot & s : counts.binds ) {
 			if ( s.kind == 0 ) {
 				if ( s.binding == 31 )
-					ubo( 31, at + kFcPsAt, VkDeviceSize( kT_farcardsBytes ) );
+					ubo( 31, at + kFcPsAt, VkDeviceSize( psBytes ) );
 				else if ( s.binding != 0 )
 					return breakOff( "the far cards' pixel stage has a uniform block at binding " + std::to_string( s.binding ) );
 				continue;
 			}
 			const int k = int( s.binding ) - ( s.kind == 3 ? 128 : 64 );
-			if ( k < 0 || k > 25 )
-				return breakOff( "the far cards' binding " + std::to_string( s.binding ) + " is out of t0..t25 / s0..s25" );
+			if ( k < 0 || k >= nTex )
+				return breakOff( "the far cards' binding " + std::to_string( s.binding ) + " is out of t0..t" + std::to_string( nTex - 1 ) + " / s0..s"
+					+ std::to_string( nTex - 1 ) );
 			if ( s.kind == 2 ) {
 				texel( s.binding, bviews[k] );
 				continue;
@@ -676,6 +724,7 @@ bool farCardsRun( const FarCardsRun & t, std::string & why )
 		return breakOff( "the far cards' framebuffer over the tone frame failed" );
 	v.vkUpdateDescriptorSets( v.dev, std::uint32_t( ws.size() ), ws.data(), 0, nullptr );
 	D.stencilRef = std::uint32_t( t.stencil.ref ) & 0xFFu;
+	D.v = vi;
 	F.kind = 3;
 	F.w = t.w;
 	F.h = t.h;

@@ -1163,6 +1163,20 @@ bool ImpostorDraw::instancedOn( Scene * scene )
 /* lane VKFAR2 (row G3): the far cards on the present device's tone frame (vkfarcardsdraw.inc). impostor_cellinstez's
  * pass-wide uniforms are set on prog and the card buffers bound; setUp( s ) binds set s's sheets and sets its uniforms as
  * GL's loop does (false: GL skips the set too). true: every set drew there; false: GL's loop draws them (the "vk far:" line). */
+/* lane VKFLIGHT17: GL's program key -> the cards' twin: 0 the base (FOGLEAK), 1 the all-on RT key (ReSTIR + RTDDGI + cascades),
+ * 2 the DG key (the Ray-traced GI row with no RT preset); -1 any other key (GL draws, the line names it). The loader gives
+ * impostor_cellinstez no WW_FRAME_UBO (vkframe_spirv.sh fxkr / fxkd) */
+static int farCardsTwinOf( const std::string & d )
+{
+	if ( d == "WW_CELL_FOGLEAK" )
+		return 0;
+	if ( d == "WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES" )
+		return 1;
+	if ( d == "WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES" )
+		return 2;
+	return -1;
+}
+
 static bool farCardsOnVulkan( Renderer * r, NifSkopeOpenGLContext::Program * prog, int nSets, const std::function< bool( int ) > & setUp,
 	const QVector< int > & count, int & draws, int & drawn )
 {
@@ -1207,14 +1221,19 @@ static bool farCardsOnVulkan( Renderer * r, NifSkopeOpenGLContext::Program * pro
 		: ( dr[0] != 0.0 || dr[1] != 1.0 ) ? "the depth range is not 0..1" : nullptr;
 	if ( !wwFogLeakShaderDefine() ) {
 		onGl( "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan pass's twin" );
-	} else if ( wwCellGiVis() == 1 || wwCellPrtOn() || rtddgiCellShaderDefine() || rtddgiRestirShaderDefine() || rtddgiRestirGiShaderDefine()
-		|| wwDebugViewShaderDefine() ) {
-		onGl( "GL's program carries a loader define the Vulkan twin (FOGLEAK alone) has not (GI march, PRT, RTDDGI, ReSTIR, debug views)" );
+	} else if ( wwCellGiVis() == 1 || wwCellPrtOn() || wwDebugViewShaderDefine() ) {
+		onGl( "GL's program carries a loader define no Vulkan twin has (GI march, PRT, debug views)" );
+	} else if ( prog->wwDefs.find( "RESTIRGI" ) != std::string::npos ) {
+		onGl( "ReSTIR GI's key in GL's program (no far-card twin: base, RT, DG only)" );
 	} else if ( !ubo ) {
 		onGl( "the global uniform buffer's bytes are not known for this context" );
 	} else if ( stateWhy ) {
 		onGl( stateWhy );
+	} else if ( farCardsTwinOf( prog->wwDefs ) < 0 ) {
+		onGl( "GL's program key '" + prog->wwDefs + "' has no far-card twin (base, RT, DG only)" );
 	} else {
+		const int vi = farCardsTwinOf( prog->wwDefs );
+		t.v = vi;
 		wwCellHdrFrameSize( t.w, t.h );
 		GLint vp[4] = {};
 		fn->glGetIntegerv( GL_VIEWPORT, vp );
@@ -1249,10 +1268,21 @@ static bool farCardsOnVulkan( Renderer * r, NifSkopeOpenGLContext::Program * pro
 			"cellFarPlaced", "cellSsgi", nullptr, "ussCloudMap", "cardSceneDepth", nullptr, nullptr, nullptr, "cellGi", "cellGiSlots",
 			"cellRooms", "cellAoDecal" };
 		static const int kType[26] = { 1, 2, 0, 1, 0, 1, 5, 0, 1, 5, 3, 0, 5, 5, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0 };
-		for ( int k = 0; k < 26 && ok; k++ ) {
+		// lane VKFLIGHT17: the RT / DG twins' t0..t51 (FarLodBindingsVk.hlsli; t47..t50 the sheets, from each set)
+		static const char * const kRtName[52] = { "cellLights", "cellGi", "cellGiSlots", "cellRooms", "cellIsLut", "cellIsBloom", "cellShadow",
+			"cellRestir", "cellFarSlots", "cellFarRecs", "cellFarPlaced", nullptr, nullptr, "cellCtGbuf", nullptr, "cellAoDecal", "cellSsgi",
+			nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "atApTex", "volTex", "volTile", "volAirTerr", "volAirRainMap",
+			"volAirNoise", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "cellGiHalf", "cellGiHalfKey", nullptr,
+			nullptr, "cellDdgiAtlas", "cellCluster", "cardSceneDepth", nullptr, nullptr, nullptr, nullptr, "ussCloudMap" };
+		static const int kRtType[52] = { 5, 1, 1, 1, 1, 0, 3, 5, 5, 5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 2, 0, 1, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 5, 0, 0, 0, 0, 0, 0 };
+		const char * const * names = vi ? kRtName : kName;
+		const int * types = vi ? kRtType : kType;
+		const int nTex = vi ? 52 : 26;
+		for ( int k = 0; k < nTex && ok; k++ ) {
 			t.tex[k] = WwVkPresent::FarCardTex();
-			if ( kName[k] )
-				ok = WwVkPresent::fcTexOf( fn, prog->id, kName[k], kType[k], t.tex[k], why );
+			if ( names[k] )
+				ok = WwVkPresent::fcTexOf( fn, prog->id, names[k], types[k], t.tex[k], why );
 		}
 		if ( ok )
 			ok = WwVkPresent::fcTexOf( fn, prog->id, "cardData", 5, t.cardData, why )
@@ -1261,19 +1291,27 @@ static bool farCardsOnVulkan( Renderer * r, NifSkopeOpenGLContext::Program * pro
 			t.sets.reserve( size_t( nSets ) );
 		if ( ok ) {
 			// the pass-wide b31 once; per set only the uniforms GL's loop sets per set
-			static std::uint8_t base[WwVkPresent::kT_farcardsBytes];
+			static std::uint8_t base[WwVkPresent::kFcLooseMax];
 			std::memset( base, 0, sizeof( base ) );
-			WwVkPresent::fxPack( fn, prog->id, WwVkPresent::kT_farcards, int( std::size( WwVkPresent::kT_farcards ) ), base );
-			static const std::vector< WwVkPresent::FxField > perSet = [] {
+			const WwVkPresent::FxField * psT = vi == 1 ? WwVkPresent::kT_farcardsRt : vi == 2 ? WwVkPresent::kT_farcardsDg : WwVkPresent::kT_farcards;
+			const int psN = vi == 1 ? int( std::size( WwVkPresent::kT_farcardsRt ) ) : vi == 2 ? int( std::size( WwVkPresent::kT_farcardsDg ) )
+				: int( std::size( WwVkPresent::kT_farcards ) );
+			WwVkPresent::fxPack( fn, prog->id, psT, psN, base );
+			auto perOf = []( const WwVkPresent::FxField * tab, int n ) {
 				static const char * const kPer[] = { "hasMaskSheet", "hasEmissiveSheet", "familyPbr", "emissiveScale", "cardMipCap",
 					"cardCovFloor", "cardCovBase", "cardBase", "frameTableBase", "cardLodTint", "cardLodStripe" };
 				std::vector< WwVkPresent::FxField > out;
-				for ( const WwVkPresent::FxField & x : WwVkPresent::kT_farcards )
-					for ( const char * n : kPer )
-						if ( std::strcmp( x.name, n ) == 0 )
-							out.push_back( x );
+				for ( int i = 0; i < n; i++ )
+					for ( const char * pn : kPer )
+						if ( std::strcmp( tab[i].name, pn ) == 0 )
+							out.push_back( tab[i] );
 				return out;
-			}();
+			};
+			static const std::vector< WwVkPresent::FxField > perSets[3] = {
+				perOf( WwVkPresent::kT_farcards, int( std::size( WwVkPresent::kT_farcards ) ) ),
+				perOf( WwVkPresent::kT_farcardsRt, int( std::size( WwVkPresent::kT_farcardsRt ) ) ),
+				perOf( WwVkPresent::kT_farcardsDg, int( std::size( WwVkPresent::kT_farcardsDg ) ) ) };
+			const std::vector< WwVkPresent::FxField > & perSet = perSets[vi];
 			static const char * const kSheet[4] = { "ColourSheet", "NormalSheet", "MaskSheet", "EmissiveSheet" };
 			for ( int s = 0; s < nSets && ok; s++ ) {
 				if ( !setUp( s ) )
