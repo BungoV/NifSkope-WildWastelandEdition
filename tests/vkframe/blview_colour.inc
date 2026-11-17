@@ -87,7 +87,7 @@ static const char * kColKindName[10] = { "", " skin", " alpha", " single", " own
 /* lane VKFLIGHT12 (11-17; stated before its first run, never widened): kind 9 `copy` is the flight's opaque refusal "GL textures with
  * no twin": GL's own frame inputs, in the formats their owners make, on the names the bl twin reads: cellIsLut (3D RGBA8), cellIsBloom
  * (RGBA16F, half the view), atApTex (3D RGBA16F), RefractionSrc (RGBA16F), waterInfoIndex / Atlas / Bodies (RG32UI / R32UI / RGBA32F),
- * LandLodDiff / Outer (2D array BC1), LandLodNoise (2D array BC5), LandLodDetail (2D array RGBA8), CubeMap (cube RGBA8). Image space on
+ * LandLodDiff / Outer (2D array BC1), LandLodNoise (2D BC5), LandLodDetail (2D RGBA8), CubeMap (cube RGBA8). Image space on
  * (cellIsOn 1, cellIsLinear 0, LUT and bloom on), hasCubeMap 1. The main arm's form and bars (depth EXACT or BOUND, colour EXACT or BOUND
  * 4e-3 of max(1, |GL|), lit >= 0.9 of covered, one crossing, 0 failed). Check: one copy of each bound input (copies == the bound count
  * > 0, bytes == their sum), copyKB / copyMs printed. GL probes: cellIsLutOn 0 and cellIsBloomOn 0 each move GL's colour on >= 20 % of
@@ -587,8 +587,8 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		{ "waterInfoBodies", 0x0DE1, 0x8814, 0x1908, 0x1406, 8, 4, 1, 8u * 4u * 16u },  // RGBA32F
 		{ "LandLodDiff", 0x8C1A, 0x83F1, 0x1908, 0x1401, 16, 16, 4, 4u * 4u * 8u * 4u },  // 2D array BC1 (renderer.cpp: the chunks' DDS)
 		{ "LandLodOuter", 0x8C1A, 0x83F1, 0x1908, 0x1401, 16, 16, 4, 4u * 4u * 8u * 4u },
-		{ "LandLodNoise", 0x8C1A, 0x8DBD, 0x1908, 0x1401, 16, 16, 2, 4u * 4u * 16u * 2u },  // 2D array BC5
-		{ "LandLodDetail", 0x8C1A, 0x8058, 0x1908, 0x1401, 16, 16, 2, 16u * 16u * 4u * 2u },  // 2D array RGBA8
+		{ "LandLodNoise", 0x0DE1, 0x8DBD, 0x1908, 0x1401, 16, 16, 1, 4u * 4u * 16u },  // 2D BC5 (Texture2D in the HLSL)
+		{ "LandLodDetail", 0x0DE1, 0x8058, 0x1908, 0x1401, 16, 16, 1, 16u * 16u * 4u },  // 2D RGBA8
 		{ "CubeMap", 0x8513, 0x8058, 0x1908, 0x1401, 8, 8, 6, 6u * 8u * 8u * 4u },  // cube RGBA8
 	};
 	GLuint cpTex[12] = {};
@@ -617,7 +617,12 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			std::vector<unsigned char> b( n * ( c.dtype == 0x1401 ? 1u : 4u ) );
 			for ( std::size_t i = 0; i < n; i++ ) {
 				const std::size_t t = i / static_cast<std::size_t>( comps ), ch = i % static_cast<std::size_t>( comps );
-				if ( c.dtype == 0x1401 )
+				if ( k == 0 ) {  // the LUT: a smooth grade (each channel a mix of two axes), as the app's; a texel noise LUT would magnify
+					// the twins' last-bit input differences past the bound
+					const std::size_t x = t % 16u, y = ( t / 16u ) % 16u, z = t / 256u;
+					const std::size_t a = ch == 0 ? x : ch == 1 ? y : ch == 2 ? z : 15u, e = ch == 0 ? y : ch == 1 ? z : ch == 2 ? x : 15u;
+					b[i] = static_cast<unsigned char>( ( 255u * ( 3u * a + 2u * e ) ) / 75u );
+				} else if ( c.dtype == 0x1401 )
 					b[i] = static_cast<unsigned char>( ( t * 37u + ch * 91u + std::size_t( k ) * 11u ) % 256u );
 				else if ( c.dtype == 0x1406 ) {
 					const float v = ( k == 1 ? 0.25f : 1.0f ) * float( ( t * 7u + ch * 13u + std::size_t( k ) ) % 17u ) / 16.0f;
@@ -1577,14 +1582,13 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 	}
 	if ( kind == 9 ) {  // lane VKFLIGHT12: a format no twin takes (RGB10_A2 on LandLodDetail) must refuse the draw, naming it
 		GLuint bad = 0;
-		const std::vector<unsigned char> bb( 16u * 16u * 4u * 2u, 128 );
+		const std::vector<unsigned char> bb( 16u * 16u * 4u, 128 );
 		glGenTextures( 1, &bad );
-		glBindTexture( 0x8C1A, bad );
-		if ( texImage3D )
-			texImage3D( 0x8C1A, 0, 0x8059, 16, 16, 2, 0, 0x1908, 0x1401, bb.data() );  // RGB10_A2
-		glTexParameteri( 0x8C1A, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
-		glTexParameteri( 0x8C1A, 0x813D, 0 );
-		glBindTexture( 0x8C1A, 0 );
+		glBindTexture( GL_TEXTURE_2D, bad );
+		glTexImage2D( GL_TEXTURE_2D, 0, 0x8059, 16, 16, 0, 0x1908, 0x1401, bb.data() );  // RGB10_A2
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+		glTexParameteri( GL_TEXTURE_2D, 0x813D, 0 );
+		glBindTexture( GL_TEXTURE_2D, 0 );
 		const GLuint keep = cpTex[10];
 		cpTex[10] = cpUnit[10] >= 0 ? bad : 0;
 		std::string rw;

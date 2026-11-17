@@ -1538,10 +1538,21 @@ std::uintptr_t objCellCopyTwin( GlProc gp, const ObjBlTexUnit & u, int red, std:
 		for ( int l = 0, lw = 0; !immLevels && l < 16 && ( lv( u.glTex, l, 0x1000, &lw ), lw > 0 ); l++ )
 			levels = l + 1;
 	}
+	/* lane VKFLIGHT12: a format sharedTarget takes (vkFormatOf), else a BC 2D / 2D array (the land LOD chunks' DDS) through farTwin;
+	 * any other format refuses, named */
+	bool dep = false;
+	const bool plain = vkFormatOf( GLenum( fmt ), dep ) != VK_FORMAT_UNDEFINED;
+	const FcFormat fc = plain ? FcFormat { VK_FORMAT_UNDEFINED, 0, 0, false } : fcFormat( GLenum( fmt ) );
+	if ( !plain && ( fc.fmt == VK_FORMAT_UNDEFINED || !fc.block || type == 1 ) ) {
+		char hx[16];
+		std::snprintf( hx, sizeof( hx ), "0x%X", unsigned( fmt ) );
+		return why = std::string( "GL format " ) + hx + " has no copy twin", 0;
+	}
 	const std::uintptr_t key = ( std::uintptr_t( 0xC07 ) << 40 ) | std::uintptr_t( u.glTex );
 	unsigned twin = 0;
 	const std::uint64_t gen0 = sharedGen();
-	if ( !sharedTarget( key, type, w, h, type ? d : 1, unsigned( fmt ), twin, why, levels ) || !twin )
+	if ( !( plain ? sharedTarget( key, type, w, h, type ? d : 1, unsigned( fmt ), twin, why, levels )
+			: farTwin( key, type, w, h, type ? d : 1, unsigned( fmt ), twin, why, levels ) ) || !twin )
 		return 0;
 	const std::uint64_t gen = sharedGen();
 	/* lane VKWATER5: a twin made here moves sharedGen(), which made every copy taken earlier this frame read as stale and copied
@@ -1560,15 +1571,18 @@ std::uintptr_t objCellCopyTwin( GlProc gp, const ObjBlTexUnit & u, int red, std:
 	switch ( s ? s->fmt : VK_FORMAT_UNDEFINED ) {
 	case VK_FORMAT_R32G32B32A32_SFLOAT: case VK_FORMAT_R32G32B32A32_SINT: case VK_FORMAT_R32G32B32A32_UINT: px = 16; break;
 	case VK_FORMAT_R16G16B16A16_SFLOAT: case VK_FORMAT_R32G32_SFLOAT: case VK_FORMAT_R32G32_UINT: case VK_FORMAT_D32_SFLOAT_S8_UINT: px = 8; break;
+	case VK_FORMAT_R16G16B16A16_UINT: px = 8; break;  // lane VKFLIGHT12
 	case VK_FORMAT_D16_UNORM: case VK_FORMAT_R8G8_UNORM: px = 2; break;
 	case VK_FORMAT_R8_UNORM: case VK_FORMAT_R8_UINT: px = 1; break;
 	default: break;
 	}
 	for ( int l = 0; l < levels; l++ ) {
 		const int lw = std::max( w >> l, 1 ), lh = std::max( h >> l, 1 ), ld = type == 1 ? std::max( d >> l, 1 ) : type == 2 ? d : 1;
-		const int x0 = red == 1 && lw > 1 ? 1 : 0;
+		const int step = fc.block ? 4 : 1;  // red 1: one texel on, one block on a BC twin
+		const int x0 = red == 1 && lw > step ? step : 0;
 		g.copyImageSubData( u.glTex, u.glTarget, l, x0, 0, 0, twin, u.glTarget, l, 0, 0, 0, lw - x0, lh, ld );
-		bytes += std::uint64_t( lw ) * std::uint64_t( lh ) * std::uint64_t( ld ) * std::uint64_t( px );
+		bytes += fc.block ? std::uint64_t( ( lw + 3 ) / 4 ) * std::uint64_t( ( lh + 3 ) / 4 ) * std::uint64_t( ld ) * std::uint64_t( fc.block )
+			: std::uint64_t( lw ) * std::uint64_t( lh ) * std::uint64_t( ld ) * std::uint64_t( px );
 	}
 	opS().copyMemo[u.glTex] = sharedGen();  // a twin made above bumped it
 	ObjBlRunStat & rs = opS().st;
@@ -1584,6 +1598,13 @@ static bool objCopyTwinName( const std::string & n, int twin )
 {
 	if ( n == "cellAo" || n == "cellAoDecal" || n == "cellSsr" )
 		return true;
+	// lane VKFLIGHT12: the frame inputs the flight's opaque pass refused ("no twin"): image space (LUT, bloom), aerial perspective,
+	// contact shadows, refraction, the water-info tables, the land LOD arrays (the env cube: objCubeCopyTwin)
+	static const char * const kFrame[] = { "cellIsLut", "cellIsBloom", "atApTex", "ussContactMap", "RefractionSrc", "waterInfoIndex",
+		"waterInfoAtlas", "waterInfoBodies", "LandLodDiff", "LandLodOuter", "LandLodNoise", "LandLodDetail" };
+	for ( const char * k : kFrame )
+		if ( n == k )
+			return true;
 	return twin >= 7 && ( n == "fxDepth" || n == "airTerr" || n == "cellGiAir" || n == "volEnvHist" );
 }
 
@@ -1739,9 +1760,22 @@ bool objBlBindUnits(GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st,
 					continue;
 				}
 				st.copied++;
+				if ( !sharedFind( key ) ) {  // lane VKFLIGHT12: a BC copy twin (farTwin: 2D or 2D array)
+					const Shared * ft = farTwinFind( key );
+					if ( !ft || u.dim != 1 || bool( u.arrayed ) != ( ft->type == 2 ) ) {
+						st.misfit++;
+						if ( st.misfitWhy.empty() )
+							st.misfitWhy = u.name + ": its BC copy twin is no view of this binding";
+						continue;
+					}
+					d.images.emplace_back( u.binding, key );
+					st.shared++;
+					continue;
+				}
 			}
-			// lane VKOBJ5 round 5: the particles' CubeMap (a plain cube) through its plain-cube copy twin
-			if ( !key && d.twin == kObjTwinPfx && u.dim == 3 && !u.arrayed ) {
+			// lane VKOBJ5 round 5: the particles' CubeMap (a plain cube) through its plain-cube copy twin; lane VKFLIGHT12: every
+			// twin's CubeMap (the cell's env cube)
+			if ( !key && ( d.twin == kObjTwinPfx || ( u.name == "CubeMap" && d.copyRed != 2 ) ) && u.dim == 3 && !u.arrayed ) {
 				key = objCubeCopyTwin( gp, u, w );
 				if ( !key ) {
 					st.misfit++;
@@ -3922,6 +3956,10 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 						if ( ft && ft->type == 4 ) {  // lane VKOBJ5: a plain-cube copy twin (objCubeCopyTwin)
 							if ( b.dim != 3 || b.arrayed || !( view = ft->view ) )
 								return why = where + ": the cube twin is no cube view of this binding", false;
+							st.twins++;
+						} else if ( ft && ( key >> 40 ) == 0xC07u ) {  // lane VKFLIGHT12: a BC copy twin (objCellCopyTwin via farTwin)
+							if ( b.dim != 1 || bool( b.arrayed ) != ( ft->type == 2 ) || !( view = ft->view ) )
+								return why = where + ": the BC copy twin is no view of this binding", false;
 							st.twins++;
 						} else if ( ft ) {  // lane VKWATER3: a texture cache twin (2D, its swizzle)
 							VkFormat fmt = VK_FORMAT_UNDEFINED;

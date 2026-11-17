@@ -369,7 +369,7 @@ bool shadeBuild( const std::string & spvDir, std::string & why )
 
 /* lane VKOBJ4 step 6: GL's texture units as set 0 (objBlBindUnits) for the CSM twin. A GL program binds csmMap (a shared
  * 2D array, DEPTH_COMPONENT16, compare LEQUAL, as sunshadow makes it), volTex (a shared 3D, as the air volume) and
- * ussContactMap (GL's own 2D) on their units. BAR: 2 shared images on the twin's csmMap / volTex bindings, 1 GL-only,
+ * cellSsgi (GL's own 2D; was ussContactMap until VKFLIGHT12 gave it a copy twin) on their units. BAR: 2 shared images on the twin's csmMap / volTex bindings, 1 GL-only,
  * 0 misfits, the csmMap sampler GL's compare state; prep writes both images and GL's samplers; the run crosses.
  * Reds (each must FAIL): swap (the two shared textures on each other's unit), fit (the CSM given to volTex's binding
  * straight to prep), cmp (the CSM's compare mode off in GL). */
@@ -450,10 +450,10 @@ bool unitsBuild( const std::string & spvDir, std::string & why )
 	ux.textureStorage2D( ux.own, 1, 0x8058, 8, 8 );
 	const std::string vs = "#version 460 core\nvoid main() { gl_Position = vec4( 0.0 ); }\n";
 	const std::string fs = "#version 460 core\nlayout ( binding = 3 ) uniform sampler2DArrayShadow csmMap;\n"
-		"layout ( binding = 4 ) uniform sampler3D volTex;\nlayout ( binding = 5 ) uniform sampler2D ussContactMap;\n"
+		"layout ( binding = 4 ) uniform sampler3D volTex;\nlayout ( binding = 5 ) uniform sampler2D cellSsgi;\n"
 		"layout ( binding = 6 ) uniform samplerCubeArrayShadow cellShadow;\n"
 		"layout ( location = 0 ) out vec4 o;\nvoid main() { o = vec4( texture( csmMap, vec4( 0.5, 0.5, 0.0, 0.5 ) ) + texture( volTex, vec3( 0.5 ) ).x"
-		" + texture( ussContactMap, vec2( 0.5 ) ).x + texture( cellShadow, vec4( 1.0, 0.0, 0.0, 1.0 ), 0.5 ) ); }\n";
+		" + texture( cellSsgi, vec2( 0.5 ) ).x + texture( cellShadow, vec4( 1.0, 0.0, 0.0, 1.0 ), 0.5 ) ); }\n";
 	ux.prog = program( vs, fs );
 	if ( !ux.prog )
 		return why = "the units program did not link", false;
