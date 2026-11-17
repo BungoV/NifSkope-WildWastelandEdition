@@ -17,12 +17,34 @@
 // Lane VKFAR4: red 16 set 0's colour sheet twin dropped and remade, its copy keyed on the VkImage handle only (must FAIL
 // when the driver gave the remade twin the old handle value; "sheet handle reused: N" says whether it did). The fence red is
 // WW_VKFENCE_RED=farcards (VKWATER4's fenceDone): the whole gate must come back refused / GATE FAILED.
+// Lane VKFLIGHT16 (2026-11-17, notes/vkflight15/next.md steps 2-3): the RT GI keys, after the base arm (its lines unchanged).
+// Programs: impostor_cellinstez.frag under the all-on key (RT: FOGLEAK + RESTIR + RTDDGI + RTDDGI_CASCADES, twin v 1) and the
+// DG key (FOGLEAK + RTDDGI + RTDDGI_CASCADES, twin v 2), farcards_prep.py's prog_rt / prog_dg; the same cards, sets and frame.
+// RT inputs are the app's shared names (vkrtbuf.h): cellRestir (RG32F, W x H: ratio, linear depth) and cellDdgiAtlas (RGBA32F,
+// 193 texels a probe) by rtBufShare, cellGiHalf / cellGiHalfKey (W x H RGBA32F) by rtImgShare, owners always fresh; GL binds
+// THOSE names. Seeding: one DDGI cascade (9 x 7 x 8) sized over the cards' model-space centres, the atlas as farlodrtdraw's;
+// the ratio from a side rng where GL's cards cover a pixel's sample 0 (D = GL's linear depth there), 1e6 elsewhere; cellDdgiCount
+// 1, cellGiLoop8 8, cellGiSky 1, cellExtDalc 1, cellGiAmb 1. The gi-half key: GL's own lit normal (debugChannel 13, view space,
+// turned into the model) and depth at each pixel's sample 0, packed as cellGiKeyNormal reads it; cellGiHalf from a side rng.
+// Bar (set before the first run, never widened; the base arm's judge and bar): per key, GL covers >= 1000 samples with >= 1000
+// distinct colours; GL probes cellRestirOn 0 (RT), cellDdgiOn 0, and (gi-half arm) cellGiHalfOn 0 and cellGiHalf reseeded each
+// move >= 20 % of GL's covered samples; key >= 1000 texels with >= 90 % unit normals; the clean runs (red 0, gi-half red 0, and
+// gi-half red 0 again after its reds) BOUND or EXACT. Reds (each must FAIL; a refused run is not reached = gate FAIL): restir
+// (RT key: the shared ratio rewritten 1.05 - ratio after GL drew), atlas (the shared atlas shifted one texel after GL drew),
+// gihalf (the shared cellGiHalf replaced by the reseeded one after GL drew), gikey (the shared key cleared to w = -1 after GL
+// drew). Every rewrite is put back after the Vulkan run.
 // Last line `FARCARDS GATE OK` or `FARCARDS GATE FAILED`.
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
 
 #include <random>
+#include <functional>
+#include <set>
+#include <utility>
+
+#include "features/vkframe/vkrtbuf.h"
+#include "features/vkframe/vkfarcardsrt_tables.h"
 
 namespace farc
 {
@@ -206,8 +228,11 @@ int main( int argc, char ** argv )
 	glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
 	const GLuint pUnpack = program( kTriVs, kUnpackFs, "unpack" ), pSlab = program( kTriVs, kSlabFs, "slab" ),
 		pReveal = program( kTriVs, kRevealFs, "reveal" ), pDepth = program( kTriVs, kDepthFs, "depth" );
-	const GLuint pCards = program( readFile( dir + "/prog.vert.glsl" ), readFile( dir + "/prog.frag.glsl" ), "impostor_cellinstez" );
-	if ( !pUnpack || !pSlab || !pReveal || !pDepth || !pCards )
+	GLuint pCards = program( readFile( dir + "/prog.vert.glsl" ), readFile( dir + "/prog.frag.glsl" ), "impostor_cellinstez" );
+	const GLuint pBase = pCards;  // lane VKFLIGHT16: pCards is the key the lambdas draw / gather with
+	const GLuint pRt = program( readFile( dir + "/prog.vert.glsl" ), readFile( dir + "/prog_rt.frag.glsl" ), "impostor_cellinstez RT" ),
+		pDg = program( readFile( dir + "/prog.vert.glsl" ), readFile( dir + "/prog_dg.frag.glsl" ), "impostor_cellinstez DG" );
+	if ( !pUnpack || !pSlab || !pReveal || !pDepth || !pCards || !pRt || !pDg )
 		return fatal( "GL programs" );
 	std::vector<int> jv;
 	if ( !readJob( dir + "/job.txt", jv, 2 ) )
@@ -475,16 +500,16 @@ int main( int argc, char ** argv )
 
 	// ---- every sampler its own unit (from 20; unit 15 is the unpack's), the textures bound by name
 	std::map<std::string, int> unitOf;
-	{
-		f.useProgram( pCards );
+	auto assignUnits = [&]( GLuint p, std::map<std::string, int> & into ) {
+		f.useProgram( p );
 		GLint n = 0;
-		f.getProgramiv( pCards, fActiveUnis, &n );
+		f.getProgramiv( p, fActiveUnis, &n );
 		int next = 20;
 		for ( GLint i = 0; i < n; i++ ) {
 			char nm[256] = {};
 			GLint sz = 0;
 			GLenum ty = 0;
-			f.getActiveUniform( pCards, GLuint( i ), 256, nullptr, &sz, &ty, nm );
+			f.getActiveUniform( p, GLuint( i ), 256, nullptr, &sz, &ty, nm );
 			if ( !isSampler( ty ) )
 				continue;
 			std::string base( nm );
@@ -493,9 +518,13 @@ int main( int argc, char ** argv )
 			std::vector<GLint> units( size_t( std::max( sz, 1 ) ) );
 			for ( GLint & u : units )
 				u = next++;
-			f.uniform1iv( f.getUniformLocation( pCards, nm ), GLsizei( units.size() ), units.data() );
-			unitOf[base] = units[0];
+			f.uniform1iv( f.getUniformLocation( p, nm ), GLsizei( units.size() ), units.data() );
+			into[base] = units[0];
 		}
+		return next;
+	};
+	{
+		const int next = assignUnits( pCards, unitOf );
 		std::printf( "FARCARDS %zu samplers, units 20..%d\n", unitOf.size(), next - 1 );
 	}
 	auto bindNamed = [&]( const char * name, GLenum target, GLuint t ) {
@@ -510,6 +539,7 @@ int main( int argc, char ** argv )
 		float covBase, covFloor;
 	};
 	const PerSet per[2] = { { "colour0", "normal0", nullptr, 0, 0.0f, 0.0f }, { "colour1", "normal1", "mask1", 1, 160.0f / 255.0f, 0.3f } };
+	std::function<void()> rtHook;  // lane VKFLIGHT16: the RT keys' inputs and switches, after the pass-wide state
 	// the pass-wide state impostordraw.cpp sets before its set loop
 	auto bindPass = [&]() {
 		f.useProgram( pCards );
@@ -541,6 +571,8 @@ int main( int argc, char ** argv )
 			}
 		}
 		f.bindBufferBase( fUbo, 0, ubo );
+		if ( rtHook )
+			rtHook();
 	};
 	// one set's sheets and uniforms, as GL's loop sets them
 	auto setUp = [&]( int s ) {
@@ -665,6 +697,15 @@ int main( int argc, char ** argv )
 		"cellIsBloom", "cellIsLut", "cellLights", "cellShadow", "cellCtGbuf", "cellFarSlots", "cellFarRecs", "cellFarPlaced", "cellSsgi",
 		nullptr, "ussCloudMap", "cardSceneDepth", nullptr, nullptr, nullptr, "cellGi", "cellGiSlots", "cellRooms", "cellAoDecal" };
 	static const int kType[26] = { 1, 2, 0, 1, 0, 1, 5, 0, 1, 5, 3, 0, 5, 5, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0 };
+	// lane VKFLIGHT16: the RT / DG twins' layout (t0..t51; t47..t50 the sheets, from each set)
+	static const char * const kRtName[52] = { "cellLights", "cellGi", "cellGiSlots", "cellRooms", "cellIsLut", "cellIsBloom", "cellShadow",
+		"cellRestir", "cellFarSlots", "cellFarRecs", "cellFarPlaced", nullptr, nullptr, "cellCtGbuf", nullptr, "cellAoDecal", "cellSsgi",
+		nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "atApTex", "volTex", "volTile", "volAirTerr", "volAirRainMap",
+		"volAirNoise", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "cellGiHalf", "cellGiHalfKey", nullptr,
+		nullptr, "cellDdgiAtlas", "cellCluster", "cardSceneDepth", nullptr, nullptr, nullptr, nullptr, "ussCloudMap" };
+	static const int kRtType[52] = { 5, 1, 1, 1, 1, 0, 3, 5, 5, 5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 2, 0, 1, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 5, 0, 0, 0, 0, 0, 0 };
+	int curV = 0;  // 0 the base twin, 1 RT, 2 DG
 	static const char * const kPer[] = { "hasMaskSheet", "hasEmissiveSheet", "familyPbr", "emissiveScale", "cardMipCap", "cardCovFloor",
 		"cardCovBase", "cardBase", "frameTableBase", "cardLodTint", "cardLodStripe" };
 	std::vector<WwVkPresent::FxField> perSet;
@@ -672,6 +713,15 @@ int main( int argc, char ** argv )
 		for ( const char * n : kPer )
 			if ( std::strcmp( x.name, n ) == 0 )
 				perSet.push_back( x );
+	std::vector<WwVkPresent::FxField> perSetRt, perSetDg;
+	for ( const char * n : kPer ) {
+		for ( const WwVkPresent::FxField & x : WwVkPresent::kT_farcardsRt )
+			if ( std::strcmp( x.name, n ) == 0 )
+				perSetRt.push_back( x );
+		for ( const WwVkPresent::FxField & x : WwVkPresent::kT_farcardsDg )
+			if ( std::strcmp( x.name, n ) == 0 )
+				perSetDg.push_back( x );
+	}
 	// cardBase / frameTableBase live only in the vertex stage's table (packed per set through vsLoose)
 	for ( const char * n : kPer ) {
 		int hits = 0;
@@ -716,8 +766,22 @@ int main( int argc, char ** argv )
 		sc.sfail = fs[4];
 		sc.zfail = fs[5];
 		sc.zpass = fs[6];
-		for ( int k = 0; k < 26; k++ )
-			if ( kName[k] && !WwVkPresent::fcTexOf( &ga, pCards, kName[k], kType[k], t.tex[k], why ) ) {
+		const char * const * names = kName;
+		const int * types = kType;
+		int nTex = 26;
+		if ( curV ) {
+#ifdef WW_FARCARDS_RT
+			names = kRtName;
+			types = kRtType;
+			nTex = 52;
+			t.v = curV;
+#else
+			std::printf( "FARCARDS %s: no RT / DG twin route (FarCardsRun has no variant)\n", curV == 1 ? "RT" : "DG" );
+			return false;
+#endif
+		}
+		for ( int k = 0; k < nTex; k++ )
+			if ( names[k] && !WwVkPresent::fcTexOf( &ga, pCards, names[k], types[k], t.tex[k], why ) ) {
 				std::printf( "FARCARDS fcTexOf refused: %s\n", why.c_str() );
 				return false;
 			}
@@ -725,9 +789,13 @@ int main( int argc, char ** argv )
 			std::printf( "FARCARDS fcTexOf refused: %s\n", why.c_str() );
 			return false;
 		}
-		static std::uint8_t base[WwVkPresent::kT_farcardsBytes];
+		static std::uint8_t base[8192];
 		std::memset( base, 0, sizeof( base ) );
-		WwVkPresent::fxPack( &ga, pCards, WwVkPresent::kT_farcards, int( std::size( WwVkPresent::kT_farcards ) ), base );
+		const WwVkPresent::FxField * psT = curV == 1 ? WwVkPresent::kT_farcardsRt : curV == 2 ? WwVkPresent::kT_farcardsDg : WwVkPresent::kT_farcards;
+		const int psN = curV == 1 ? int( std::size( WwVkPresent::kT_farcardsRt ) )
+			: curV == 2 ? int( std::size( WwVkPresent::kT_farcardsDg ) ) : int( std::size( WwVkPresent::kT_farcards ) );
+		const std::vector<WwVkPresent::FxField> & perT = curV == 1 ? perSetRt : curV == 2 ? perSetDg : perSet;
+		WwVkPresent::fxPack( &ga, pCards, psT, psN, base );
 		for ( int s = 0; s < nSets; s++ ) {
 			setUp( s );
 			t.sets.emplace_back();
@@ -738,10 +806,10 @@ int main( int argc, char ** argv )
 					std::printf( "FARCARDS fcTexOf refused: %s\n", why.c_str() );
 					return false;
 				}
-			if ( s == 0 )
+			if ( s == 0 && !curV )
 				sheet0 = cs.sheet[0].tex;
 			std::memcpy( cs.loose, base, sizeof( cs.loose ) );
-			WwVkPresent::fxPack( &ga, pCards, perSet.data(), int( perSet.size() ), cs.loose );
+			WwVkPresent::fxPack( &ga, pCards, perT.data(), int( perT.size() ), cs.loose );
 			std::memset( cs.vsLoose, 0, sizeof( cs.vsLoose ) );
 			WwVkPresent::fxPack( &ga, pCards, WwVkPresent::kT_farcardsVs, int( std::size( WwVkPresent::kT_farcardsVs ) ), cs.vsLoose );
 			if ( gDump ) {
@@ -835,6 +903,376 @@ int main( int argc, char ** argv )
 	const WwVkPresent::FxStat st = WwVkPresent::takeFarCardsStat();
 	std::printf( "FARCARDS stat (reds): %d runs, %d failed (%s), drawing thread %.3f ms a run (max %.3f; includes the harness's hand-off "
 		"wait, not a frame cost)\n", st.runs, st.fails, st.failWhy.c_str(), st.runs ? st.cpuMs / st.runs : 0.0, st.maxMs );
+	// ---- lane VKFLIGHT16: the RT GI keys (header), after the base arm; the base arm's lines above are unchanged
+	{
+		using BufSub = void( WINAPI * )( GLenum, std::ptrdiff_t, std::ptrdiff_t, const void * );
+		using ClearTexImage = void( WINAPI * )( GLuint, GLint, GLenum, GLenum, const void * );
+		const auto bufSub = reinterpret_cast<BufSub>( wglGetProcAddress( "glBufferSubData" ) );
+		const auto clearTex = reinterpret_cast<ClearTexImage>( wglGetProcAddress( "glClearTexImage" ) );
+		auto bufWrite = [&]( GLuint buf, const void * data, size_t bytes ) {
+			f.bindBuffer( 0x8C2A, buf );
+			bufSub( 0x8C2A, 0, std::ptrdiff_t( bytes ), data );
+			f.bindBuffer( 0x8C2A, 0 );
+		};
+		const int fcDims[4] = { 9, 7, 8, 9 * 7 * 8 };
+		const size_t fcProbes = size_t( 9 * 7 * 8 ), fcAtlasN = 193 * fcProbes;
+		const size_t rsBytes = size_t( W ) * size_t( H ) * 8, atBytes = fcAtlasN * 16;
+		unsigned rsBuf = 0, rsTex = 0, atBuf = 0, atTex = 0, giTex[2] = { 0, 0 };
+		static char fcGiKeys[2];
+		auto giKeyOf = [&]( int slot ) { return reinterpret_cast<std::uintptr_t>( &fcGiKeys[slot] ); };
+		bool rtReady = bufSub && clearTex;
+		if ( rtReady && ( !WwVkPresent::rtBufShare( WwVkPresent::kRtBufRestir, 0x8230 /* GL_RG32F */, rsBytes, rsBuf, rsTex, why )
+			|| !WwVkPresent::rtBufShare( WwVkPresent::kRtBufDdgiAtlas, 0x8814 /* GL_RGBA32F */, atBytes, atBuf, atTex, why ) ) )
+			rtReady = false;
+		for ( int slot = 0; slot < 2 && rtReady; slot++ )
+			rtReady = WwVkPresent::rtImgShare( slot, giKeyOf( slot ), W, H, 0, 0, giTex[slot], why );
+		if ( !rtReady ) {
+			std::printf( "FARCARDS RT inputs not shared (%s): FAIL\n", bufSub && clearTex ? why.c_str() : "no glBufferSubData / glClearTexImage" );
+			ok = false;
+		} else {
+			// the owners (as rtddgicell.cpp / the ReSTIR step / ao.cpp register them): the gate writes the inputs itself, always fresh
+			WwVkPresent::rtBufOwner( WwVkPresent::kRtBufRestir, []( std::string & ) { return true; } );
+			WwVkPresent::rtBufOwner( WwVkPresent::kRtBufDdgiAtlas, []( std::string & ) { return true; } );
+			for ( int slot = 0; slot < 2; slot++ )
+				WwVkPresent::rtImgOwner( slot, []( std::string & ) { return true; } );
+			std::printf( "FARCARDS RT shared: cellRestir %zu bytes (texture %u), cellDdgiAtlas %zu bytes (texture %u), cellGiHalf texture %u, "
+				"cellGiHalfKey texture %u (%dx%d RGBA32F)\n", rsBytes, rsTex, atBytes, atTex, giTex[0], giTex[1], W, H );
+		}
+		// GL's depth at every sample (the reference frame's depth / stencil read as depth)
+		const GLuint unpD = tex2d( WS, H, fRgba32f, GL_RGBA, GL_FLOAT, nullptr, false );
+		const GLuint fbUnpD = fbo( GL_TEXTURE_2D, unpD, 0, 0 );
+		auto readDepth = [&]() {
+			std::vector<float> out( size_t( WS ) * size_t( H ) );
+			glBindTexture( fT2DMS, refDs );
+			glTexParameteri( fT2DMS, 0x90EA, GL_DEPTH_COMPONENT );
+			glBindTexture( fT2DMS, 0 );
+			f.bindFramebuffer( fFb, fbUnpD );
+			glViewport( 0, 0, WS, H );
+			drawState0();
+			f.useProgram( pUnpack );
+			bindUnit( 15, fT2DMS, refDs );
+			u1i( pUnpack, "src", 15 );
+			u1i( pUnpack, "S", S );
+			glDrawArrays( GL_TRIANGLES, 0, 3 );
+			glReadPixels( 0, 0, WS, H, fRed, GL_FLOAT, out.data() );
+			bindUnit( 15, fT2DMS, 0 );
+			return out;
+		};
+		// one DDGI cascade over the cards' model-space centres (200 units of border each side)
+		float lo[3] = { 1e30f, 1e30f, 1e30f }, hi[3] = { -1e30f, -1e30f, -1e30f };
+		for ( int i = 0; i < nCards; i++ )
+			for ( int k = 0; k < 3; k++ ) {
+				lo[k] = std::min( lo[k], cardData[size_t( i ) * 24 + size_t( k )] );
+				hi[k] = std::max( hi[k], cardData[size_t( i ) * 24 + size_t( k )] );
+			}
+		float step = 0.0f;
+		for ( int k = 0; k < 3; k++ )
+			step = std::max( step, ( hi[k] - lo[k] + 400.0f ) / float( fcDims[k] - 1 ) );
+		const float org[4] = { lo[0] - 200.0f, lo[1] - 200.0f, lo[2] - 200.0f, step }, stp[4] = { step, step, step, 0.0f };
+		std::printf( "FARCARDS RT cascade: origin (%.1f, %.1f, %.1f), step %.2f, 9 x 7 x 8 probes\n", org[0], org[1], org[2], step );
+		auto setI = [&]( const char * n, int v ) {
+			const GLint l = f.getUniformLocation( pCards, n );
+			if ( l >= 0 )
+				f.uniform1i( l, v );
+		};
+		auto set4f = [&]( const char * n, const float * v ) {
+			const GLint l = f.getUniformLocation( pCards, n );
+			if ( l >= 0 )
+				f.uniform4fv( l, 1, v );
+		};
+		int swRestir = 1, swDdgi = 1, swGiHalf = 0, dbgCh = 0;
+		// after bindPass's uni.txt (it sets cellGiAmb 0 / cellExtDalc 0 every pass): the RT inputs and switches
+		rtHook = [&]() {
+			f.useProgram( pCards );
+			bindNamed( "cellRestir", 0x8C2A, rsTex );
+			bindNamed( "cellDdgiAtlas", 0x8C2A, atTex );
+			bindNamed( "cellGiHalf", GL_TEXTURE_2D, giTex[0] );
+			bindNamed( "cellGiHalfKey", GL_TEXTURE_2D, giTex[1] );
+			const float rsz[4] = { float( W ), float( H ), 0.0f, 0.0f }, rect[4] = { 0.0f, 0.0f, float( W ), float( H ) }, one = 1.0f;
+			set4f( "cellRestirSize", rsz );
+			set4f( "cellDdgiOrigin", org );
+			set4f( "cellDdgiStep", stp );
+			set4f( "cellDdgiCOrigin", org );
+			set4f( "cellDdgiCStep", stp );
+			for ( const char * n : { "cellDdgiDims", "cellDdgiCDims" } ) {
+				const GLint l = f.getUniformLocation( pCards, n );
+				if ( l >= 0 )
+					f.uniform4iv( l, 1, fcDims );
+			}
+			setI( "cellDdgiCBase", 0 );
+			setI( "cellDdgiCount", 1 );
+			setI( "cellGiLoop8", 8 );
+			setI( "cellGiSky", 1 );
+			setI( "cellExtDalc", 1 );
+			setI( "cellGiAmb", 1 );
+			setI( "cellRestirOn", swRestir );
+			setI( "cellDdgiOn", swDdgi );
+			setI( "cellGiHalfOn", swGiHalf );
+			setI( "cellPass", 0 );
+			setI( "cellProbe", 0 );
+			set4f( "cellGiHalfRect", rect );
+			const GLint ls = f.getUniformLocation( pCards, "cellGiHalfScale" );
+			if ( ls >= 0 )
+				f.uniform1fv( ls, 1, &one );
+			setI( "debugChannel", dbgCh );
+		};
+		// GL's reference of the current key: the frame, the cards (depth at every sample if asked), reveal, depth pass
+		auto glRef = [&]( std::vector<std::uint16_t> & a, std::vector<std::uint16_t> & b, std::vector<std::uint16_t> & c, std::vector<float> * d ) {
+			before( fbRef );
+			bindPass();
+			cardState( fbRef );
+			ex.bindVertexArray( vao );
+			for ( int s = 0; s < nSets; s++ ) {
+				setUp( s );
+				ex.drawElementsInstanced( GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, nullptr, setCount[s] );
+			}
+			ex.bindVertexArray( 0 );
+			drawState0();
+			glDepthFunc( GL_LESS );
+			const bool glOk = glGetError() == GL_NO_ERROR;
+			if ( d )
+				*d = readDepth();
+			a = readSamples( refCol );
+			reveal( fbRef );
+			b = readSamples( refCol );
+			depthDraw( fbRef );
+			c = readSamples( refCol );
+			return glOk;
+		};
+		auto coverOf = [&]( const std::vector<std::uint16_t> & a, size_t & distinct ) {
+			std::set<std::uint64_t> cols;
+			size_t n = 0;
+			for ( size_t i = 0; i + 3 < a.size(); i += 4 ) {
+				if ( a[i] == bg[i] && a[i + 1] == bg[i + 1] && a[i + 2] == bg[i + 2] && a[i + 3] == bg[i + 3] )
+					continue;
+				n++;
+				cols.insert( std::uint64_t( a[i] ) | std::uint64_t( a[i + 1] ) << 16 | std::uint64_t( a[i + 2] ) << 32 | std::uint64_t( a[i + 3] ) << 48 );
+			}
+			distinct = cols.size();
+			return n;
+		};
+		auto movedOf = [&]( const std::vector<std::uint16_t> & a, const std::vector<std::uint16_t> & p ) {
+			size_t n = 0;
+			for ( size_t i = 0; i + 3 < a.size() && i + 3 < p.size(); i += 4 ) {
+				const bool cov = a[i] != bg[i] || a[i + 1] != bg[i + 1] || a[i + 2] != bg[i + 2] || a[i + 3] != bg[i + 3];
+				if ( cov && ( a[i] != p[i] || a[i + 1] != p[i + 1] || a[i + 2] != p[i + 2] || a[i + 3] != p[i + 3] ) )
+					n++;
+			}
+			return n;
+		};
+		const std::map<std::string, int> baseUnits = unitOf;
+		const struct
+		{
+			const char * tag;
+			int v;
+			GLuint p;
+		} keys[2] = { { "RT", 1, pRt }, { "DG", 2, pDg } };
+		std::mt19937 rtRng( 20261117u );
+		for ( const auto & k : keys ) {
+			if ( !rtReady )
+				break;
+			std::map<std::string, int> ku;
+			const int kn = assignUnits( k.p, ku );
+			const bool inOk = ku.count( "cellDdgiAtlas" ) && ku.count( "cellGiHalf" ) && ku.count( "cellGiHalfKey" );
+			const bool rsOk = ( ku.count( "cellRestir" ) != 0 ) == ( k.v == 1 );
+			std::printf( "FARCARDS %s: %zu samplers, units 20..%d; cellDdgiAtlas / cellGiHalf / cellGiHalfKey %s, cellRestir %s: %s\n", k.tag, ku.size(),
+				kn - 1, inOk ? "read" : "NOT all read", ku.count( "cellRestir" ) ? "read" : "not read", inOk && rsOk ? "OK" : "FAIL" );
+			if ( !inOk || !rsOk ) {
+				ok = false;
+				continue;
+			}
+			pCards = k.p;
+			curV = k.v;
+			unitOf = ku;
+			swRestir = 1, swDdgi = 1, swGiHalf = 0, dbgCh = 0;
+			// the atlas: irradiance seeded, distance pairs far, probe states usable / missing in turn (farlodrtdraw's)
+			std::vector<float> atlas( fcAtlasN * 4 );
+			{
+				std::uniform_real_distribution<float> u( 0.05f, 1.0f );
+				for ( float & x : atlas )
+					x = u( rtRng );
+				for ( size_t t = 64 * fcProbes; t < 192 * fcProbes; t++ ) {
+					atlas[4 * t] = atlas[4 * t + 2] = 2000.0f;
+					atlas[4 * t + 1] = atlas[4 * t + 3] = 4.0e6f;
+				}
+				for ( size_t t = 192 * fcProbes; t < 193 * fcProbes; t++ ) {
+					atlas[4 * t] = atlas[4 * t + 1] = atlas[4 * t + 2] = 0.0f;
+					atlas[4 * t + 3] = ( t - 192 * fcProbes ) % 2 ? 1.0f : 2.0f;
+				}
+				bufWrite( atBuf, atlas.data(), atBytes );
+			}
+			// the ratio: GL's depth first (depth does not read the ratio), then (ratio, D) where the cards cover a pixel's sample 0
+			before( fbRef );
+			const std::vector<float> bgD = readDepth();
+			std::vector<std::uint16_t> gA, gB, gC;
+			std::vector<float> preD;
+			bool glOk = glRef( gA, gB, gC, &preD );
+			std::vector<float> restir( size_t( W ) * size_t( H ) * 2 );
+			int onCards = 0;
+			{
+				std::uniform_real_distribution<float> u( 0.05f, 1.0f );
+				for ( int y = 0; y < H; y++ )
+					for ( int x = 0; x < W; x++ ) {
+						const size_t s0 = size_t( y ) * size_t( WS ) + size_t( x ) * size_t( S ), t = size_t( y ) * size_t( W ) + size_t( x );
+						restir[2 * t] = u( rtRng );
+						restir[2 * t + 1] = 1.0e6f;
+						if ( preD[s0] != bgD[s0] ) {
+							restir[2 * t + 1] = proj[14] / ( 2.0f * preD[s0] - 1.0f + proj[10] );
+							onCards++;
+						}
+					}
+				bufWrite( rsBuf, restir.data(), rsBytes );
+			}
+			glOk = glRef( gA, gB, gC, nullptr ) && glOk;
+			size_t distinct = 0;
+			const size_t cov = coverOf( gA, distinct );
+			const bool covOk = glOk && cov >= 1000 && distinct >= 1000;
+			std::printf( "FARCARDS %s GL: %zu samples covered, %zu distinct colours (want >= 1000 each), cellRestir ratio over %d of %d pixels%s: %s\n",
+				k.tag, cov, distinct, onCards, W * H, glOk ? "" : ", a GL error", covOk ? "OK" : "FAIL" );
+			if ( !covOk )
+				ok = false;
+			auto probe = [&]( const char * what, const std::vector<std::uint16_t> & ref, const std::function<void( bool )> & flip ) {
+				std::vector<std::uint16_t> pA, pB, pC;
+				flip( true );
+				const bool ran = glRef( pA, pB, pC, nullptr );
+				flip( false );
+				size_t dn = 0;
+				const size_t c0 = coverOf( ref, dn ), mv = ran ? movedOf( ref, pA ) : 0;
+				const bool pOk = ran && c0 > 0 && mv * 5 >= c0;
+				std::printf( "FARCARDS %s probe %s: GL moves %zu of %zu covered samples (want >= 20 %%): %s\n", k.tag, what, mv, c0, pOk ? "OK" : "FAIL" );
+				if ( !pOk )
+					ok = false;
+			};
+			if ( k.v == 1 )
+				probe( "cellRestirOn 0", gA, [&]( bool on ) { swRestir = on ? 0 : 1; } );
+			probe( "cellDdgiOn 0", gA, [&]( bool on ) { swDdgi = on ? 0 : 1; } );
+			auto vkCase = [&]( const char * what, bool red, const std::vector<std::uint16_t> & rA, const std::vector<std::uint16_t> & rB,
+				const std::vector<std::uint16_t> & rC ) {
+				std::vector<std::uint16_t> a, b, c;
+				if ( !runVk( 0, a, b, c ) ) {
+					std::printf( "FARCARDS %s %s: the Vulkan run failed (%s): FAIL\n", k.tag, what, red ? "the red not reached" : "no picture" );
+					ok = false;
+					return;
+				}
+				const Verdict v = judge( bg, a, rA, b, rB, c, rC );
+				const bool pass = red ? !v.ok() : v.ok();
+				std::printf( "FARCARDS %s %s: %s (%zu covered, %zu halves differ, %zu flips, %zu past 1 ulp, max %d ulp, stencil differs on %zu, "
+					"depth on %zu)%s\n", k.tag, what, v.word(), v.covered, v.diff, v.flips, v.past1, v.maxu, v.stencil, v.depth,
+					red && !pass ? ": PASSED, the gate cannot see it" : "" );
+				if ( !pass )
+					ok = false;
+			};
+			vkCase( "red 0", false, gA, gB, gC );
+			if ( k.v == 1 ) {	// red restir: the shared ratio rewritten after GL drew
+				std::vector<float> rs2( restir );
+				for ( size_t t = 0; t < rs2.size(); t += 2 )
+					rs2[t] = 1.05f - rs2[t];
+				bufWrite( rsBuf, rs2.data(), rsBytes );
+				vkCase( "red restir", true, gA, gB, gC );
+				bufWrite( rsBuf, restir.data(), rsBytes );
+			}
+			{	// red atlas: the shared atlas one texel on, after GL drew
+				std::vector<float> at2( atlas.size(), 0.0f );
+				std::memcpy( at2.data() + 4, atlas.data(), ( atlas.size() - 4 ) * sizeof( float ) );
+				bufWrite( atBuf, at2.data(), atBytes );
+				vkCase( "red atlas", true, gA, gB, gC );
+				bufWrite( atBuf, atlas.data(), atBytes );
+			}
+			// the gi-half arm: GL's own lit normal (view space, turned into the model) and depth make the key
+			std::vector<std::uint16_t> nC, nB, nCc;
+			std::vector<float> nD;
+			dbgCh = 13;
+			glRef( nC, nB, nCc, &nD );
+			dbgCh = 0;
+			size_t written = 0, unitN = 0;
+			std::vector<float> keyT( size_t( W ) * size_t( H ) * 4u, 0.0f );
+			for ( int y = 0; y < H; y++ )
+				for ( int x = 0; x < W; x++ ) {
+					const size_t s0 = size_t( y ) * size_t( WS ) + size_t( x ) * size_t( S ), t = 4 * ( size_t( y ) * size_t( W ) + size_t( x ) );
+					keyT[t + 3] = -1.0f;
+					if ( nD[s0] == bgD[s0] )
+						continue;
+					written++;
+					float nv[3], n[3], pv[3], P[3];
+					for ( int c = 0; c < 3; c++ )
+						nv[c] = 2.0f * h2f( nC[s0 * 4 + size_t( c )] ) - 1.0f;
+					if ( std::fabs( std::sqrt( nv[0] * nv[0] + nv[1] * nv[1] + nv[2] * nv[2] ) - 1.0f ) > 0.03f )
+						continue;	// not a normal: no surface there
+					unitN++;
+					const float D = proj[14] / ( 2.0f * nD[s0] - 1.0f + proj[10] );
+					const float xn = ( float( x ) + 0.5f ) / float( W ) * 2.0f - 1.0f, yn = ( float( y ) + 0.5f ) / float( H ) * 2.0f - 1.0f;
+					pv[0] = xn * D / proj[0];
+					pv[1] = yn * D / proj[5];
+					pv[2] = -D;
+					toModel( pv, P );
+					dirToModel( nv, n );
+					keyT[t] = P[0];
+					keyT[t + 1] = P[1];
+					keyT[t + 2] = P[2];
+					const float a = std::fabs( n[0] ) + std::fabs( n[1] ) + std::fabs( n[2] );
+					float ox = n[0] / a, oy = n[1] / a;
+					if ( n[2] < 0.0f ) {
+						const float tx = ( 1.0f - std::fabs( oy ) ) * ( ox >= 0.0f ? 1.0f : -1.0f ), ty = ( 1.0f - std::fabs( ox ) ) * ( oy >= 0.0f ? 1.0f : -1.0f );
+						ox = tx, oy = ty;
+					}
+					keyT[t + 3] = std::floor( ( ox * 0.5f + 0.5f ) * 2047.0f + 0.5f ) * 2048.0f + std::floor( ( oy * 0.5f + 0.5f ) * 2047.0f + 0.5f );
+				}
+			const bool keyOk = written >= 1000 && unitN * 10 >= written * 9;
+			std::printf( "FARCARDS %s gi-half key: %zu texels on the cards, %zu decode to a unit normal (want >= 1000, >= 90 %%): %s\n", k.tag, written,
+				unitN, keyOk ? "OK" : "FAIL" );
+			if ( !keyOk )
+				ok = false;
+			std::vector<float> giT( size_t( W ) * size_t( H ) * 4u ), giT2( giT.size() );
+			{
+				std::mt19937 giRng( 20261131u );	// a side rng: the other seeding stays as it was
+				std::uniform_real_distribution<float> gu( 0.05f, 1.0f );
+				for ( float & g : giT )
+					g = gu( giRng );
+				for ( float & g : giT2 )
+					g = gu( giRng );
+			}
+			const GLuint gPlain = tex2d( W, H, fRgba32f, GL_RGBA, GL_FLOAT, giT.data(), false ),
+				gPlain2 = tex2d( W, H, fRgba32f, GL_RGBA, GL_FLOAT, giT2.data(), false ),
+				kPlain = tex2d( W, H, fRgba32f, GL_RGBA, GL_FLOAT, keyT.data(), false );
+			auto toShared = [&]( GLuint src, int slot ) {
+				f.copyImageSubData( src, GL_TEXTURE_2D, 0, 0, 0, 0, giTex[slot], GL_TEXTURE_2D, 0, 0, 0, 0, W, H, 1 );
+			};
+			toShared( gPlain, 0 );
+			toShared( kPlain, 1 );
+			swGiHalf = 1;
+			std::vector<std::uint16_t> hA, hB, hC;
+			if ( !glRef( hA, hB, hC, nullptr ) ) {
+				std::printf( "FARCARDS %s gi-half GL reference: a GL error: FAIL\n", k.tag );
+				ok = false;
+			}
+			probe( "cellGiHalfOn 0", hA, [&]( bool on ) { swGiHalf = on ? 0 : 1; } );
+			probe( "cellGiHalf reseeded", hA, [&]( bool on ) { toShared( on ? gPlain2 : gPlain, 0 ); } );
+			vkCase( "gi-half red 0", false, hA, hB, hC );
+			toShared( gPlain2, 0 );	// red gihalf: the shared cellGiHalf replaced after GL drew
+			vkCase( "red gihalf", true, hA, hB, hC );
+			toShared( gPlain, 0 );
+			const float miss[4] = { 0.0f, 0.0f, 0.0f, -1.0f };	// red gikey: the shared key all misses after GL drew
+			clearTex( giTex[1], 0, GL_RGBA, GL_FLOAT, miss );
+			vkCase( "red gikey", true, hA, hB, hC );
+			toShared( kPlain, 1 );
+			vkCase( "gi-half red 0 again", false, hA, hB, hC );
+			swGiHalf = 0;
+			const GLuint del[3] = { gPlain, gPlain2, kPlain };
+			glDeleteTextures( 3, del );
+		}
+		pCards = pBase;
+		curV = 0;
+		unitOf = baseUnits;
+		rtHook = nullptr;
+		if ( rtReady ) {
+			const WwVkPresent::FxStat rs = WwVkPresent::takeFarCardsStat();
+			std::printf( "FARCARDS stat (RT keys): %d runs, %d failed (%s)\n", rs.runs, rs.fails, rs.failWhy.c_str() );
+			WwVkPresent::rtBufDrop( WwVkPresent::kRtBufRestir );
+			WwVkPresent::rtBufDrop( WwVkPresent::kRtBufDdgiAtlas );
+			for ( int slot = 0; slot < 2; slot++ )
+				WwVkPresent::rtImgDrop( slot, giKeyOf( slot ) );
+		}
+	}
 	WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &volKey ) );
 	f.bindFramebuffer( fFb, 0 );
 	WwVkPresent::toneFrameDrop();

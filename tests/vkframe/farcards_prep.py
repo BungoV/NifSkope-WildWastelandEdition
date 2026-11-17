@@ -89,6 +89,11 @@ os.makedirs(d, exist_ok=True)
 FAR = os.path.join(FEAT, 'far-lod')
 write_src(os.path.join(d, 'prog.vert.glsl'), S.inject(S.expand(os.path.join(FAR, 'impostor_instez.vert')), ['WW_CELL_FOGLEAK']))
 write_src(os.path.join(d, 'prog.frag.glsl'), S.inject(S.expand(os.path.join(FAR, 'impostor_cellinstez.frag')), ['WW_CELL_FOGLEAK']))
+# lane VKFLIGHT16: the RT GI keys the app picks (impostor_cellinstez.prog under the all-on route), the vertex stage unchanged
+RT_KEYS = (('prog_rt.frag.glsl', ['WW_CELL_FOGLEAK', 'WW_CELL_RESTIR', 'WW_CELL_RTDDGI', 'WW_CELL_RTDDGI_CASCADES']),
+           ('prog_dg.frag.glsl', ['WW_CELL_FOGLEAK', 'WW_CELL_RTDDGI', 'WW_CELL_RTDDGI_CASCADES']))
+for dst, defs in RT_KEYS:
+    write_src(os.path.join(d, dst), S.inject(S.expand(os.path.join(FAR, 'impostor_cellinstez.frag')), defs))
 U = dict(j['uniforms'])
 U.update({
     # the card pass (impostordraw.cpp's pass-wide uniforms; the per-set ones and the view's are the harness's)
