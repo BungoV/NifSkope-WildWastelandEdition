@@ -884,6 +884,102 @@ int main( int argc, char ** argv )
 				if ( cs != kMain ? !fail : fail )
 					gateOk = false;
 			}
+			/* lane VKFLIGHT18 (frame time), the batch / cost arm (seed 1): kN draws of the twin, a crossing each (farLodRtRun, the
+			 * app before) vs queued (farLodRtQueue + farGroundFlush, the app now): crossings, CPU ms a draw, Vulkan's GPU ms a timed
+			 * crossing (fxWork timestamps, read at the next crossing). Bars: both match GL, queued EXACT vs a crossing each, queued
+			 * crossings = ceil( kN / kTwinBatchMax ) for kN draws, 0 lost. Red: queued and read before the flush must FAIL (the
+			 * queue draws nothing until its flush). Without WW_VK_FARLODRTQ (vkfarlodrt.inc) the arm FAILS. */
+			if ( seed == 1 ) {
+#ifdef WW_VK_FARLODRTQ
+				const int kN = 64, kind = k.v == 2 ? 22 : 21;
+				struct QImg
+				{
+					std::vector<std::uint16_t> c;
+					std::vector<float> d;
+					bool ran = true;
+					double ms = 0.0, gpuMs = 0.0;
+					int gpuN = 0, cross = 0, draws = 0, lost = 0;
+					std::string why;
+				};
+				// mode 0 a crossing each, 1 queued + flushed, 2 (red) queued, read before the flush
+				auto qRun = [&]( int mode ) {
+					QImg o;
+					before( fbFrame );
+					( void )WwVkPresent::takeFarLodRtDrawStat( k.v );
+					( void )WwVkPresent::takeFarLodRtBatchStat( k.v );
+					int miss = 0;
+					WwVkPresent::takeFxGpu( kind, o.gpuMs, o.gpuN, miss );
+					const double t0 = nowMs();
+					for ( int i = 0; i < kN; i++ ) {
+						drawState( fbFrame, scissor, k );
+						WwVkPresent::WaterRun r;
+						WwVkPresent::farLodRtStateOf( &gw, k.p, r, k.v );
+						r.w = W, r.h = H, r.color = fc, r.cmds = cmds, r.key = reinterpret_cast<std::uintptr_t>( twinKeys[ki] );
+						o.ran = ( mode ? WwVkPresent::farLodRtQueue( r, k.v, o.why ) : WwVkPresent::farLodRtRun( r, k.v, o.why ) ) && o.ran;
+						stateEnd( k );
+					}
+					if ( mode == 1 )
+						o.ran = WwVkPresent::farGroundFlush( o.why ) && o.ran;
+					o.ms = ( nowMs() - t0 ) / double( kN );
+					if ( mode == 2 ) {
+						o.c = readColor( fc );
+						o.d = readDepth( fds, true );
+						o.ran = WwVkPresent::farGroundFlush( o.why ) && o.ran;
+					}
+					runs++;
+					const WwVkPresent::FxStat ds = WwVkPresent::takeFarLodRtDrawStat( k.v );
+					const WwVkPresent::TwinBatchStat bs = WwVkPresent::takeFarLodRtBatchStat( k.v );
+					o.cross = mode ? bs.crossings : ds.runs;
+					o.draws = mode ? bs.draws : ds.runs;
+					o.lost = bs.lost;
+					if ( mode != 2 ) {
+						o.c = readColor( fc );
+						o.d = readDepth( fds, true );
+					}
+					WwVkPresent::takeFxGpu( kind, o.gpuMs, o.gpuN, miss );
+					return o;
+				};
+				const int wantCross = ( kN + farlod::kTwinBatchMax - 1 ) / farlod::kTwinBatchMax;
+				auto qArm = [&]( const char * what, const QImg & o, int mode ) {
+					if ( !o.ran ) {
+						std::printf( "FARLODRTDRAW %s batch %s: REFUSED (%s)\n", k.tag, what, o.why.c_str() );
+						gateOk = false;
+						return;
+					}
+					const Verdict v = judge( bgC, bgD, o.c, o.d, glC, glD );
+					const char * word = v.word();
+					const bool fail = std::strcmp( word, "FAIL" ) == 0;
+					const bool crossOk = mode == 0 ? o.cross == kN : ( o.cross == wantCross && o.draws == kN && !o.lost );
+					std::printf( "FARLODRTDRAW %s batch %s: %s covered %zu (both %zu, one side only %zu), colour %zu halves differ; %d crossings for "
+						"%d draws, %d lost, %.4f ms CPU a draw, GPU %.4f ms a timed crossing (%d timed)%s\n", k.tag, what, word, v.covered, v.both,
+						v.onlyOne, v.halvesDiff, o.cross, kN, o.lost, o.ms, o.gpuN ? o.gpuMs / o.gpuN : 0.0, o.gpuN,
+						mode == 2 ? ( fail ? " -> red FAILS as it must" : " -> red PASSES: the gate is blind" ) : crossOk ? "" : " -> NOT the crossings wanted" );
+					if ( mode == 2 ? !fail : ( fail || !crossOk ) )
+						gateOk = false;
+				};
+				const QImg singles = qRun( 0 );
+				qArm( "64 draws, a crossing each", singles, 0 );
+				const QImg queued = qRun( 1 );
+				qArm( "64 draws queued + flushed", queued, 1 );
+				size_t cd = 0, dd = 0;
+				for ( size_t i = 0; i < queued.c.size() && i < singles.c.size(); i++ )
+					cd += queued.c[i] != singles.c[i];
+				for ( size_t i = 0; i < queued.d.size() && i < singles.d.size(); i++ )
+					dd += queued.d[i] != singles.d[i];
+				const bool exact = !cd && !dd && !queued.c.empty() && queued.c.size() == singles.c.size() && queued.d.size() == singles.d.size();
+				std::printf( "FARLODRTDRAW %s batch queued vs a crossing each: %s (%zu colour halves, %zu depth samples differ)\n", k.tag,
+					exact ? "EXACT" : "DIFFER", cd, dd );
+				gateOk = gateOk && exact;
+				qArm( "red (queued, read before the flush)", qRun( 2 ), 2 );
+				std::printf( "FARLODRTDRAW %s batch cost for %d draws: a crossing each %d crossings, %.4f ms CPU a draw; queued %d crossings, "
+					"%.4f ms CPU a draw (%.1fx)\n", k.tag, kN, singles.cross, singles.ms, queued.cross, queued.ms,
+					queued.ms > 0.0 ? singles.ms / queued.ms : 0.0 );
+#else
+				std::printf( "FARLODRTDRAW %s batch: FAIL (no far LOD RT queue: farLodRtQueue / farLodRtRunN are not built, WW_VK_FARLODRTQ undefined)\n",
+					k.tag );
+				gateOk = false;
+#endif
+			}
 			// lane VKFAR30: the all-on arm (header): cellGiHalfOn 1 on VKBUF2's shared screen GI images (lane VKFAR31: both keys)
 			if ( seed == 1 ) {
 				Smp * sg = nullptr, * sk = nullptr;
