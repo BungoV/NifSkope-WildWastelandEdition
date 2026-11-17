@@ -165,14 +165,17 @@ struct ObjBlPool
 	std::size_t offset[16] = {};
 	std::uint32_t stride[16] = {};
 	std::uint32_t halfMask = 0;
+	std::uint8_t constSlot[16] = {};  //!< lane VKFLIGHT11: a location the VAO leaves off: the slot of GL's current value (objConstSlot)
 };
 /*! the class's VAO as the pipeline's vertex input: attribute i on buffer binding i, stride 4 n, R32..._SFLOAT, GL location i.
- * A GL location in `need` (bit L) the class does not carry reads GL's generic default (0,0,0,1: the cell pass never sets a
- * current value): binding 16, stride 0, one R32G32B32A32 (the twins' constant buffer) */
+ * A GL location in `need` (bit L) the class does not carry reads the constant buffer (binding 16, stride 0, one R32G32B32A32)
+ * at slot constSlot[L] (lane VKFLIGHT11: an own VAO's disabled location, GL's current value), else slot 0 = (0,0,0,1), GL's
+ * generic default (the pooled route reads no current value) */
 constexpr std::uint32_t kObjBlConstBinding = 16;
 void objBlPoolLayout( std::uint64_t attrMask, std::vector<ObjBlBuffer> & buffers, std::vector<ObjBlAttr> & attrs, std::uint32_t need = 0,
 	const std::uint32_t * stride = nullptr, std::uint32_t halfMask = 0,
-	bool halfRed = false );  //!< lane VKWATER3: GL's strides (0 tight), half floats (n 3: 4 halves); halfRed: read as 16-bit unorm
+	bool halfRed = false,  //!< lane VKWATER3: GL's strides (0 tight), half floats (n 3: 4 halves); halfRed: read as 16-bit unorm
+	const std::uint8_t * constSlot = nullptr );  //!< lane VKFLIGHT11: per location its constant slot (nullptr: slot 0)
 /*! GL's pool into the class's twins on the present device (glCopyNamedBufferSubData into buffers GL imports; the twins grow
  * by doubling), GL's order: call before the run's signal and list `glNames` in it. false with a reason (nothing copied).
  * red 1 copies each attribute from the buffer of the attribute before it (gates only) */
@@ -215,6 +218,7 @@ struct ObjBlDraw
 	std::uint32_t attrStride[16] = {}, halfMask = 0;  //!< lane VKWATER3: the pool's strides and half floats (objBlPoolLayout)
 	bool halfRed = false;        //!< lane VKWATER3, gates only: the halves read as 16-bit unorm (objCellShade's red `half`)
 	std::uint32_t need = 0;      //!< the GL locations the vertex stage reads (bit L)
+	std::uint8_t constSlot[16] = {};  //!< lane VKFLIGHT11: ObjBlPool::constSlot of the draw's VAO (0: (0,0,0,1))
 	std::vector<std::pair<std::uint32_t, std::vector<std::uint8_t>>> ubos;  //!< binding -> bytes (objBlMirror)
 	std::vector<std::pair<std::uint32_t, std::uintptr_t>> images;          //!< binding -> a shared target (or a texture cache twin)
 	std::vector<std::uint32_t> imageSwz;  //!< lane VKWATER3: per image, a twin's swizzle (blSwizzleCode; 0 none)
@@ -384,10 +388,11 @@ struct ObjBlShade
 	 * mirrored wwDrawBase is set 0 (false: GL's wwDrawBase as mirrored, the rows from GL's row 0) */
 	bool rowsAtBase = false;
 	/*! lane VKOBJ5 (an unpooled bl shape): the vertices from the bound VAO, read as objCellShade reads it (per location the
-	 * stage reads: float or half, its buffer / offset / stride; a disabled one must hold (0,0,0,1); the VAO's index buffer);
+	 * stage reads: float or half, its buffer / offset / stride; a disabled one reads GL's current value (VKFLIGHT11); the VAO's index buffer);
 	 * of `pool` only verts is read */
 	bool ownVao = false;
-	int ownRed = 0;  //!< gates only: 1 `offset` (the attributes read from offset 0), 2 `half` (the halves read as 16-bit unorm)
+	int ownRed = 0;  //!< gates only: 1 `offset` (the attributes read from offset 0), 2 `half` (the halves read as 16-bit unorm),
+	                 //!< 3 `const` (lane VKFLIGHT11: a disabled location reads (0,0,0,1), not GL's current value)
 	const std::uint32_t * psGate = nullptr;  //!< gates only: this pixel module instead of the shipped twin (blview's plain row)
 	std::size_t psGateWords = 0;
 	/*! lane VKWATER3 (ruling 11-15): a GL-owned texture with no twin, a twin that does not fit or a refused texel buffer refuses
@@ -403,8 +408,8 @@ int objBlVariant( const std::string & defs, const char *& why, int red = 0 );
  * of fo4_cell / fo4_cellcsm / pbrm_default / pbrm_cell / pbrm_cellcsm on the app's base variant (WW_CELL_FOGLEAK + WW_FRAME_UBO; the caller refuses any other). Read
  * from GL here: the frame and fixed state (objBlFrameRead), the uniforms (objBlMirror), the units (objBlBindUnits: every
  * texture a shared target or a texture cache twin, else refused), the shape's VAO (per location the stage reads: enabled,
- * float or half, not normalised or integer, divisor 0, its buffer / offset / stride; a disabled one must hold GL's
- * (0,0,0,1)) and its index buffer (GL_UNSIGNED_SHORT, its size). false: why (nothing drawn; GL draws the shape) */
+ * float or half, not normalised or integer, divisor 0, its buffer / offset / stride; a disabled one reads GL's
+ * current value, VKFLIGHT11) and its index buffer (GL_UNSIGNED_SHORT, its size). false: why (nothing drawn; GL draws the shape) */
 struct ObjCellShade
 {
 	int twin = 2;                 //!< 2 fo4_cell, 3 fo4_cellcsm, 4 pbrm_default, 5 pbrm_cell, 6 pbrm_cellcsm, 7 fo4_effectcell, 8 fo4_effectdecalcsm, 10 fo4_effectdecal

@@ -679,7 +679,7 @@ bool vkBlDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * coun
 		s.poolKey = reinterpret_cast<std::uintptr_t>( &blOwnKey );
 		s.pool.verts = verts;
 		s.ownVao = true;
-		s.ownRed = redOwnName == "offset" ? 1 : redOwnName == "half" ? 2 : 0;
+		s.ownRed = redOwnName == "offset" ? 1 : redOwnName == "half" ? 2 : redOwnName == "const" ? 3 : 0;
 	} else {
 		const Class & k = *c.boundCls;
 		s.poolKey = reinterpret_cast<std::uintptr_t>( &k );
@@ -1552,7 +1552,7 @@ void frame()
 		for ( int kind = 0; kind < kBlKinds; kind++ ) {
 			const QString none;
 			const QString & red = kind == 0 ? skinRed : kind == 1 ? alphaRed : kind == 3 ? ownRed : none;
-			const bool redOn = kind == 0 ? red == "bone" : kind == 1 ? red == "flags" : kind == 3 && ( red == "offset" || red == "half" );
+			const bool redOn = kind == 0 ? red == "bone" : kind == 1 ? red == "flags" : kind == 3 && ( red == "offset" || red == "half" || red == "const" );
 			if ( !blTried[kind] )
 				continue;
 			std::snprintf( b, sizeof( b ), "vk %s: shapes=%lld drawn=%lld gl=%lld%s%s%s%s", kindName[kind], blTried[kind], blDrawn[kind],

@@ -162,7 +162,8 @@ struct Op
 	std::vector<OpEntry> made;
 	int refused = 0;
 	std::map<std::uintptr_t, OpPool> pools;
-	CsmBuf constVb;  // GL's generic attribute default (0,0,0,1) for the locations a class does not carry (host-visible)
+	CsmBuf constVb;  // lane VKFLIGHT11: 16-byte slots of GL current attribute values, slot 0 = (0,0,0,1) (host-visible)
+	std::vector<float> constHost;  // the slots written (4 floats each), append only: a crossing in flight reads none written after it
 	// the draws (slice 7): the frame's rows (wwDraws), the prepared draws (`live` of them this frame), the stand-ins
 	CsmBuf rows;
 	std::size_t rowCount = 0;
@@ -844,8 +845,39 @@ int objBlPipes( int * refused )
 	return int( opS().made.size() );
 }
 
+// lane VKFLIGHT11: the constant attribute slots (Op::constVb), made on first use with slot 0 = (0,0,0,1)
+constexpr std::uint32_t kObjConstSlots = 64;
+static bool objConstMake( std::string & why )
+{
+	Op & O = opS();
+	if ( O.constVb.buf )
+		return true;
+	std::string w;
+	if ( !csmBuf( O.constVb, kObjConstSlots * 16, false, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, w ) )
+		return why = "the constant attribute buffer: " + w, false;
+	O.constHost.assign( { 0.0f, 0.0f, 0.0f, 1.0f } );
+	std::memcpy( O.constVb.ptr, O.constHost.data(), 16 );
+	return true;
+}
+// the slot holding GL's current value `c` (bit for bit): found, else appended (a slot is never rewritten); -1 with a reason
+static int objConstSlot( const float c[4], std::string & why )
+{
+	if ( !objConstMake( why ) )
+		return -1;
+	Op & O = opS();
+	const std::size_t n = O.constHost.size() / 4;
+	for ( std::size_t k = 0; k < n; k++ )
+		if ( std::memcmp( O.constHost.data() + 4 * k, c, 16 ) == 0 )
+			return int( k );
+	if ( n >= kObjConstSlots )
+		return why = "more than " + std::to_string( kObjConstSlots ) + " constant attribute values", -1;
+	O.constHost.insert( O.constHost.end(), c, c + 4 );
+	std::memcpy( static_cast<char *>( O.constVb.ptr ) + 16 * n, c, 16 );
+	return int( n );
+}
+
 void objBlPoolLayout( std::uint64_t attrMask, std::vector<ObjBlBuffer> & buffers, std::vector<ObjBlAttr> & attrs, std::uint32_t need,
-	const std::uint32_t * stride, std::uint32_t halfMask, bool halfRed )
+	const std::uint32_t * stride, std::uint32_t halfMask, bool halfRed, const std::uint8_t * constSlot )
 {
 	buffers.clear();
 	attrs.clear();
@@ -874,7 +906,8 @@ void objBlPoolLayout( std::uint64_t attrMask, std::vector<ObjBlBuffer> & buffers
 	buffers.push_back( { kObjBlConstBinding, 0, false } );
 	for ( std::uint32_t l = 0; l < 32; l++ )
 		if ( miss >> l & 1u )
-			attrs.push_back( { l, kObjBlConstBinding, std::uint32_t( VK_FORMAT_R32G32B32A32_SFLOAT ), 0 } );
+			attrs.push_back( { l, kObjBlConstBinding, std::uint32_t( VK_FORMAT_R32G32B32A32_SFLOAT ),
+				16u * ( constSlot && l < 16 ? std::uint32_t( constSlot[l] ) : 0u ) } );
 }
 
 // the twins of class `key` as vertex / index buffers ([16] = the constant (0,0,0,1)); false: no such class or none copied yet
@@ -902,13 +935,8 @@ bool objBlPoolCopy( std::uintptr_t key, const ObjBlPool & p, std::vector<unsigne
 	if ( p.attrMask >> 60 )
 		return why = "more than 15 attributes", false;
 	std::string w;
-	CsmBuf & cv = opS().constVb;
-	if ( !cv.buf ) {
-		if ( !csmBuf( cv, 16, false, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, w ) )
-			return why = "the constant attribute buffer: " + w, false;
-		const float one[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
-		std::memcpy( cv.ptr, one, 16 );
-	}
+	if ( !objConstMake( why ) )
+		return false;
 	OpPool & t = opS().pools[key];
 	t.gone = false;
 	t.attrMask = p.attrMask;
@@ -1076,6 +1104,7 @@ void objBlPipeFree()
 		}
 		O.pools.clear();
 		csmBufFree( O.constVb, false );
+		O.constHost.clear();
 	}
 	O.made.clear();
 	O.refused = 0;
@@ -2866,7 +2895,7 @@ bool objBlFrameSamples( unsigned colorTex, unsigned dsTex, std::vector<std::uint
 
 /* lane VKOBJ5 (an unpooled bl shape, objBlShade's ownVao): the bound VAO as a pool, read as objCellShade reads it (lane
  * VKWATER3's reader, kept as it is there): per location in `need` (comps: the stage's components) enabled, 1 to 4 floats or
- * halves, not normalised or integer, divisor 0, its buffer / offset / stride; a disabled one must hold (0,0,0,1). The
+ * halves, not normalised or integer, divisor 0, its buffer / offset / stride; a disabled one reads GL's current value (VKFLIGHT11, red 3: (0,0,0,1)). The
  * index buffer: the VAO's (GL_UNSIGNED_SHORT, BUFFER_SIZE / 2 indices). red 1 reads every attribute from offset 0 */
 static bool objOwnVao( GlProc gp, std::uint32_t need, const std::uint32_t * comps, int red, ObjBlPool & pool, std::string & why )
 {
@@ -2892,8 +2921,10 @@ static bool objOwnVao( GlProc gp, std::uint32_t need, const std::uint32_t * comp
 		if ( !on ) {
 			float c[4] = {};
 			getAfv( l, 0x8626u, c );  // CURRENT_VERTEX_ATTRIB
-			if ( c[0] != 0.0f || c[1] != 0.0f || c[2] != 0.0f || c[3] != 1.0f )
-				return why = at + "disabled with a current value other than (0,0,0,1)", false;
+			const int k = objConstSlot( c, why );  // lane VKFLIGHT11: GL's current value (red 3 `const`: slot 0, (0,0,0,1))
+			if ( k < 0 )
+				return why = at + why, false;
+			pool.constSlot[l] = red == 3 ? 0 : std::uint8_t( k );
 			continue;  // the constant binding
 		}
 		getAiv( l, 0x8623u, &size );     // SIZE
@@ -2984,13 +3015,13 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 		own.verts = s.pool.verts;
 		if ( !own.verts )
 			return fail( "the shape's VAO: no vertex count" );
-		if ( !objOwnVao( gp, d.need, comps, s.ownRed == 1 ? 1 : 0, own, w2 ) )
+		if ( !objOwnVao( gp, d.need, comps, s.ownRed == 1 || s.ownRed == 3 ? s.ownRed : 0, own, w2 ) )
 			return fail( "the shape's VAO: " + w2 );
 		d.attrMask = own.attrMask;
 		d.halfMask = own.halfMask;
 		d.halfRed = s.ownRed == 2;
 		for ( int i = 0; i < 16; i++ )
-			d.attrStride[i] = own.stride[i];
+			d.attrStride[i] = own.stride[i], d.constSlot[i] = own.constSlot[i];
 	}
 	ObjBlUniStat ust;
 	if ( !objBlMirror( gp, s.prog, d.vs, d.vsWords, d.ps, d.psWords, d.ubos, ust, w2 ) )
@@ -3173,8 +3204,10 @@ bool objCellShade( GlProc gp, const ObjCellShade & s, std::string & why )
 		if ( !on ) {
 			float c[4] = {};
 			getAfv( l, 0x8626u, c );  // CURRENT_VERTEX_ATTRIB
-			if ( c[0] != 0.0f || c[1] != 0.0f || c[2] != 0.0f || c[3] != 1.0f )
-				return fail( at + "disabled with a current value other than (0,0,0,1)" );
+			const int k = objConstSlot( c, w2 );  // lane VKFLIGHT11: GL's current value through its constant slot
+			if ( k < 0 )
+				return fail( at + w2 );
+			pool.constSlot[l] = std::uint8_t( k );
 			continue;  // the constant binding
 		}
 		getAiv( l, 0x8623u, &size );     // SIZE
@@ -3214,7 +3247,7 @@ bool objCellShade( GlProc gp, const ObjCellShade & s, std::string & why )
 	d.halfMask = pool.halfMask;
 	d.halfRed = s.red == 2;
 	for ( int i = 0; i < 16; i++ )
-		d.attrStride[i] = pool.stride[i];
+		d.attrStride[i] = pool.stride[i], d.constSlot[i] = pool.constSlot[i];
 	ObjBlUniStat ust;
 	if ( !objBlMirror( gp, s.prog, d.vs, d.vsWords, d.ps, d.psWords, d.ubos, ust, w2 ) )
 		return fail( "the uniforms: " + w2 );
@@ -3732,7 +3765,7 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 	// the pipeline of the class's layout
 	std::vector<ObjBlBuffer> bufs;
 	std::vector<ObjBlAttr> attrs;
-	objBlPoolLayout( d.attrMask, bufs, attrs, d.need, d.attrStride, d.halfMask, d.halfRed );
+	objBlPoolLayout( d.attrMask, bufs, attrs, d.need, d.attrStride, d.halfMask, d.halfRed, d.constSlot );
 	ObjBlPipeInfo info;
 	if ( !objBlPipe( d.twin, d.vs, d.vsWords, d.ps, d.psWords, d.target, bufs, attrs, info, why, d.pipeRed ) )
 		return false;
