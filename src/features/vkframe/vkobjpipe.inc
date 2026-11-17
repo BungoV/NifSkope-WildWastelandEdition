@@ -3494,7 +3494,8 @@ bool objBlTexelCopy( GlProc gp, unsigned tex, std::vector<unsigned> & glNames, s
 	static const Fmt fmts[] = { { 0x8814, VK_FORMAT_R32G32B32A32_SFLOAT, 0, 16 }, { 0x8D82, VK_FORMAT_R32G32B32A32_SINT, 1, 16 },
 		{ 0x8D70, VK_FORMAT_R32G32B32A32_UINT, 2, 16 }, { 0x822E, VK_FORMAT_R32_SFLOAT, 0, 4 }, { 0x8235, VK_FORMAT_R32_SINT, 1, 4 },
 		{ 0x8236, VK_FORMAT_R32_UINT, 2, 4 }, { 0x8230, VK_FORMAT_R32G32_SFLOAT, 0, 8 }, { 0x823B, VK_FORMAT_R32G32_SINT, 1, 8 },
-		{ 0x823C, VK_FORMAT_R32G32_UINT, 2, 8 }, { 0x881A, VK_FORMAT_R16G16B16A16_SFLOAT, 0, 8 }, { 0x8058, VK_FORMAT_R8G8B8A8_UNORM, 0, 4 } };
+		{ 0x823C, VK_FORMAT_R32G32_UINT, 2, 8 }, { 0x881A, VK_FORMAT_R16G16B16A16_SFLOAT, 0, 8 }, { 0x8058, VK_FORMAT_R8G8B8A8_UNORM, 0, 4 },
+		{ 0x822B, VK_FORMAT_R8G8_UNORM, 0, 2 }, { 0x8229, VK_FORMAT_R8_UNORM, 0, 1 } };  // lane VKFLIGHT13: RG8 (farStream), R8
 	const Fmt * f = nullptr;
 	for ( const Fmt & e : fmts )
 		if ( e.gl == fmt )
