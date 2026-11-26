@@ -119,13 +119,42 @@ def metres(fog):
             for k, v in fog.items()}
 
 
+# WXSTRIP1 (bungo 11-26): a clouds.layers.<n>.type per active record layer, by the weather's cloud type. A layer's band is
+# its texture's; the word picks the cloud's make-up inside it. Layer words are the first seven of the spec (no cirrus).
+LAYER_WORDS = {
+    'cumulus': ({1: 'altocumulus', 3: 'stratocumulus', 8: 'stratocumulus', 9: 'stratocumulus'}, 'cumulus'),
+    'stratus': ({1: 'altocumulus', 2: 'stratocumulus', 13: 'stratocumulus', 14: 'stratocumulus', 15: 'stratocumulus'},
+                'stratus'),
+    'stratocumulus': ({1: 'altocumulus', 12: 'stratus'}, 'stratocumulus'),
+    'cumulonimbus': ({0: 'altocumulus', 1: 'altocumulus', 2: 'stratocumulus', 3: 'stratocumulus', 8: 'stratocumulus',
+                      9: 'stratocumulus', 12: 'stratus', 13: 'stratocumulus', 14: 'stratocumulus',
+                      15: 'stratocumulus'}, 'cumulonimbus'),
+}
+FOG_CAP = (300.0, 200.0)  # the fog class never sees farther than this by day / night: denser than vanilla (bungo 11-26)
+
+
+def cloud_layers(f, ctype, coverage):
+    """{layer number: word} for the record's active layers (texture set, not disabled, an alpha above 0 at some time)"""
+    tbl, dflt = LAYER_WORDS[ctype]
+    mask = int(f.get('cloudDisabledMask', '0x0'), 16)
+    out = {}
+    for k in f.get('cloudTextures', {}):
+        n = int(k)
+        cc = f.get('cloudColors', {}).get(k, {})
+        if (mask >> n) & 1 or max([(t.get('alpha', 0) or 0) for t in cc.values()] or [0]) <= 0 or n == 0:
+            continue
+        w = tbl.get(n, dflt)
+        out[str(n)] = 'nimbostratus' if w == 'stratus' and n in (4, 5) and coverage >= 0.95 else w
+    return out
+
+
 def record_block(f):
     """every field of the record that no physical key takes, as stored (distances in m; SPEC.md 1.5 `vanillaRecord`)"""
     rec = {'formVersion': f.get('formVersion'), 'definedBy': f.get('owner'), 'winner': f.get('winner')}
     if 'fog' in f:
         rec['fog'] = metres(f['fog'])
     for k in ('fogScale', 'colors', 'cloudTextures', 'cloudLayersMax', 'cloudDisabledMask', 'cloudColors',
-              'cloudSpeed', 'directionalAmbient', 'imageSpaces', 'precipitationForm', 'visualEffect', 'aurora',
+              'cloudSpeed', 'directionalAmbient', 'precipitationForm', 'visualEffect', 'aurora',
               'sounds', 'skyStatics', 'godRays', 'visibilityMult', 'volatilityMult',
               'lensFlare', 'magic'):  # WEATHERRECX2: GNAM, UNAM (every WTHR field of xEdit's FO4 definition)
         if k in f:
@@ -162,6 +191,8 @@ def translate(w, f):
         vd = fit_visibility(fog['dayNear'], fog['dayFar'], fog['dayPower'], fog['dayMax'])
         vn = fit_visibility(fog['nightNear'], fog['nightFar'], fog['nightPower'], fog['nightMax'])
         vd, vn = float('%.0f' % vd), float('%.0f' % vn)
+        if v['class'] == 'fog':
+            vd, vn = min(vd, FOG_CAP[0]), min(vn, FOG_CAP[1])
         atmo['visibility'] = vd
         tr_atmo.append('visibility')
         der['atmosphere.visibility'] = ('FNAM day near %.0f far %.0f u power %.3g max %.3g -> least-squares '
@@ -229,6 +260,9 @@ def translate(w, f):
         for k, x in CLOUD_SHADOW:
             cl[k] = x
         cl['_added'] = [k for k, _ in CLOUD_SHADOW]
+        lay = cloud_layers(f, cl['type'], cl['coverage'])
+        if lay and 'layers' not in cl:
+            cl['layers'] = {n: {'type': t} for n, t in lay.items()}
         der['clouds.shadow'] = ('added: the cloud shadow law (opacity 0..1, strength = the exponent, shadowLayerDensity '
                                 'percent on each layer alpha, shadowDeck m = the highest layer sheet); the reader defaults')
     d = f.get('data', {})
@@ -243,7 +277,7 @@ def translate(w, f):
         der[k] = 'generated rung (class %s, region %s); the record cloud art and colours are in `vanillaRecord`' % (
             v['class'], v['region']) if k == 'clouds' else 'generated rung (class %s, region %s)' % (
             v['class'], v['region'])
-    der['vanillaRecord'] = 'every other WTHR field as stored (NAM0, FNAM in m, NAM4, PNAM/JNAM, QNAM/RNAM, DALC, IMSP, ...)'
+    der['vanillaRecord'] = 'every other WTHR field as stored (NAM0, FNAM in m, NAM4, PNAM/JNAM, QNAM/RNAM, DALC, ...); the image-space tints are not copied'
     e['_derivedFrom'] = der
     e = G.finish18(e)
     e['vanillaRecord'] = record_block(f)
