@@ -177,6 +177,48 @@ def radstorm_rain(w, pf, e):
     return round((c['liquidWater'] * RAIN_SHARE / 0.0889) ** (1.0 / 0.84), 1)
 
 
+# HIGHCLOUD1 (11-26): the genera our weathers never drew (altostratus, cirrostratus, cirrus, cirrocumulus), as real skies
+# carry them. Fusion draws ONE mid/high layer (VolumetricCloudsModel.h ApplyRecx), so a weather gets at most one of them.
+# Evidence: record layer 0 active = the vanilla "upper" wisp texture (skyrimcloudsupper01), the record's own high cloud.
+#  - upper layer + a fair class -> highType cirrus (wisps); cirrocumulus when the upper layers draw fully opaque (day alpha
+#    1.0: a crisp mottled upper deck); upper layer + mist / smoke (a milky sky over a lower deck) -> cirrostratus (veil);
+#    upper layer + overcast -> midType altostratus.
+#  - no upper layer (class only): overcast / rain / drizzle -> midType altostratus (the grey mid sheet that thickens into the
+#    raining deck); polluted -> highType cirrostratus. Fog, storm, radstorm, snow and weathers with no cloud art: none.
+# The upper layer 1's word follows the genus (a band-2 layer word sets the top layer's type after highType): cirrus and
+# cirrostratus drop it, cirrocumulus keeps altocumulus (same cloudlet form and type), altostratus names it altostratus.
+FAIR_CLASSES = ('clear', 'clearest', 'dust', 'duststorm', 'polluted')
+
+
+def layer_active(f, n):
+    cc = f.get('cloudColors', {}).get(str(n), {})
+    return (str(n) in f.get('cloudTextures', {}) and not (int(f.get('cloudDisabledMask', '0x0'), 16) >> n) & 1
+            and max([(t.get('alpha', 0) or 0) for t in cc.values()] or [0]) > 0)
+
+
+def cloud_genera(cls, f, layers):
+    # -> ({midType|highType: word} or {}, the layers {number: word} after the genus)
+    upper = layer_active(f, 0)
+    keys = {}
+    if upper and cls in FAIR_CLASSES:
+        opaque = (f.get('cloudColors', {}).get('0', {}).get('day', {}).get('alpha', 0) or 0) >= 1.0
+        keys = {'highType': 'cirrocumulus' if opaque else 'cirrus'}
+    elif upper and cls in ('mist', 'smoke'):
+        keys = {'highType': 'cirrostratus'}
+    elif cls in ('overcast', 'rain', 'drizzle'):
+        keys = {'midType': 'altostratus'}
+    elif cls == 'polluted':
+        keys = {'highType': 'cirrostratus'}
+    out = dict(layers)
+    if out.get('1') == 'altocumulus':
+        word = keys.get('highType') or keys.get('midType')
+        if word in ('cirrus', 'cirrostratus'):
+            del out['1']
+        elif word == 'altostratus':
+            out['1'] = 'altostratus'
+    return keys, out
+
+
 def translate(w, f):
     """w: the wthr_list row (rung input), f: the wthr_full row -> (entry, diag)"""
     v = G.generate(w)
@@ -261,6 +303,8 @@ def translate(w, f):
             cl[k] = x
         cl['_added'] = [k for k, _ in CLOUD_SHADOW]
         lay = cloud_layers(f, cl['type'], cl['coverage'])
+        genus, lay = cloud_genera(v['class'], f, lay)
+        cl.update(genus)
         if lay and 'layers' not in cl:
             cl['layers'] = {n: {'type': t} for n, t in lay.items()}
         der['clouds.shadow'] = ('added: the cloud shadow law (opacity 0..1, strength = the exponent, shadowLayerDensity '
