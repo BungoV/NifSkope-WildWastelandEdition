@@ -12,13 +12,15 @@ bake: for each layer of the card array (the `.lodm` beside the sheets) the sourc
 (tools/card_skyvis_rays.cpp), which returns sky visibility per covered texel. Uncovered texels are
 flooded from their covered neighbours inside the frame and the mips are coverage-weighted 2x2 means (a
 frame is a multiple of 16 texels, so no mip mixes two frames). finish() then writes, into --stage only:
-`<set>_rvaos.DDS`, BC7 (tools/card_mask_bc7.cpp, the repo encoder) with R = roughness (255 - gloss on
-legacy), G = sky, B = AO, A = subsurface, every mip encoded from the decoded `_gsaos` and the sky; and
+`<set>_rvaos.DDS`, UNCOMPRESSED RGBA8 (DXGI 28, linear, full mip chain, DX10 header; bungo 11-27: BC7 could not
+hold four independent channels on sheets with a subsurface mask) with R = roughness (255 - gloss on
+legacy), G = sky, B = AO, A = subsurface, every mip taken from the decoded `_gsaos` and the sky; and
 the `.lodm` with the mask key and path -> `rvaos` / `_rvaos`, array.maskLayout "rvaos" and array.specular (one value a
 layer: the coverage-weighted mean of the source G). Spec: docs/LODGEN_LODM_FORMAT.md 4.2.
 
-gate: per-channel max / mean read-back error against the values meant (flags any max over 4 counts),
-the header (BC7, same size / mips / slices), and the sky per layer: covered mean/min/max, the spread and
+gate: per-channel max / mean read-back error against the decoded inputs: every max must be 0 (compared texel
+count printed, > 0 required; `--red R|G|B|A` gates a copy off by 1 and must FAIL), the header (RGBA8, same
+size / mips / slices), an END line, and the sky per layer: covered mean/min/max, the spread and
 the inner-crown vs outer/top means (bins fixed at bake time from the surface points: see BINS).
 """
 import argparse
@@ -53,98 +55,118 @@ def dds_info(p):
     return ww, hh, mips, fmt, arr
 
 
-def mip_sizes(w, h, mips):
+RGBA8 = 28          # DXGI_FORMAT_R8G8B8A8_UNORM: the `_rvaos` sheet (uncompressed, lossless; bungo 11-27)
+
+
+def mip_sizes(w, h, mips, fmt=77):
+    """(width, height, bytes) per mip: block formats (BC3/BC7, 16 B a 4x4) or RGBA8 (4 B a texel)."""
     out = []
     for m in range(mips):
         mw, mh = max(1, w >> m), max(1, h >> m)
-        out.append((mw, mh, ((mw + 3) // 4) * ((mh + 3) // 4) * 16))
+        out.append((mw, mh, mw * mh * 4 if fmt == RGBA8 else ((mw + 3) // 4) * ((mh + 3) // 4) * 16))
     return out
 
 
-def layer_span(w, h, mips):
-    return sum(s for _w, _h, s in mip_sizes(w, h, mips))
+def layer_span(w, h, mips, fmt=77):
+    return sum(s for _w, _h, s in mip_sizes(w, h, mips, fmt))
 
 
 def decode(raw, w, h, n):
     return np.asarray(Image.frombytes('RGBA', (w, h), raw, 'bcn', n))
 
 
-def mip0(path, layer):
-    w, h, mips, fmt, _arr = dds_info(path)
-    span = layer_span(w, h, mips)
-    with open(path, 'rb') as f:
-        f.seek(HDR + layer * span)
-        raw = f.read(mip_sizes(w, h, mips)[0][2])
+def decode_any(raw, w, h, fmt):
+    if fmt == RGBA8:
+        return np.frombuffer(raw, np.uint8).reshape(h, w, 4)
     return decode(raw, w, h, 7 if fmt in (98, 99) else 3)
 
 
-# ---- the _rvaos sheet (BC7): R roughness, G sky visibility, B AO, A subsurface -----------------------
+def mip0(path, layer):
+    w, h, mips, fmt, _arr = dds_info(path)
+    span = layer_span(w, h, mips, fmt)
+    with open(path, 'rb') as f:
+        f.seek(HDR + layer * span)
+        raw = f.read(mip_sizes(w, h, mips, fmt)[0][2])
+    return decode_any(raw, w, h, fmt)
+
+
+# ---- the _rvaos sheet (RGBA8): R roughness, G sky visibility, B AO, A subsurface ----------------------
 
 def sheet_mips(path, layer):
-    """Every mip of one layer, decoded RGBA, padded to whole 4x4 blocks."""
+    """Every mip of one layer, decoded RGBA. Block sources are padded to whole 4x4 blocks; RGBA8 is exact size."""
     w, h, mips, fmt, _arr = dds_info(path)
     out = []
     with open(path, 'rb') as f:
-        f.seek(HDR + layer * layer_span(w, h, mips))
-        for mw, mh, size in mip_sizes(w, h, mips):
-            out.append(decode(f.read(size), mw + (-mw) % 4, mh + (-mh) % 4, 7 if fmt in (98, 99) else 3))
+        f.seek(HDR + layer * layer_span(w, h, mips, fmt))
+        for mw, mh, size in mip_sizes(w, h, mips, fmt):
+            pw, ph = (mw, mh) if fmt == RGBA8 else (mw + (-mw) % 4, mh + (-mh) % 4)
+            out.append(decode_any(f.read(size), pw, ph, fmt))
     return out
 
 
-def rvaos_layer(g_path, layer, sky):
-    """The values meant for one layer: R = 255 - gloss, G = sky (list of padded uint8 mips), B AO, A subsurface."""
+def mask_a(path, layer):
+    """A of every mip of one layer of a sheet whose A holds the subsurface mask (None without a path)."""
+    return [m[..., 3].copy() for m in sheet_mips(path, layer)] if path else None
+
+
+def rvaos_layer(g_path, layer, sky, sub=None):
+    """The values meant for one layer: R = 255 - gloss, G = sky (list of padded uint8 mips), B AO, A subsurface
+    (the `_gsaos` A, or `sub` when that A no longer holds it: the 11-27 sky pass overwrote it)."""
     out = []
-    for m, s in zip(sheet_mips(g_path, layer), sky):
+    for k, (m, s) in enumerate(zip(sheet_mips(g_path, layer), sky)):
         v = m.copy()
         v[..., 0] = 255 - m[..., 0]
         v[..., 1] = s
+        if sub is not None:
+            v[..., 3] = sub[k]
         out.append(v)
     return out
 
 
-def write_rvaos(g_path, sky_by_layer, dst, encoder, work):
-    """BC7 copy of `g_path` with the rvaos channels; returns the per-channel error of the encode."""
+def write_rvaos(g_path, sky_by_layer, dst, work=None, sub_path=''):
+    """RGBA8 (DXGI 28, linear, full mip chain, DX10 header) copy of `g_path` with the rvaos channels, written
+    losslessly; returns (max error, mean error, texel count) of the read-back against the values meant."""
     W, H, mips, fmt, nl = dds_info(g_path)
     meant = []
     for li in range(nl):
-        meant += rvaos_layer(g_path, li, sky_by_layer[li])
-    job = os.path.join(work, 'bc7_job.bin')
-    out = os.path.join(work, 'bc7_out.bin')
-    with open(job, 'wb') as f:
-        f.write(struct.pack('<I', len(meant)))
-        for v in meant:
-            f.write(struct.pack('<II', v.shape[1], v.shape[0]))
-            f.write(np.ascontiguousarray(v, np.uint8).tobytes())
-    r = subprocess.run([encoder, job, out], capture_output=True, text=True)
-    if r.returncode:
-        raise SystemExit('bc7 encoder rc %d %s' % (r.returncode, r.stderr))
+        meant += rvaos_layer(g_path, li, sky_by_layer[li], mask_a(sub_path, li))
     hdr = bytearray(open(g_path, 'rb').read(HDR))
-    struct.pack_into('<I', hdr, 128, 98)                      # DXGI_FORMAT_BC7_UNORM, the rest as the source
-    body = open(out, 'rb').read()
-    assert len(body) == nl * layer_span(W, H, mips), (len(body), nl * layer_span(W, H, mips))
-    open(dst, 'wb').write(bytes(hdr) + body)
+    struct.pack_into('<I', hdr, 128, RGBA8)
+    flags = struct.unpack_from('<I', hdr, 8)[0]
+    struct.pack_into('<I', hdr, 8, (flags & ~0x80000) | 0x8)      # DDSD_PITCH in place of DDSD_LINEARSIZE
+    struct.pack_into('<I', hdr, 20, W * 4)                         # pitch of mip 0
+    sizes = mip_sizes(W, H, mips, RGBA8)
+    parts = [bytes(hdr)]
+    k = 0
+    for li in range(nl):
+        for mw, mh, _s in sizes:
+            parts.append(np.ascontiguousarray(meant[k][:mh, :mw], np.uint8).tobytes())
+            k += 1
+    body = b''.join(parts[1:])
+    assert len(body) == nl * layer_span(W, H, mips, RGBA8), (len(body), nl * layer_span(W, H, mips, RGBA8))
+    open(dst, 'wb').write(parts[0] + body)
     return channel_error(dst, meant)
 
 
 def channel_error(dst, meant):
-    """Decode `dst` back; max and mean |got - meant| per channel over every mip of every layer."""
+    """Decode `dst` back; max and mean |got - meant| per channel over every mip of every layer, and the count."""
     W, H, mips, fmt, nl = dds_info(dst)
     mx = np.zeros(4, int)
     over = np.zeros(4, int)
     tot = np.zeros(4)
     cnt = 0
     k = 0
+    sizes = mip_sizes(W, H, mips, fmt)
     for li in range(nl):
-        for mw, mh, got in zip([s[0] for s in mip_sizes(W, H, mips)], [s[1] for s in mip_sizes(W, H, mips)],
-                               sheet_mips(dst, li)):
+        for (mw, mh, _s), got in zip(sizes, sheet_mips(dst, li)):
             d = np.abs(got[:mh, :mw].astype(int) - meant[k][:mh, :mw].astype(int))
             mx = np.maximum(mx, d.reshape(-1, 4).max(0))
             tot += d.reshape(-1, 4).sum(0)
-            over += (d.reshape(-1, 4) > 4).sum(0)
+            over += (d.reshape(-1, 4) > 0).sum(0)
             cnt += mw * mh
             k += 1
-    print('    texels over 4: R %d G %d B %d A %d of %d' % (*over, cnt))
-    return mx, tot / max(cnt, 1)
+    print('    texels with error > 0: R %d G %d B %d A %d of %d compared' % (*over, cnt))
+    return mx, tot / max(cnt, 1), cnt
 
 
 def card_specular(g_path, d_path, layers):
@@ -175,11 +197,11 @@ def write_lodm(src, dst, specular):
     open(dst, 'wb').write(head + struct.pack('<I', len(body)) + body)
 
 
-def report_error(name, mx, mean):
-    flag = [c for c, v in zip('RGBA', mx) if v > 4]
-    print('  bc7 %s max R %d G %d B %d A %d | mean R %.2f G %.2f B %.2f A %.2f%s'
-          % (name, mx[0], mx[1], mx[2], mx[3], mean[0], mean[1], mean[2], mean[3],
-             ' | OVER 4: ' + ','.join(flag) if flag else ''))
+def report_error(name, mx, mean, cnt):
+    flag = [c for c, v in zip('RGBA', mx) if v > 0]
+    print('  rgba8 %s compared %d texels | max R %d G %d B %d A %d | mean R %.4f G %.4f B %.4f A %.4f%s'
+          % (name, cnt, mx[0], mx[1], mx[2], mx[3], mean[0], mean[1], mean[2], mean[3],
+             ' | ERROR in: ' + ','.join(flag) if flag else ''))
     return len(flag)
 
 
@@ -331,7 +353,7 @@ def bake(a):
 
 
 def finish(a, base, sky):
-    """Write `<set>_rvaos.DDS` (BC7) and the `.lodm` that names it into --stage; layers without a sky value
+    """Write `<set>_rvaos.DDS` (RGBA8) and the `.lodm` that names it into --stage; layers without a sky value
     (a --layers run) read open sky (255)."""
     g_path, d_path = getattr(a, 'gsaos', '') or base + '_gsaos.DDS', base + '_d.DDS'
     W, H, mips, fmt, nl = dds_info(g_path)
@@ -339,8 +361,8 @@ def finish(a, base, sky):
         if li not in sky:
             sky[li] = [np.full((mh + (-mh) % 4, mw + (-mw) % 4), 255, np.uint8) for mw, mh, _s in mip_sizes(W, H, mips)]
     dst = os.path.join(a.stage, os.path.basename(base) + '_rvaos.DDS')
-    mx, mean = write_rvaos(g_path, sky, dst, a.encoder, a.work)
-    report_error(os.path.basename(dst), mx, mean)
+    mx, mean, cnt = write_rvaos(g_path, sky, dst, sub_path=getattr(a, 'mask_a', ''))
+    report_error(os.path.basename(dst), mx, mean, cnt)
     spec = card_specular(g_path, d_path, lodm(base + '.lodm')['array']['layers'])
     write_lodm(base + '.lodm', os.path.join(a.stage, os.path.basename(base) + '.lodm'), spec)
     print('  specular per layer', spec)
@@ -359,20 +381,35 @@ def pack(a):
 
 def gate(a):
     """--dds the `_rvaos` sheet, --orig the `_gsaos` it came from, --sky the sheet whose A held the sky."""
+    if a.red:
+        # the red: a copy of the sheet with ONE channel of one texel row off by 1 (mip 0, layer 0); it must FAIL
+        raw = bytearray(open(a.dds, 'rb').read())
+        ch = 'RGBA'.index(a.red)
+        W0 = dds_info(a.dds)[0]
+        for x in range(min(W0, 64)):
+            i = HDR + x * 4 + ch
+            raw[i] = raw[i] - 1 if raw[i] == 255 else raw[i] + 1
+        red_path = os.path.join(os.path.dirname(os.path.abspath(a.bins)), 'red_%s.DDS' % a.red)
+        open(red_path, 'wb').write(bytes(raw))
+        print('RED: %s channel %s +-1 on 64 texels of mip 0 layer 0 -> %s' % (a.red, a.red, red_path))
+        a.dds = red_path
     W, H, mips, fmt, nl = dds_info(a.dds)
     oW, oH, omips, ofmt, onl = dds_info(a.orig)
     fails = 0
-    size_ok = os.path.getsize(a.dds) == HDR + nl * layer_span(W, H, mips)
-    hdr_ok = fmt == 98 and (W, H, mips, nl) == (oW, oH, omips, onl) and size_ok
-    print('GATE %s dxgi %d (98 = BC7), %dx%d mips %d layers %d, source %dx%d mips %d layers %d, size ok %s'
+    size_ok = os.path.getsize(a.dds) == HDR + nl * layer_span(W, H, mips, fmt)
+    hdr_ok = fmt == RGBA8 and (W, H, mips, nl) == (oW, oH, omips, onl) and size_ok
+    print('GATE %s dxgi %d (28 = R8G8B8A8_UNORM), %dx%d mips %d layers %d, source %dx%d mips %d layers %d, size ok %s'
           % (os.path.basename(a.dds), fmt, W, H, mips, nl, oW, oH, omips, onl, size_ok))
     fails += not hdr_ok
     meant = []
     for li in range(nl):
         sky = [m[..., 3] for m in sheet_mips(a.sky, li)]
-        meant += rvaos_layer(a.orig, li, sky)
-    mx, mean = channel_error(a.dds, meant)
-    flags = report_error('read-back vs meant (R 255-gloss, G old A, B AO, A subsurface)', mx, mean)
+        meant += rvaos_layer(a.orig, li, sky, mask_a(a.mask_a, li))
+    mx, mean, cnt = channel_error(a.dds, meant)
+    flags = report_error('read-back vs decoded inputs (R 255-gloss, G sky = old A, B AO, A subsurface)', mx, mean, cnt)
+    exact = cnt > 0 and flags == 0
+    fails += not exact
+    crown_fails = 0
     bins = np.load(a.bins)
     d_path = a.d or a.orig.replace('_gsaos', '_d')
     sheet = []
@@ -389,15 +426,17 @@ def gate(a):
         mo = float(G[b == BIN_OUTER].mean()) if (b == BIN_OUTER).any() else float('nan')
         judged = (b == BIN_INNER).sum() >= 16 and (b == BIN_OUTER).sum() >= 16
         bad = sd < 0.03 or (judged and not mi < mo)
-        fails += bad
+        crown_fails += bad
         sheet.append(c)
         print('  layer %d sky (G) covered %d mean %.3f min %.3f max %.3f sd %.3f | inner %d %.3f outer %d %.3f %s'
               % (li, c.size, c.mean(), c.min(), c.max(), sd, (b == BIN_INNER).sum(), mi, (b == BIN_OUTER).sum(), mo,
                  ('FAIL' if bad else 'ok') + ('' if judged else ' (inner/outer not judged: too few)')))
     allc = np.concatenate(sheet) if sheet else np.zeros(1)
-    print('SHEET %s covered %d sky mean %.3f min %.3f max %.3f layers %d fails %d flags %d'
-          % (os.path.basename(a.dds), allc.size, allc.mean(), allc.min(), allc.max(), len(sheet), fails, flags))
-    print('RESULT', 'PASS' if fails == 0 else 'FAIL', '(error-bar flags %d)' % flags)
+    print('SHEET %s covered %d sky mean %.3f min %.3f max %.3f layers %d crown-fail layers %d (reported by name, not '
+          'part of the exactness result) channels with error %d'
+          % (os.path.basename(a.dds), allc.size, allc.mean(), allc.min(), allc.max(), len(sheet), crown_fails, flags))
+    print('END %s exact %s header %s compared %d max R %d G %d B %d A %d crown_fail_layers %d'
+          % ('PASS' if fails == 0 else 'FAIL', exact, hdr_ok, cnt, *mx, crown_fails))
     return 1 if fails else 0
 
 
@@ -416,7 +455,7 @@ def main():
     b.add_argument('--red', default='')
     b.add_argument('--data', default=r'X:/Programs/Steam/steamapps/common/Fallout 4/Data')
     b.add_argument('--mod-archive', action='append', default=[])
-    b.add_argument('--encoder', required=True, help='card_mask_bc7.exe (tools/card_mask_bc7.cpp)')
+    b.add_argument('--encoder', default='', help='unused since the RGBA8 ruling (kept so old command lines run)')
     k = sp.add_parser('pack')
     k.add_argument('--objects', required=True, help='the card set: .lodm, _d')
     k.add_argument('--gsaos', required=True, help='the _gsaos before any sky pass')
@@ -425,13 +464,16 @@ def main():
     k.add_argument('--sky', required=True, help='a _gsaos whose A holds sky visibility')
     k.add_argument('--stage', required=True)
     k.add_argument('--work', required=True)
-    k.add_argument('--encoder', required=True)
+    k.add_argument('--encoder', default='', help='unused since the RGBA8 ruling')
+    k.add_argument('--mask-a', default='', help='a sheet whose A holds the subsurface mask (when --gsaos A was overwritten by the sky)')
     g = sp.add_parser('gate')
     g.add_argument('--dds', required=True)
     g.add_argument('--orig', required=True)
     g.add_argument('--sky', required=True)
     g.add_argument('--bins', required=True)
     g.add_argument('--d', default='')
+    g.add_argument('--mask-a', default='', help='the same --mask-a the pack used')
+    g.add_argument('--red', default='', choices=['', 'R', 'G', 'B', 'A'], help='gate a copy with that channel off by 1: must FAIL')
     a = ap.parse_args()
     if a.cmd == 'gate':
         return gate(a)
