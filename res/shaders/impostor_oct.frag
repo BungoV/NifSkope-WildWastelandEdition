@@ -70,7 +70,7 @@ layout ( depth_greater ) out float gl_FragDepth;
 // --- the four sheets of spec 42..48 -----------------------------------------
 uniform sampler2D ColourSheet;     // _d / _bc : RGB colour (unlit), A coverage
 uniform sampler2D NormalSheet;     // _n       : R nX, G nY, B height, A sway
-uniform sampler2D MaskSheet;       // _gsaos / _rmaos : R, G, B AO, A sky visibility on cards (else subsurface)
+uniform sampler2D MaskSheet;       // _gsaos / _rmaos : R, G, B AO, A subsurface; card _rvaos: R roughness, G sky, B AO, A subsurface
 uniform sampler2D EmissiveSheet;   // _g / _e  : RGB emissive colour, BC1
 
 uniform bool  hasMaskSheet;
@@ -650,10 +650,10 @@ void main()
 		else if ( debugChannel == 3 ) dbg = normal * 0.5 + 0.5;         // normal, model space
 		else if ( debugChannel == 4 ) dbg = vec3( height );             // height, raw 0..1
 		else if ( debugChannel == 5 ) dbg = vec3( sway );               // sway weight
-		else if ( debugChannel == 6 ) dbg = vec3( mask.r );             // gloss / roughness
-		else if ( debugChannel == 7 ) dbg = vec3( mask.g );             // specular / metallic
+		else if ( debugChannel == 6 ) dbg = vec3( mask.r );             // gloss / roughness (card _rvaos: roughness)
+		else if ( debugChannel == 7 ) dbg = vec3( mask.g );             // specular / metallic (card _rvaos: sky visibility)
 		else if ( debugChannel == 8 ) dbg = vec3( mask.b );             // AO
-		else if ( debugChannel == 9 ) dbg = vec3( mask.a );             // sky visibility (cards), else subsurface mask
+		else if ( debugChannel == 9 ) dbg = vec3( mask.a );             // subsurface mask
 		else if ( debugChannel == 10 ) dbg = emissive * emissiveScale;  // emissive x its multiple
 		else if ( debugChannel == 11 ) {
 			/* Which of the three frames won here, as a colour. The one picture
@@ -680,7 +680,10 @@ void main()
 	 *     mask.r       legacy: gloss          pbr: roughness
 	 *     mask.g       legacy: specular       pbr: metallic
 	 *     mask.b       ambient occlusion      (used below, no material needed)
-	 *     mask.a       cards: sky visibility (tools/card_skyvis.py), else the subsurface mask (spec 296)
+	 *     mask.a       subsurface mask        (a material label, spec 296)
+	 *     card arrays with array.maskLayout "rvaos" (`_rvaos`, BC7) use one layout
+	 *     whatever the family: R roughness, G sky visibility, B AO, A subsurface;
+	 *     the specular / metallic is one value a layer, array.specular in the .lodm
 	 *     emissive     the emissive colour; the MULTIPLE is `emissiveScale`
 	 *     familyPbr    which of the two spellings the above are in
 	 *

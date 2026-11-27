@@ -86,6 +86,7 @@ emits a key whose value is the default (that is what keeps the file compact).
 | colour | `diffuse` | `baseColor` | `_d` / `_bc` | BC3 | RGB colour (unlit, sRGB), **A = coverage** |
 | normal | `normal` | `normal` | `_n` / `_n` | **BC7** (a `DX10` header, `BC7_UNORM`; since 2026-09-23, lane IMPOSTORDEPTH2: BC3 carried the height in the 5:6:5 colour block) | R = normal X, G = normal Y, B = height, A = sway weight |
 | mask | `gsaos` | `rmaos` | `_gsaos` / `_rmaos` | BC3 | R gloss / roughness, G specular / metallic, B AO, A subsurface mask |
+| mask, card array after the sky pass (`array.maskLayout` `"rvaos"`, §4.2) | `rvaos` | `rvaos` | `_rvaos` (both families) | **BC7** | R roughness, G sky visibility, B AO, A subsurface mask; the specular / metallic is `array.specular` |
 | emissive | `emissive` | `emissive` | `_g` / `_e` | BC1 | RGB emissive colour, no alpha |
 | specular | — | `specular` | — / `_s` | **BC7** (the `_n` sheet's codec) | RGB = sqrt(F0'), **A = specular weight**; `card` files of family pbr only, and only when a shape departs from the default specular (§3.4) |
 
@@ -489,6 +490,31 @@ under a new name.
 A reader still accepts the old names and payloads 1 / 2 (each old file holds one family, layer =
 slice everywhere). An existing bake is converted in place, without a rebake, by
 `tools/lodgen_migrate_arrays.py` (dry run by default, `--apply --backup <dir>`).
+
+### 4.2 The card mask `_rvaos`: one sheet layout whatever the family (2026-11-27, lane SKYVIS1127B)
+
+`tools/card_skyvis.py` (after the bake; `bake` casts the sky rays, `pack` reuses a sky already
+baked) writes a card set's mask as `<stem>_rvaos.DDS`, **BC7** (`DX10` header, `BC7_UNORM`, the same
+size, mips and slices as the sheet it replaces), and rewrites the `.lodm` beside it:
+
+| channel | value |
+|---|---|
+| R | roughness, per texel: legacy `255 - gloss`, pbr the roughness as baked |
+| G | sky visibility, 0..1 linear (1 open sky straight up, 0.5 an open vertical face, 0 facing down or enclosed) |
+| B | AO, as baked |
+| A | subsurface mask, as baked |
+
+| key | meaning |
+|---|---|
+| `array.maskLayout` | `"rvaos"`. Absent = the old per-family mask (`_gsaos` / `_rmaos`, R gloss / roughness, G specular / metallic) |
+| `array.specular` | one number a layer, indexed by the SET's layer `i`, 0..1: the source mask's G (legacy specular, pbr metallic) averaged over the layer's covered texels (`_d` A >= `coverage.test`), weighted by `_d` A |
+| `textures.legacy.rvaos` / `textures.pbr.rvaos` | the mask (R roughness, G sky Visibility, B AO, A Subsurface; it mirrors `_rmaos`). It replaces the card `gsaos` / `rmaos` keys: a reader that finds only those on a card set reports a stale bake (one log line naming the file) and never reads them as this layout. Near-mesh `rmaos` (pbrm) is untouched |
+
+The family only picks the shading: legacy reads gloss = 1 - R with the layer's `specular`, pbr
+reads R as roughness and the layer's `specular` as metallic (an optional pbr `_s` still applies on
+top). Payload stays `lodm` 3: a reader that does not know `maskLayout` must not be handed the set
+(its mask channels moved). The `.lodo` `cardCorpusHash` covers the sheets, so a set rewritten this
+way reads as a different corpus to a reader that checks it.
 
 ---
 
