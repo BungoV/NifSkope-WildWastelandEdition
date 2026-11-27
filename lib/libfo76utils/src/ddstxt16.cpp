@@ -782,9 +782,12 @@ void DDSTexture16::loadTexture(FileBuffer& buf, int mipOffset,
   {
     if (!(formatFlags & 0x40))          // DDPF_RGB
     {
-      if (!(formatFlags & 0x00080000))
+      if (formatFlags & 0x00020000)     // DDPF_LUMINANCE (e.g. 8-bit L8 _SSS maps)
+        ;
+      else if (formatFlags & 0x00080000)
+        formatFlags = formatFlags | 0x41;
+      else
         errorMessage("unsupported texture file format");
-      formatFlags = formatFlags | 0x41;
     }
     unsigned int  bitsPerPixel = FileBuffer::readUInt32Fast(hdrData + 88);
     if ((bitsPerPixel - 8U) & ~24U)     // must be 8, 16, 24 or 32

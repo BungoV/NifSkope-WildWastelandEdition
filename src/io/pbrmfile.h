@@ -54,6 +54,10 @@ struct PbrmMaterial
 
 	// --- Minimal Standard slice: the four Primary UV sockets ---
 	Slot baseColor, normal, rmaos, emissive;
+	//! primarySubsurface (_SSS mask for foliage / Advanced Subsurface)
+	Slot subsurface;
+	float subsurfaceWeight = 1.0f;
+	bool overrideSubsurfaceWeight = true;
 
 	// Constants. Each `override*` true means "ignore the texture channel and use
 	// the constant". Defaults are the spec's missing-value defaults.
@@ -147,6 +151,8 @@ struct PbrmMaterial
 		//! coverage" from "this texture happens to have an alpha channel", and
 		//! FO4 diffuse maps routinely carry meaningless or zero alpha.
 		OpacityTexture   = 1u << 11,
+		//! primarySubsurface enabled with a valid map path and !overrideWeight.
+		SubsurfaceTexture = 1u << 12,
 		//! v6 names bit 7 RmaosSpecularWeight: RMAOS alpha is the WEIGHT, not
 		//! an F0. The v5 shader reads bit 7 as "alpha is F0", so the renderer
 		//! never hands it this bit for a v6 file (lane PBRR1).

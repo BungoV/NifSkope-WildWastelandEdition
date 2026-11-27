@@ -1711,6 +1711,14 @@ struct WwPbrmSpecSlot
 	QString spec, weight, restore;
 };
 
+//! One shape's slot 7 swap for channel 11 (.pbrm _SSS on a mixed legacy+pbrm model).
+struct WwPbrmSssSlot
+{
+	BSShaderLightingProperty * bsp;
+	QString sssTex, restore;
+	bool hadOverride = false;
+};
+
 float wwSrgbToLinear( float c )
 {
 	c = qBound( 0.0f, c, 1.0f );
@@ -1824,7 +1832,7 @@ bool wwPbrmCardSources( const NifModel * nif, const QString & looseRoot, const Q
 {
 	const PbrmMaterial & m = s.m;
 	const quint32 f = m.features;
-	std::unique_ptr<DDSTexture16> base, rm, sp, tint, em;
+	std::unique_ptr<DDSTexture16> base, rm, sp, tint, em, sss;
 	auto need = [&]( const PbrmMaterial::Slot & slot, std::unique_ptr<DDSTexture16> & t ) {
 		t = wwPbrmLoadTexture( nif, looseRoot, slot.lookupPath, why );
 		return bool( t );
@@ -1845,6 +1853,8 @@ bool wwPbrmCardSources( const NifModel * nif, const QString & looseRoot, const Q
 	if ( tintTex && !need( m.tintMask, tint ) )
 		return false;
 	if ( emOn && ( f & PbrmMaterial::EmissiveTexture ) && !need( m.emissive, em ) )
+		return false;
+	if ( ( f & PbrmMaterial::SubsurfaceTexture ) && !need( m.subsurface, sss ) )
 		return false;
 
 	// a grid: the map's own, halved until neither side exceeds 2048; 4 x 4 for a constant
@@ -1936,17 +1946,20 @@ bool wwPbrmCardSources( const NifModel * nif, const QString & looseRoot, const Q
 		if ( !write( colourAt( g.w, g.h ), QStringLiteral( "c" ), s.colour, colourAt ) )
 			return false;
 	}
-	// slot 7: roughness, metallic, AO
+	// slot 7: roughness, metallic, AO, and subsurface mask in alpha (from primarySubsurface _SSS, 0 when absent)
 	{
-		const Grid g = gridOf( { rm.get() } );
+		const Grid g = gridOf( { rm.get(), sss.get() } );
 		QImage img( g.w, g.h, QImage::Format_ARGB32 );
 		for ( int y = 0; y < g.h; y++ ) {
 			QRgb * d = reinterpret_cast<QRgb *>( img.scanLine( y ) );
 			for ( int x = 0; x < g.w; x++ ) {
-				const FloatVector4 r = at( rm, ( float( x ) + 0.5f ) / float( g.w ), ( float( y ) + 0.5f ) / float( g.h ), g.w );
+				const float u = ( float( x ) + 0.5f ) / float( g.w ), v = ( float( y ) + 0.5f ) / float( g.h );
+				const FloatVector4 r = at( rm, u, v, g.w );
+				const float sv = sss ? qBound( 0.0f, at( sss, u, v, g.w )[0] * m.subsurfaceWeight, 1.0f ) : 0.0f;
 				d[x] = qRgba( wwByte( ( f & PbrmMaterial::RmaosRoughness ) ? r[0] : m.roughness ),
 					wwByte( ( f & PbrmMaterial::RmaosMetallic ) ? r[1] : m.metallic ),
-					wwByte( ( f & PbrmMaterial::RmaosAo ) ? r[2] : m.ao ), 255 );
+					wwByte( ( f & PbrmMaterial::RmaosAo ) ? r[2] : m.ao ),
+					wwByte( sv ) );
 			}
 		}
 		if ( !write( img, QStringLiteral( "rmaos" ), s.rmaos ) )
@@ -2026,6 +2039,47 @@ bool wwPbrmCardSources( const NifModel * nif, const QString & looseRoot, const Q
 		if ( !nif->findResourceFile( n, "textures", ".dds" ).isEmpty() )
 			s.normal = n;
 	}
+	return true;
+}
+
+/*! Write only the .pbrm subsurface mask (in alpha) into `<stem>_sss.dds`, for a shape on a mixed
+ *  legacy+pbrm model so channel 11 still reads its _SSS map (or 0 when absent) without altering channel 10. */
+bool wwPbrmCardSssOnly( const NifModel * nif, const QString & looseRoot, const QString & texDir,
+	const QString & gameDir, const QString & stem, const PbrmMaterial & m, QString & outName, QString & why )
+{
+	std::unique_ptr<DDSTexture16> sss;
+	if ( m.features & PbrmMaterial::SubsurfaceTexture ) {
+		sss = wwPbrmLoadTexture( nif, looseRoot, m.subsurface.lookupPath, why );
+		if ( !sss )
+			return false;
+	}
+	int gw = 4, gh = 4;
+	if ( sss ) {
+		gw = sss->getWidth(); gh = sss->getHeight();
+		while ( gw > 2048 || gh > 2048 ) {
+			gw = qMax( 1, gw / 2 ); gh = qMax( 1, gh / 2 );
+		}
+	}
+	float mip = 0.0f;
+	if ( sss )
+		for ( int s2 = sss->getWidth(); s2 > gw; s2 /= 2 )
+			mip += 1.0f;
+	QImage img( gw, gh, QImage::Format_ARGB32 );
+	for ( int y = 0; y < gh; y++ ) {
+		QRgb * d = reinterpret_cast<QRgb *>( img.scanLine( y ) );
+		const float v = ( float( y ) + 0.5f ) / float( gh );
+		for ( int x = 0; x < gw; x++ ) {
+			const float u = ( float( x ) + 0.5f ) / float( gw );
+			const float sv = sss ? qBound( 0.0f, sss->getPixelT( u, v, mip )[0] * m.subsurfaceWeight, 1.0f ) : 0.0f;
+			d[x] = qRgba( 0, 0, 0, wwByte( sv ) );
+		}
+	}
+	const QString file = stem + QStringLiteral( "_sss.dds" );
+	if ( !wwWriteDdsBgra( texDir + "/" + file, img ) ) {
+		why = QStringLiteral( "cannot write %1/%2" ).arg( texDir, file );
+		return false;
+	}
+	outName = gameDir + "\\" + file;
 	return true;
 }
 
@@ -24453,7 +24507,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * default specular: weight 1, white, IOR 1.5). */
 					std::unique_ptr<QTemporaryDir> pbrmTmp;
 					std::vector<WwPbrmSpecSlot> pbrmSpecSlots;
+					std::vector<WwPbrmSssSlot> pbrmSssSlots;
 					bool pbrmSpec = false;
+					bool pbrmSubsurface = false;
 
 					{
 						Scene * sc = skope->ogl->getScene();
@@ -24587,6 +24643,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 										s.bsp->wwTextureOverride.insert( 1, s.normal );
 									s.bsp->wwTextureOverride.insert( 2, s.emissive );    // empty = black: a pbr set's emissive is its own or none
 									s.bsp->wwTextureOverride.insert( 7, s.rmaos );
+									s.bsp->wwSubsurfaceInMaskAlpha = true;
+									pbrmSubsurface = true;
 									lodmEmissiveScale.insert( s.block, s.emissiveScale );
 									pbrmSpecSlots.push_back( { s.bsp, s.spec, s.weight, s.rmaos } );
 									if ( !s.specDefault )
@@ -24595,9 +24653,30 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								lodmShapes++;
 							}
 						}
+						if ( !familyPbr && !pbrmShapes.empty() ) {
+							pbrmTmp = std::make_unique<QTemporaryDir>();
+							const QString sub = QStringLiteral( "wwpbrmcard%1" ).arg( ++wwPbrmBakeSerial );
+							const QString texDir = pbrmTmp->path() + "/textures/" + sub;
+							if ( pbrmTmp->isValid() && QDir().mkpath( texDir ) ) {
+								std::vector<WwPbrmSssSlot> pending;
+								for ( auto & s : pbrmShapes ) {
+									QString sssPath, why;
+									if ( wwPbrmCardSssOnly( nif, looseRoot, texDir, QStringLiteral( "textures\\" ) + sub,
+											QString::number( s.block ), s.m, sssPath, why ) ) {
+										pending.push_back( { s.bsp, sssPath, s.bsp->wwTextureOverride.value( 7 ),
+											s.bsp->wwTextureOverride.contains( 7 ) } );
+									}
+								}
+								if ( !pending.empty() ) {
+									const_cast< NifModel * >( nif )->addResourceRoot( QDir::toNativeSeparators( pbrmTmp->path() + "/textures" ) );
+									pbrmSssSlots = std::move( pending );
+									pbrmSubsurface = true;
+								}
+							}
+						}
 						for ( const auto & s : pbrmShapes ) {
 							ms << "pbrm " << s.served << " " << s.route << " "
-								<< ( familyPbr ? "used" : s.refusal.isEmpty() ? "unused" : "refused" ) << " tree " << s.tree << "\n";
+								<< ( familyPbr ? "used" : !pbrmSssSlots.empty() ? "sss-only" : s.refusal.isEmpty() ? "unused" : "refused" ) << " tree " << s.tree << "\n";
 							if ( !s.refusal.isEmpty() )
 								ms << "pbrmrefused " << s.served << " " << s.refusal << "\n";
 						}
@@ -25321,6 +25400,20 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							for ( const auto & p : pbrmSpecSlots )
 								p.bsp->wwTextureOverride.insert( 7, which == 0 ? p.spec : which == 1 ? p.weight : p.restore );
 						};
+						auto pbrmSssSwap = [&]( bool on ) {
+							for ( const auto & p : pbrmSssSlots ) {
+								if ( on ) {
+									p.bsp->wwTextureOverride.insert( 7, p.sssTex );
+									p.bsp->wwSubsurfaceInMaskAlpha = true;
+								} else {
+									if ( p.hadOverride )
+										p.bsp->wwTextureOverride.insert( 7, p.restore );
+									else
+										p.bsp->wwTextureOverride.remove( 7 );
+									p.bsp->wwSubsurfaceInMaskAlpha = false;
+								}
+							}
+						};
 
 						/* The crop: the frame's extents out of the viewport's, around THIS
 						 * VIEW'S OWN silhouette centre (`ox`, `oy` in units, the pair pass
@@ -25452,7 +25545,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 									tN = frameOf( channel( 8 ), ox, oy );		// normal, view space
 									tD = frameOf( channel( 9 ), ox, oy );		// window depth
 									tS = frameOf( channel( 10 ), ox, oy );		// the material channel: legacy pair, or a .lodm's third texture raw
-									tM = frameOf( channel( 11 ), ox, oy );		// alpha-tested: the leaf cards
+									if ( !pbrmSssSlots.empty() ) pbrmSssSwap( true );
+									tM = frameOf( channel( 11 ), ox, oy );		// alpha-tested / .pbrm _SSS subsurface mask
+									if ( !pbrmSssSlots.empty() ) pbrmSssSwap( false );
 									tE = frameOf( channel( 13 ), ox, oy );		// the emissive: a .lodm's texture raw, or the vanilla glow rule
 									if ( pbrmSpec ) {
 										pbrmSlot7( 0 );
@@ -25472,7 +25567,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 									const QImage s8 = channelOff( 8, RW, RH, halfH, ox, oy );
 									const QImage s9 = channelOff( 9, RW, RH, halfH, ox, oy );
 									const QImage s10 = channelOff( 10, RW, RH, halfH, ox, oy );
+									if ( !pbrmSssSlots.empty() ) pbrmSssSwap( true );
 									const QImage s11 = channelOff( 11, RW, RH, halfH, ox, oy );
+									if ( !pbrmSssSlots.empty() ) pbrmSssSwap( false );
 									const QImage s13 = channelOff( 13, RW, RH, halfH, ox, oy );
 									QImage s10p, s10w;
 									if ( pbrmSpec ) {
@@ -25626,7 +25723,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 										 * texture; B multiplies that texture's AO (neutral for
 										 * the vanilla pair) by the height-neighbourhood AO. */
 										const QRgb ps = pS.pixel( x, y );
-										const int mask = unp( qRed( pM.pixel( x, y ) ) ) >= 128 ? 255 : 0;
+										const int mask = pbrmSubsurface
+											? unp( qRed( pM.pixel( x, y ) ) )
+											: ( unp( qRed( pM.pixel( x, y ) ) ) >= 128 ? 255 : 0 );
 										rmaos.setPixel( i * tw + x, j * th + y,
 											qRgba( unp( qRed( ps ) ), unp( qGreen( ps ) ), unp( qBlue( ps ) ) * ao / 255, mask ) );
 										/* The emissive sheet, un-premultiplied like the rest and

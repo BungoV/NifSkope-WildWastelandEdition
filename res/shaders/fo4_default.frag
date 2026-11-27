@@ -66,6 +66,7 @@ uniform vec3 tintColor;
  * is actually stored. */
 uniform int lodChannelView;
 uniform bool lodMaskRaw;		// channel 10: the specular slot raw (a source .lodm's third texture)
+uniform bool lodSubsurfaceRaw;	// channel 11: the specular slot's alpha carries the .pbrm subsurface mask (_SSS)
 uniform bool lodEmissiveRaw;	// channel 13: the glow slot raw (a source .lodm's emissive texture)
 uniform vec3 lodEmissiveColor;	// channel 13: the source's emissive colour, folded into the legacy sheet
 uniform float lodSpecStrength;	// channel 10: the material's specular strength, lighting or not
@@ -590,12 +591,12 @@ void main()
 			 * a curved albedo. The consumer lights the card. */
 			v = baseMap.rgb * C.rgb;
 		} else if ( lodChannelView == 11 ) {
-			/* The impostor bake's subsurface mask source. A LOD tree: the
-			 * alpha-tested shapes are the leaf cards, the trunk is opaque. A
-			 * near tree: every shape is alpha-tested (the bark card too), and
-			 * the branch cards are the ones that carry the tree-animation
-			 * flag; the bake picks the rule for the model. */
-			float leaf = lodMaskByTree ? ( lodTreeAnim ? 1.0 : 0.0 ) : ( alphaFlags > 0 ? 1.0 : 0.0 );
+			/* The impostor bake's subsurface mask source. A .pbrm shape packs its
+			 * _SSS map (or 0 when absent) in SpecularMap.a; legacy shapes fall back
+			 * to tree-animation flag (near trees) or alpha test (LOD trees). */
+			float leaf = lodSubsurfaceRaw
+				? texture( SpecularMap, offset, wwMipBias ).a
+				: ( lodMaskByTree ? ( lodTreeAnim ? 1.0 : 0.0 ) : ( alphaFlags > 0 ? 1.0 : 0.0 ) );
 			/* G: the WIND WEIGHT W (IMPOSTORWIND1, sway A): the raw vertex alpha on a
 			 * tree-animation shape -- the only wind input the game's tree vertex
 			 * shader reads -- and 0 on any other shape, which the game never moves.

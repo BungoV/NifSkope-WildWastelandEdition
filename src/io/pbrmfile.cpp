@@ -213,7 +213,8 @@ PbrmMaterial pbrmParse( const QByteArray & bytes )
 	QString canon = m.shader.trimmed();
 	if ( canon.endsWith( QLatin1String( " Surface" ), Qt::CaseInsensitive ) )
 		canon.chop( 8 );
-	if ( canon.compare( QLatin1String( "Standard" ), Qt::CaseInsensitive ) != 0 ) {
+	if ( canon.compare( QLatin1String( "Standard" ), Qt::CaseInsensitive ) != 0
+		&& canon.compare( QLatin1String( "Advanced Subsurface" ), Qt::CaseInsensitive ) != 0 ) {
 		m.unsupported = true;
 		m.diagnostics.append( QStringLiteral( "shader family \"%1\" is not in the supported slice" ).arg( m.shader ) );
 	}
@@ -232,24 +233,27 @@ PbrmMaterial pbrmParse( const QByteArray & bytes )
 
 	// Constants. A missing texture forces its positive overrides on, so the
 	// constant applies — with the documented exemption for porosity, whose
-	// absence has a meaningful derived value instead.
-	m.overrideColor = pbrmBool( vBase, "overrideColor", true ) || !samplable( m.baseColor );
+	// absence has a meaningful derived value instead. When a slot carries a
+	// valid enabled texture and the override key is omitted (sparse v6 JSON
+	// emitted by pbrm.exe convert), default to sampling the map, matching the
+	// editor preview (materialpreviewwidget.cpp:502-543).
+	m.overrideColor = pbrmBool( vBase, "overrideColor", !samplable( m.baseColor ) ) || !samplable( m.baseColor );
 	pbrmColor( vBase, "color", m.baseColorRGB );
-	m.overrideOpacity = pbrmBool( vBase, "overrideOpacity", true ) || !samplable( m.baseColor );
+	m.overrideOpacity = pbrmBool( vBase, "overrideOpacity", !samplable( m.baseColor ) ) || !samplable( m.baseColor );
 	m.opacity = pbrmNumber( vBase, "opacity", 1.0f );
 	m.diffuseRoughness = qBound( 0.0f, pbrmNumber( vBase, "diffuseRoughness", 0.0f ), 1.0f );
 
-	m.overrideNormal = pbrmBool( vNorm, "overrideNormal", true ) || !samplable( m.normal );
+	m.overrideNormal = pbrmBool( vNorm, "overrideNormal", !samplable( m.normal ) ) || !samplable( m.normal );
 	m.normalStrength = pbrmNumber( vNorm, "strength", 1.0f );
 	m.heightInBlue = pbrmBool( vNorm, "heightInBlue", false );
 	m.curvatureInAlpha = pbrmBool( vNorm, "curvatureInAlpha", false );
 	m.cavitySpecOcclusion = pbrmNumber( vNorm, "cavitySpecOcclusion", 1.0f );
 
-	m.overrideRoughness = pbrmBool( vRmaos, "overrideRoughness", true ) || !samplable( m.rmaos );
+	m.overrideRoughness = pbrmBool( vRmaos, "overrideRoughness", !samplable( m.rmaos ) ) || !samplable( m.rmaos );
 	m.roughness = pbrmNumber( vRmaos, "roughness", 0.5f );
-	m.overrideMetallic = pbrmBool( vRmaos, "overrideMetallic", true ) || !samplable( m.rmaos );
+	m.overrideMetallic = pbrmBool( vRmaos, "overrideMetallic", !samplable( m.rmaos ) ) || !samplable( m.rmaos );
 	m.metallic = pbrmNumber( vRmaos, "metallic", 0.0f );
-	m.overrideAo = pbrmBool( vRmaos, "overrideAo", true ) || !samplable( m.rmaos );
+	m.overrideAo = pbrmBool( vRmaos, "overrideAo", !samplable( m.rmaos ) ) || !samplable( m.rmaos );
 	m.ao = pbrmNumber( vRmaos, "ao", 1.0f );
 	// RMAOS alpha. v4/v5: the dielectric F0 itself, clamped to [0, 0.16] like
 	// the FO4CS reader. v6: the OpenPBR specular WEIGHT, [0,1], default 1,
@@ -265,14 +269,14 @@ PbrmMaterial pbrmParse( const QByteArray & bytes )
 		|| ( !m.specularV6 && !alphaIsF0 );
 	if ( m.specularV6 ) {
 		m.specularWeight = qBound( 0.0f, pbrmNumber( vRmaos, "specularWeight", 1.0f ), 1.0f );
-		m.overrideSpecularWeight = pbrmBool( vRmaos, "overrideSpecularWeight", true )
+		m.overrideSpecularWeight = pbrmBool( vRmaos, "overrideSpecularWeight", !samplable( m.rmaos ) )
 			|| !samplable( m.rmaos ) || !alphaIsWeight;
 		m.overrideF0 = true;		// no authored F0 in v6
 	} else {
 		m.f0 = qBound( 0.0f, pbrmNumber( vRmaos, "f0", 0.04f ), 0.16f );
 		// RMAOS alpha is F0 only while alphaCarries says so; under Porosity, F0
 		// always takes its constant.
-		m.overrideF0 = pbrmBool( vRmaos, "overrideF0", true ) || !samplable( m.rmaos ) || !alphaIsF0;
+		m.overrideF0 = pbrmBool( vRmaos, "overrideF0", !samplable( m.rmaos ) ) || !samplable( m.rmaos ) || !alphaIsF0;
 	}
 	m.overridePorosity = pbrmBool( vRmaos, "overridePorosity", false );
 	m.porosity = pbrmNumber( vRmaos, "porosity", 0.5f );
@@ -340,6 +344,17 @@ PbrmMaterial pbrmParse( const QByteArray & bytes )
 		}
 		const QString ov = vTint.value( QStringLiteral( "overlap" ) ).toString( QStringLiteral( "Normalize" ) );
 		m.tintOverlap = ov == QLatin1StringView( "Add" ) ? 1 : ov == QLatin1StringView( "Priority RGBA" ) ? 2 : 0;
+	}
+
+	// Subsurface mask (primarySubsurface): _SSS map for foliage / Advanced Subsurface.
+	{
+		QJsonObject vSss;
+		m.subsurface = pbrmSlot( uv, "primarySubsurface", vSss, m.diagnostics );
+		m.subsurfaceWeight = qBound( 0.0f, pbrmNumber( vSss, "weight", 1.0f ), 1.0f );
+		m.overrideSubsurfaceWeight = pbrmBool( vSss, "overrideWeight", !samplable( m.subsurface ) )
+			|| !samplable( m.subsurface );
+		if ( samplable( m.subsurface ) && !m.overrideSubsurfaceWeight )
+			m.features |= PbrmMaterial::SubsurfaceTexture;
 	}
 
 	// Composition (lane PBRR4; FO4CS PBRM.cpp:654-664 + 747-757). Unknown mode names fall

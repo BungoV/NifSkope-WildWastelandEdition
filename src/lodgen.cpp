@@ -22060,6 +22060,14 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 			: fams[1] ? QStringLiteral( "pbr" ) : QStringLiteral( "legacy" ) );
 		root.insert( QStringLiteral( "kind" ), QStringLiteral( "cardArray" ) );
 		tex.insert( QStringLiteral( "normal" ), gameBase + QStringLiteral( "_n.DDS" ) );
+		const bool mixed = ( fams[0] && fams[1] );
+		std::vector<std::vector<quint32>> colorAll, maskAll;
+		if ( mixed ) {
+			for ( Group * c : fams ) {
+				colorAll.insert( colorAll.end(), c->color.begin(), c->color.end() );
+				maskAll.insert( maskAll.end(), c->mask.begin(), c->mask.end() );
+			}
+		}
 		for ( Group * c : fams ) {
 			if ( !c )
 				continue;
@@ -22073,17 +22081,20 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 				|| !lodgenEmissiveShipsBlack( c->emis, c->aw, c->ah, c->auxMips );
 			if ( !writeEmissive )
 				blackEmissiveDropped++;
-			const struct { QString suffix; const std::vector<std::vector<quint32>> * px; bool bc3; bool aux; } sheets[3] = {
-				{ colorSfx, &c->color, true, false }, { maskSfx, &c->mask, true, true },
+			const std::vector<std::vector<quint32>> * colorPx = ( mixed && !c->pbr ) ? &colorAll : &c->color;
+			const std::vector<std::vector<quint32>> * maskPx = ( mixed && !c->pbr ) ? &maskAll : &c->mask;
+			const struct { QString suffix; const std::vector<std::vector<quint32>> * px; bool bc3; bool aux; bool isMask; bool skip; } sheets[3] = {
+				{ colorSfx, colorPx, true, false, false, false },
+				{ maskSfx, maskPx, true, true, true, mixed && c->pbr },
 				// the emissive is BC1: three channels and no alpha to carry
-				{ emSfx, &c->emis, false, true } };
+				{ emSfx, &c->emis, false, true, false, !writeEmissive } };
 			for ( const auto & s : sheets ) {
-				if ( s.px == &c->emis && !writeEmissive )
+				if ( s.skip )
 					continue;
 				const int sw = s.aux ? c->aw : c->w, sh = s.aux ? c->ah : c->h;
 				const int sm = s.aux ? c->auxMips : c->mips;
 				// the mask is the `_rvaos` RGBA8 sheet, the other two stay block-coded
-				const bool wrote = s.px == &c->mask
+				const bool wrote = s.isMask
 					? lodgenWriteDdsArrayRgba8( fileBase + s.suffix, sw, sh, *s.px, sm )
 					: lodgenWriteDdsArray( fileBase + s.suffix, sw, sh, *s.px, s.bc3, sm, false );
 				if ( !wrote )

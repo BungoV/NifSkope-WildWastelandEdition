@@ -2898,6 +2898,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 	 * shape bakes the legacy pair, which needs the specular strength whether
 	 * or not lighting is on (specStrength above is zeroed when it is off). */
 	prog->uni1i( "lodMaskRaw", bsprop->wwTextureOverride.contains( 7 ) ? 1 : 0 );
+	prog->uni1i( "lodSubsurfaceRaw", ( bsprop->wwTextureOverride.contains( 7 ) && bsprop->wwSubsurfaceInMaskAlpha ) ? 1 : 0 );
 	/* The impostor bake's emissive channel: a shape whose GLOW slot (2) a
 	 * source .lodm retargeted reads that texture raw - GlowMap is bound from
 	 * fileName( 2 ) above, which consults the retarget, and falls back to the

@@ -812,6 +812,8 @@ public:
 	 * (docs/LODGEN_IMPOSTOR_SPEC.md) so the photograph is of the textures the
 	 * LOD material names, not the vanilla set's; empty in every other use. */
 	QHash<int, QString> wwTextureOverride;
+	//! True when wwTextureOverride[7] packs the .pbrm subsurface mask in alpha (impostor bake).
+	bool wwSubsurfaceInMaskAlpha = false;
 
 	//! The resolved-state fields of one WW_PBRM_CENSUS row (lane PBRR0): the
 	//! route that served the shape, its file, the .pbrm envelope, the refusal.

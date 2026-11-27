@@ -109,13 +109,14 @@ def mask_a(path, layer):
     return [m[..., 3].copy() for m in sheet_mips(path, layer)] if path else None
 
 
-def rvaos_layer(g_path, layer, sky, sub=None):
-    """The values meant for one layer: R = 255 - gloss, G = sky (list of padded uint8 mips), B AO, A subsurface
-    (the `_gsaos` A, or `sub` when that A no longer holds it: the 11-27 sky pass overwrote it)."""
+def rvaos_layer(g_path, layer, sky, sub=None, already_rvaos=False):
+    """The values meant for one layer: R = roughness (255 - gloss when source is legacy _gsaos, kept as-is when
+    source is already _rvaos), G = sky (list of padded uint8 mips), B AO, A subsurface."""
     out = []
     for k, (m, s) in enumerate(zip(sheet_mips(g_path, layer), sky)):
         v = m.copy()
-        v[..., 0] = 255 - m[..., 0]
+        if not already_rvaos:
+            v[..., 0] = 255 - m[..., 0]
         v[..., 1] = s
         if sub is not None:
             v[..., 3] = sub[k]
@@ -123,13 +124,13 @@ def rvaos_layer(g_path, layer, sky, sub=None):
     return out
 
 
-def write_rvaos(g_path, sky_by_layer, dst, work=None, sub_path=''):
+def write_rvaos(g_path, sky_by_layer, dst, work=None, sub_path='', already_rvaos=False):
     """RGBA8 (DXGI 28, linear, full mip chain, DX10 header) copy of `g_path` with the rvaos channels, written
     losslessly; returns (max error, mean error, texel count) of the read-back against the values meant."""
     W, H, mips, fmt, nl = dds_info(g_path)
     meant = []
     for li in range(nl):
-        meant += rvaos_layer(g_path, li, sky_by_layer[li], mask_a(sub_path, li))
+        meant += rvaos_layer(g_path, li, sky_by_layer[li], mask_a(sub_path, li), already_rvaos=already_rvaos)
     hdr = bytearray(open(g_path, 'rb').read(HDR))
     struct.pack_into('<I', hdr, 128, RGBA8)
     flags = struct.unpack_from('<I', hdr, 8)[0]
@@ -295,10 +296,11 @@ def bake(a):
     j = lodm(base + '.lodm')
     arr = j['array']
     oct_n = int(arr['oct'])
-    d_path, n_path = base + '_d.DDS', base + '_n.DDS'
-    g_path = base + '_gsaos.DDS'
+    d_path = base + '_d.DDS' if os.path.isfile(base + '_d.DDS') else base + '_bc.DDS'
+    n_path = base + '_n.DDS'
+    g_path = base + '_rvaos.DDS' if os.path.isfile(base + '_rvaos.DDS') else base + '_gsaos.DDS'
     W, H, mips, fmt, nl = dds_info(g_path)
-    assert fmt == 77 and dds_info(d_path)[:2] == (W, H) and dds_info(n_path)[:2] == (W, H), 'sheet layout'
+    assert fmt in (77, RGBA8) and dds_info(d_path)[:2] == (W, H) and dds_info(n_path)[:2] == (W, H), 'sheet layout'
     assert nl == len(arr['layers']), (nl, len(arr['layers']))
     fw, fh = W // oct_n, H // oct_n
     span = layer_span(W, H, mips)
@@ -355,15 +357,22 @@ def bake(a):
 def finish(a, base, sky):
     """Write `<set>_rvaos.DDS` (RGBA8) and the `.lodm` that names it into --stage; layers without a sky value
     (a --layers run) read open sky (255)."""
-    g_path, d_path = getattr(a, 'gsaos', '') or base + '_gsaos.DDS', base + '_d.DDS'
+    d_path = base + '_d.DDS' if os.path.isfile(base + '_d.DDS') else base + '_bc.DDS'
+    default_g = base + '_rvaos.DDS' if os.path.isfile(base + '_rvaos.DDS') else base + '_gsaos.DDS'
+    g_path = getattr(a, 'gsaos', '') or default_g
     W, H, mips, fmt, nl = dds_info(g_path)
+    already_rvaos = (fmt == RGBA8)
     for li in range(nl):
         if li not in sky:
             sky[li] = [np.full((mh + (-mh) % 4, mw + (-mw) % 4), 255, np.uint8) for mw, mh, _s in mip_sizes(W, H, mips)]
     dst = os.path.join(a.stage, os.path.basename(base) + '_rvaos.DDS')
-    mx, mean, cnt = write_rvaos(g_path, sky, dst, sub_path=getattr(a, 'mask_a', ''))
+    mx, mean, cnt = write_rvaos(g_path, sky, dst, sub_path=getattr(a, 'mask_a', ''), already_rvaos=already_rvaos)
     report_error(os.path.basename(dst), mx, mean, cnt)
-    spec = card_specular(g_path, d_path, lodm(base + '.lodm')['array']['layers'])
+    j = lodm(base + '.lodm')
+    if already_rvaos and 'specular' in j['array'] and len(j['array']['specular']) == nl:
+        spec = j['array']['specular']
+    else:
+        spec = card_specular(g_path, d_path, j['array']['layers'])
     write_lodm(base + '.lodm', os.path.join(a.stage, os.path.basename(base) + '.lodm'), spec)
     print('  specular per layer', spec)
     print('WROTE', dst)
