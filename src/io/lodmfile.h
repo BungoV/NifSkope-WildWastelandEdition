@@ -94,6 +94,9 @@ struct LodmMaterial
 	//! the three textures, as authored: colour (diffuse or base colour),
 	//! normal, mask (GSAOS or RMAOS); empty when the file names none
 	QString color, normal, mask;
+	//! true when `mask` is a card `_rvaos` sheet (textures key `rvaos`): R roughness, G sky visibility, B AO,
+	//! A subsurface. False for a sheet from a bake before it (`gsaos`/`rmaos`), which a reader draws as before.
+	bool maskRvaos = false;
 	//! the emissive sheet (`textures.emissive`, `_g` legacy / `_e` pbr);
 	//! empty when the file names none
 	QString emissive;
@@ -107,7 +110,7 @@ struct LodmMaterial
 	int payloadVersion = 0;		//!< the payload's `lodm`: 1, 2 (card sway) or 3 (array layout)
 	/*! lodm 3 only: the per-family sheets, [0] legacy and [1] pbr (`normal` above is
 	 *  the shared one). `color`/`mask`/`emissive` above hold the FIRST family present. */
-	struct FamilySheets { bool present = false; QString color, mask, emissive; int layers = 0; };
+	struct FamilySheets { bool present = false; QString color, mask, emissive; int layers = 0; bool rvaos = false; };
 	FamilySheets fam[2];
 	bool mixed = false;			//!< lodm 3 holding both families
 	QVector<qint8> layerPbr;		//!< lodm 3: per layer, its family (1 = pbr)
@@ -143,5 +146,10 @@ inline const char * lodmMaskKey( bool pbr ) { return pbr ? "rmaos" : "gsaos"; }
 inline const char * lodmColorSuffix( bool pbr ) { return pbr ? "_bc" : "_d"; }
 inline const char * lodmMaskSuffix( bool pbr ) { return pbr ? "_rmaos" : "_gsaos"; }
 inline const char * lodmEmissiveSuffix( bool pbr ) { return pbr ? "_e" : "_g"; }
+//! The card array mask a bake WRITES, both families: `_rvaos`, R roughness (legacy 255 - gloss),
+//! G sky visibility, B AO, A subsurface. Only the bake's output name: a source .pbrm / .lodm
+//! input keeps its own slot names (rmaos, gsaos) and lodmMaskKey/lodmMaskSuffix above.
+inline const char * lodmCardMaskKey() { return "rvaos"; }
+inline const char * lodmCardMaskSuffix() { return "_rvaos"; }
 
 #endif // LODMFILE_H

@@ -3158,6 +3158,30 @@ bool lodgenWriteDds( const QString & path, int w, int h,
 	const std::vector<quint32> & bgra, bool bc3 = false, int maxMips = 0,
 	bool bc1Alpha = false, quint32 stamp0 = 0, quint32 stamp1 = 0,
 	bool mipsToOne = false, bool bc7 = false );
+// the card mask `_rvaos` (RGBA8) helpers, defined beside lodgenWriteDdsArray below
+static bool lodgenWriteDdsArrayRgba8( const QString & path, int w, int h,
+	const std::vector<std::vector<quint32>> & layers, int maxMips );
+static void lodgenCardMaskToRvaos( std::vector<quint32> & px, bool pbr );
+
+/*! The ONE specular (legacy) or metallic (pbr) value of a card layer: the mask's G, the mean over
+ *  the covered texels (alpha >= covTest) weighted by the coverage alpha, 0..1 rounded to 4 places.
+ *  `mask` and `colour` are the same size (the frame size, before any halving). */
+static double lodgenCardSpecular( const QImage & mask, const QImage & colour, int covTest )
+{
+	double sum = 0.0, wsum = 0.0;
+	for ( int y = 0; y < mask.height(); y++ ) {
+		const QRgb * rc = reinterpret_cast<const QRgb *>( mask.constScanLine( y ) );
+		const QRgb * ac = reinterpret_cast<const QRgb *>( colour.constScanLine( y ) );
+		for ( int x = 0; x < mask.width(); x++ ) {
+			const int a = qAlpha( ac[x] );
+			if ( a >= covTest ) {
+				sum += double( a ) * qGreen( rc[x] );
+				wsum += double( a );
+			}
+		}
+	}
+	return wsum > 0.0 ? std::round( sum / wsum / 255.0 * 10000.0 ) / 10000.0 : 0.0;
+}
 
 struct LodgenCard
 {
@@ -4025,7 +4049,7 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 				};
 				bool ok = true;
 				const QString colorSfx = QLatin1String( lodmColorSuffix( card.octPbr ) ) + QStringLiteral( ".DDS" );
-				const QString maskSfx = QLatin1String( lodmMaskSuffix( card.octPbr ) ) + QStringLiteral( ".DDS" );
+				const QString maskSfx = QLatin1String( lodmCardMaskSuffix() ) + QStringLiteral( ".DDS" );
 				/* THE AUX HALVING. The base colour keeps the frame's size - it
 				 * carries the coverage in alpha, so it is the silhouette - and
 				 * the other three come down by `auxDiv`. Done AFTER the frame
@@ -4048,6 +4072,8 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 					return auxDiv <= 1 ? img
 						: img.scaled( aw, ah, Qt::IgnoreAspectRatio, Qt::SmoothTransformation );
 				};
+				// the one specular / metallic value, from the frame-size mask (before the halving)
+				const double cardSpec = lodgenCardSpecular( rm, alb, card.octCovTest );
 				const QImage nrmA = down( nrm ), rmA = down( rm );
 				if ( !QFile::exists( base + colorSfx ) )
 					ok = lodgenWriteDds( base + colorSfx, w, h, pixels( alb ), true, frameMips ) && ok;
@@ -4059,9 +4085,17 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 					{ QStringLiteral( "_n.DDS" ), &nrmA, true }, { maskSfx, &rmA, false } };
 				for ( const auto & s : sheets ) {
 					const QString path = base + s.suffix;
-					if ( !QFile::exists( path ) )
+					if ( QFile::exists( path ) )
+						continue;
+					if ( s.suffix == maskSfx ) {
+						// the mask is the `_rvaos` RGBA8 sheet (one layer, DX10), not a block codec
+						std::vector<quint32> rv = pixels( *s.img );
+						lodgenCardMaskToRvaos( rv, card.octPbr );
+						ok = lodgenWriteDdsArrayRgba8( path, aw, ah, std::vector<std::vector<quint32>>{ rv }, auxMips ) && ok;
+					} else {
 						ok = lodgenWriteDds( path, aw, ah, pixels( *s.img ), true, auxMips,
 								false, 0, 0, false, s.bc7 ) && ok;
+					}
 				}
 				// the emissive sheet is BC1: RGB only, no alpha to carry
 				const QString emSfx = QLatin1String( lodmEmissiveSuffix( card.octPbr ) ) + QStringLiteral( ".DDS" );
@@ -4094,7 +4128,10 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 					}
 					tex.insert( QLatin1String( lodmColorKey( card.octPbr ) ), game + colorSfx );
 					tex.insert( QStringLiteral( "normal" ), game + QStringLiteral( "_n.DDS" ) );
-					tex.insert( QLatin1String( lodmMaskKey( card.octPbr ) ), game + maskSfx );
+					tex.insert( QLatin1String( lodmCardMaskKey() ), game + maskSfx );
+					// the mask layout and its one specular / metallic value (docs/LODGEN_LODM_FORMAT.md 2.1)
+					oc.insert( QStringLiteral( "maskLayout" ), QStringLiteral( "rvaos" ) );
+					oc.insert( QStringLiteral( "specular" ), cardSpec );
 					if ( !emi.isNull() )
 						tex.insert( QStringLiteral( "emissive" ), game + emSfx );
 					// a new key, no version bump: a reader ignores keys it does not know (LODGEN_LODM_FORMAT 2)
@@ -5950,6 +5987,87 @@ bool lodgenWriteDdsArray( const QString & path, int w, int h,
 	f.write( reinterpret_cast<const char *>( hdr ), 128 );
 	f.write( reinterpret_cast<const char *>( dx10 ), 20 );
 	return f.write( reinterpret_cast<const char *>( data.data() ), qint64( data.size() ) ) == qint64( data.size() );
+}
+
+/*! The card mask array `_rvaos`: DX10, DXGI 28 (R8G8B8A8_UNORM, linear), uncompressed, every
+ *  layer with its full mip chain (box filter, round to nearest, as the block writers' chain).
+ *  Texels are written R, G, B, A (the input words are BGRA, as everywhere in this file). A block
+ *  codec cannot hold four independent channels on a sheet with a subsurface mask (BC7 measured
+ *  max error 167), so the sheet stays exact (SKYVIS1127C). */
+static bool lodgenWriteDdsArrayRgba8( const QString & path, int w, int h,
+	const std::vector<std::vector<quint32>> & layers, int maxMips )
+{
+	if ( layers.empty() )
+		return false;
+	QFile f( path );
+	if ( !f.open( QIODevice::WriteOnly ) )
+		return false;
+	std::vector<quint8> data;
+	int mips = 0;
+	for ( const std::vector<quint32> & layer : layers ) {
+		std::vector<std::vector<quint32>> chain;
+		chain.push_back( layer );
+		int mw = w, mh = h;
+		while ( mw > 4 && mh > 4 && ( maxMips <= 0 || int( chain.size() ) < maxMips ) ) {
+			const std::vector<quint32> & prev = chain.back();
+			const int nw = mw / 2, nh = mh / 2;
+			std::vector<quint32> next( size_t( nw ) * nh );
+			for ( int y = 0; y < nh; y++ )
+				for ( int x = 0; x < nw; x++ ) {
+					quint32 acc[4] = { 0, 0, 0, 0 };
+					for ( int sy = 0; sy < 2; sy++ )
+						for ( int sx = 0; sx < 2; sx++ ) {
+							const quint32 p = prev[size_t( y * 2 + sy ) * mw + ( x * 2 + sx )];
+							acc[0] += ( p >> 16 ) & 0xFF;
+							acc[1] += ( p >> 8 ) & 0xFF;
+							acc[2] += p & 0xFF;
+							acc[3] += ( p >> 24 ) & 0xFF;
+						}
+					next[size_t( y ) * nw + x] = ( ( ( acc[3] + 2 ) >> 2 ) << 24 )
+						| ( ( ( acc[0] + 2 ) >> 2 ) << 16 ) | ( ( ( acc[1] + 2 ) >> 2 ) << 8 )
+						| ( ( acc[2] + 2 ) >> 2 );
+				}
+			chain.push_back( std::move( next ) );
+			mw = nw;
+			mh = nh;
+		}
+		mips = int( chain.size() );
+		for ( const std::vector<quint32> & mip : chain )
+			for ( quint32 p : mip ) {
+				data.push_back( quint8( p >> 16 ) );
+				data.push_back( quint8( p >> 8 ) );
+				data.push_back( quint8( p ) );
+				data.push_back( quint8( p >> 24 ) );
+			}
+	}
+	quint32 hdr[32] = { 0 };
+	hdr[0] = 0x20534444;            // 'DDS '
+	hdr[1] = 124;
+	hdr[2] = 0x0002100F;            // caps|height|width|pitch|pf|mipcount
+	hdr[3] = quint32( h );
+	hdr[4] = quint32( w );
+	hdr[5] = quint32( w ) * 4;      // pitch of mip 0
+	hdr[7] = quint32( mips );
+	hdr[19] = 32;
+	hdr[20] = 0x4;                  // fourCC
+	hdr[21] = 0x30315844U;          // 'DX10'
+	hdr[27] = 0x401008;             // caps: complex|texture|mipmap
+	const quint32 dx10[5] = { 28U, 3U, 0U, quint32( layers.size() ), 0U };
+	f.write( reinterpret_cast<const char *>( hdr ), 128 );
+	f.write( reinterpret_cast<const char *>( dx10 ), 20 );
+	return f.write( reinterpret_cast<const char *>( data.data() ), qint64( data.size() ) ) == qint64( data.size() );
+}
+
+/*! One card mask layer (BGRA words of the bake's `_oct_gsaos`/`_oct_rmaos` PNG: R gloss or
+ *  roughness, G specular or metallic, B AO, A subsurface) as the `_rvaos` layout: R roughness
+ *  (a legacy set's 255 - gloss), G sky visibility, B AO, A subsurface. This bake has no sky
+ *  term, so G is 255 (open sky) and the post-pass tools/card_skyvis.py fills it. */
+static void lodgenCardMaskToRvaos( std::vector<quint32> & px, bool pbr )
+{
+	for ( quint32 & p : px ) {
+		const quint32 r = ( p >> 16 ) & 0xFF;
+		p = ( p & 0xFF000000U ) | ( ( pbr ? r : 255U - r ) << 16 ) | 0x0000FF00U | ( p & 0xFF );
+	}
 }
 
 } // namespace
@@ -21715,7 +21833,7 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 	 * array, because an array packs whatever sets share a size class and a
 	 * library part-way through a re-bake legitimately holds both vintages. */
 	struct Layer { QString id, lodmGame, source, projection, conv; float halfW = 0, halfH = 0, span = 0, emissiveScale = 1.0f; Vector3 center; QJsonArray frameOff; QJsonObject coverage;
-		bool swayModel = false; double leafAmplitude = 1.0, leafFrequency = 1.0; };
+		bool swayModel = false; double leafAmplitude = 1.0, leafFrequency = 1.0; double specular = 0.0; };
 	struct Group { bool pbr = false, ring = false; int w = 0, h = 0, aw = 0, ah = 0, oct = 0, fw = 0, fh = 0, padX = 0, padY = 0, gapX = 0, gapY = 0, mips = 1, auxMips = 1; QVector<Layer> layers; std::vector<std::vector<quint32>> color, n, mask, emis; };
 	if ( auxDiv < 1 )
 		auxDiv = 1;
@@ -21833,6 +21951,11 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 		for ( int g2 = mipUnit / auxDiv; g2 >= 2; g2 /= 2 )
 			g.auxMips++;
 		g.auxMips = qMax( 1, g.auxMips );
+		/* The layer's ONE specular (legacy) or metallic (pbr) value: the mask's G, mean over the
+		 * covered texels weighted by coverage, taken at the frame size before the halving.
+		 * It travels in `array.specular`; the `_rvaos` sheet carries sky in G instead. */
+		const double layerSpec = lodgenCardSpecular( rm, alb,
+			card.value( QStringLiteral( "coverage" ) ).toObject().value( QStringLiteral( "test" ) ).toInt( 128 ) );
 		if ( auxDiv > 1 ) {
 			nrm = nrm.scaled( g.aw, g.ah, Qt::IgnoreAspectRatio, Qt::SmoothTransformation );
 			rm = rm.scaled( g.aw, g.ah, Qt::IgnoreAspectRatio, Qt::SmoothTransformation );
@@ -21874,10 +21997,15 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 		l.swayModel = lm.root.value( QStringLiteral( "sway" ) ).toString() == QLatin1String( "model" );
 		l.leafAmplitude = lm.root.value( QStringLiteral( "leafAmplitude" ) ).toDouble( 1.0 );
 		l.leafFrequency = lm.root.value( QStringLiteral( "leafFrequency" ) ).toDouble( 1.0 );
+		l.specular = layerSpec;
 		g.layers.append( l );
 		g.color.push_back( pixels( alb ) );
 		g.n.push_back( pixels( nrm ) );
-		g.mask.push_back( pixels( rm ) );
+		{
+			std::vector<quint32> rv = pixels( rm );
+			lodgenCardMaskToRvaos( rv, lm.pbr );
+			g.mask.push_back( std::move( rv ) );
+		}
 		g.emis.push_back( pixels( emi ) );
 	}
 	if ( groups.isEmpty() )
@@ -21936,7 +22064,7 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 			if ( !c )
 				continue;
 			const QString colorSfx = QLatin1String( lodmColorSuffix( c->pbr ) ) + QStringLiteral( ".DDS" );
-			const QString maskSfx = QLatin1String( lodmMaskSuffix( c->pbr ) ) + QStringLiteral( ".DDS" );
+			const QString maskSfx = QLatin1String( lodmCardMaskSuffix() ) + QStringLiteral( ".DDS" );
 			const QString emSfx = QLatin1String( lodmEmissiveSuffix( c->pbr ) ) + QStringLiteral( ".DDS" );
 			// a black emissive is not written, as the mesh arrays have it (lane TIDY1);
 			// WW_LODGEN_KEEP_BLACK_EMISSIVE=1 is the gate's way back
@@ -21954,13 +22082,17 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 					continue;
 				const int sw = s.aux ? c->aw : c->w, sh = s.aux ? c->ah : c->h;
 				const int sm = s.aux ? c->auxMips : c->mips;
-				if ( !lodgenWriteDdsArray( fileBase + s.suffix, sw, sh, *s.px, s.bc3, sm, false ) )
+				// the mask is the `_rvaos` RGBA8 sheet, the other two stay block-coded
+				const bool wrote = s.px == &c->mask
+					? lodgenWriteDdsArrayRgba8( fileBase + s.suffix, sw, sh, *s.px, sm )
+					: lodgenWriteDdsArray( fileBase + s.suffix, sw, sh, *s.px, s.bc3, sm, false );
+				if ( !wrote )
 					return fail( QString( "could not write %1" ).arg( fileBase + s.suffix ) );
 				arrays++;
 			}
 			QJsonObject ft;
 			ft.insert( QLatin1String( lodmColorKey( c->pbr ) ), gameBase + colorSfx );
-			ft.insert( QLatin1String( lodmMaskKey( c->pbr ) ), gameBase + maskSfx );
+			ft.insert( QLatin1String( lodmCardMaskKey() ), gameBase + maskSfx );
 			if ( writeEmissive )
 				ft.insert( QStringLiteral( "emissive" ), gameBase + emSfx );
 			tex.insert( c->pbr ? QStringLiteral( "pbr" ) : QStringLiteral( "legacy" ), ft );
@@ -21985,7 +22117,7 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 			arr.insert( QStringLiteral( "auxClass" ), QJsonArray{ g.aw, g.ah } );
 			arr.insert( QStringLiteral( "auxMips" ), g.auxMips );
 		}
-		QJsonArray layers, scales, sw, amp, frq;
+		QJsonArray layers, scales, sw, amp, frq, specs;
 		const QString lodmGame = gameBase + QStringLiteral( ".lodm" );
 		int unified = 0;
 		for ( Group * c : fams ) {
@@ -22015,6 +22147,7 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 				o.insert( QStringLiteral( "familyLayer" ), l );
 				layers.append( o );
 				scales.append( double( L.emissiveScale ) );
+				specs.append( L.specular );
 				sw.append( L.swayModel ? QStringLiteral( "model" ) : QStringLiteral( "synthetic" ) );
 				amp.append( L.leafAmplitude );
 				frq.append( L.leafFrequency );
@@ -22025,6 +22158,9 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 		arr.insert( QStringLiteral( "layers" ), layers );
 		// one multiple per layer, parallel to `layers`, as the mesh arrays have it
 		arr.insert( QStringLiteral( "emissiveScale" ), scales );
+		// the mask sheet's layout, and the one specular (legacy) / metallic (pbr) value per layer
+		arr.insert( QStringLiteral( "maskLayout" ), QStringLiteral( "rvaos" ) );
+		arr.insert( QStringLiteral( "specular" ), specs );
 		// the sway source and leaf numbers, parallel to `layers` too, when any layer's is the model's
 		if ( anySwayModel ) {
 			arr.insert( QStringLiteral( "sway" ), sw );
