@@ -65,7 +65,7 @@ two-channel `_s`.
 |---|---|---|---|---|---|
 | `_d` / `_bc` | BC3 | colour (diffuse / albedo), unlit | | | coverage |
 | `_n` | BC3; **BC7** on a card | normal X | normal Y | height | sway weight |
-| `_gsaos` / `_rmaos` | BC3 | gloss / roughness | specular / metallic | AO | subsurface mask |
+| `_gsaos` / `_rmaos` | BC3 | gloss / roughness | specular / metallic | AO | subsurface mask; on a card array after the sky pass, **sky visibility** (below) |
 | `_g` / `_e` | BC1 | emissive colour | | | — |
 | `_s` (pbr card only, optional) | BC7 | sqrt(F0') R | sqrt(F0') G | sqrt(F0') B | specular weight |
 
@@ -394,6 +394,22 @@ tests low still gets the neighbours' colour there.
   (trunks, walls, rocks). A near tree is alpha-tested on every shape, bark
   included, so the alpha test alone would have called the whole tree a leaf.
   The meta says which rule ran (`mask tree|alpha`).
+- sky visibility (card arrays, lane SKYVIS1127 2026-11-27): `tools/card_skyvis.py`
+  rewrites A of a card array's `_gsaos` (or `_rmaos`) after the bake. Per
+  covered texel (`_d` A >= the layer's coverage test) the surface point is the
+  orthographic ray through the texel against the source model (alpha test
+  honoured) where it lands within 1.5 height steps of the baked height, else
+  the baked height itself. From there N cosine-weighted rays about the baked
+  normal; a ray counts when it points up (model +Z > 0) and leaves the model
+  unhit. A = counted / N, linear 0..1: 1 = open sky straight up, 0.5 = an open
+  vertical face, 0 = facing down or enclosed. Ground is not geometry: a ray
+  below the horizon is never sky. Uncovered texels take their nearest covered
+  texel inside the frame; mips are coverage-weighted means. Only bytes 0..7 of
+  each BC3 block change, so R, G, B and the header stay byte for byte, and the
+  `.lodm` is unchanged (no version bump). A sheet the pass has not run on
+  still carries the subsurface mask (255 on today's tree cards). The NifSkope
+  card shader reads A only in debug channel 9; Fusion's LOD card reader takes
+  it as the sky term.
 - the emissive sheet: shader channel 13 — the glow slot RAW where a source
   `.lodm` retargeted it (an EMPTY retarget binds black, which is how a pbr
   set that names no emissive says it emits nothing), else the vanilla glow

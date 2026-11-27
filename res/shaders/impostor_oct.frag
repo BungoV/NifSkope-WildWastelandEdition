@@ -70,7 +70,7 @@ layout ( depth_greater ) out float gl_FragDepth;
 // --- the four sheets of spec 42..48 -----------------------------------------
 uniform sampler2D ColourSheet;     // _d / _bc : RGB colour (unlit), A coverage
 uniform sampler2D NormalSheet;     // _n       : R nX, G nY, B height, A sway
-uniform sampler2D MaskSheet;       // _gsaos / _rmaos : R, G, B AO, A subsurface
+uniform sampler2D MaskSheet;       // _gsaos / _rmaos : R, G, B AO, A sky visibility on cards (else subsurface)
 uniform sampler2D EmissiveSheet;   // _g / _e  : RGB emissive colour, BC1
 
 uniform bool  hasMaskSheet;
@@ -653,7 +653,7 @@ void main()
 		else if ( debugChannel == 6 ) dbg = vec3( mask.r );             // gloss / roughness
 		else if ( debugChannel == 7 ) dbg = vec3( mask.g );             // specular / metallic
 		else if ( debugChannel == 8 ) dbg = vec3( mask.b );             // AO
-		else if ( debugChannel == 9 ) dbg = vec3( mask.a );             // subsurface mask
+		else if ( debugChannel == 9 ) dbg = vec3( mask.a );             // sky visibility (cards), else subsurface mask
 		else if ( debugChannel == 10 ) dbg = emissive * emissiveScale;  // emissive x its multiple
 		else if ( debugChannel == 11 ) {
 			/* Which of the three frames won here, as a colour. The one picture
@@ -680,7 +680,7 @@ void main()
 	 *     mask.r       legacy: gloss          pbr: roughness
 	 *     mask.g       legacy: specular       pbr: metallic
 	 *     mask.b       ambient occlusion      (used below, no material needed)
-	 *     mask.a       subsurface mask        (a material label, spec 296)
+	 *     mask.a       cards: sky visibility (tools/card_skyvis.py), else the subsurface mask (spec 296)
 	 *     emissive     the emissive colour; the MULTIPLE is `emissiveScale`
 	 *     familyPbr    which of the two spellings the above are in
 	 *
