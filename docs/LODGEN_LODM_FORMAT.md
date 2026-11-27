@@ -508,7 +508,7 @@ size, mips and slices as the sheet it replaces), and rewrites the `.lodm` beside
 |---|---|
 | `array.maskLayout` | `"rvaos"`. Absent = the old per-family mask (`_gsaos` / `_rmaos`, R gloss / roughness, G specular / metallic) |
 | `array.specular` | one number a layer, indexed by the SET's layer `i`, 0..1: the source mask's G (legacy specular, pbr metallic) averaged over the layer's covered texels (`_d` A >= `coverage.test`), weighted by `_d` A |
-| `textures.legacy.rvaos` / `textures.pbr.rvaos` | the mask (R roughness, G sky Visibility, B AO, A Subsurface; it mirrors `_rmaos`). It replaces the card `gsaos` / `rmaos` keys: a reader that finds only those on a card set reports a stale bake (one log line naming the file) and never reads them as this layout. Near-mesh `rmaos` (pbrm) is untouched |
+| `textures.legacy.rvaos` / `textures.pbr.rvaos` | the mask (R roughness, G sky Visibility, B AO, A Subsurface; it mirrors `_rmaos`). It replaces the card `gsaos` / `rmaos` keys: a reader that finds only those on a card set reports a stale bake (one log line naming the file) and never reads them as this layout. `_rvaos` names only the card mask sheet the bake WRITES: the source `.pbrm` files the bake reads keep their regular slots (base colour, normal, `_rmaos`, ...), and the `.pbrm` reader's slot names do not change (bungo 11-27) |
 
 The family only picks the shading: legacy reads gloss = 1 - R with the layer's `specular`, pbr
 reads R as roughness and the layer's `specular` as metallic (an optional pbr `_s` still applies on
