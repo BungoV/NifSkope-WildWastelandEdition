@@ -86,7 +86,7 @@ emits a key whose value is the default (that is what keeps the file compact).
 | colour | `diffuse` | `baseColor` | `_d` / `_bc` | BC3 | RGB colour (unlit, sRGB), **A = coverage** |
 | normal | `normal` | `normal` | `_n` / `_n` | **BC7** (a `DX10` header, `BC7_UNORM`; since 2026-09-23, lane IMPOSTORDEPTH2: BC3 carried the height in the 5:6:5 colour block) | R = normal X, G = normal Y, B = height, A = sway weight |
 | mask | `gsaos` | `rmaos` | `_gsaos` / `_rmaos` | BC3 | R gloss / roughness, G specular / metallic, B AO, A subsurface mask |
-| mask, card array after the sky pass (`array.maskLayout` `"rvaos"`, §4.2) | `rvaos` | `rvaos` | `_rvaos` (both families) | **BC7** | R roughness, G sky visibility, B AO, A subsurface mask; the specular / metallic is `array.specular` |
+| mask, card array after the sky pass (`array.maskLayout` `"rvaos"`, §4.2) | `rvaos` | `rvaos` | `_rvaos` (both families) | **RGBA8** | R roughness, G sky visibility, B AO, A subsurface mask; the specular / metallic is `array.specular` |
 | emissive | `emissive` | `emissive` | `_g` / `_e` | BC1 | RGB emissive colour, no alpha |
 | specular | — | `specular` | — / `_s` | **BC7** (the `_n` sheet's codec) | RGB = sqrt(F0'), **A = specular weight**; `card` files of family pbr only, and only when a shape departs from the default specular (§3.4) |
 
@@ -494,7 +494,7 @@ slice everywhere). An existing bake is converted in place, without a rebake, by
 ### 4.2 The card mask `_rvaos`: one sheet layout whatever the family (2026-11-27, lane SKYVIS1127B)
 
 `tools/card_skyvis.py` (after the bake; `bake` casts the sky rays, `pack` reuses a sky already
-baked) writes a card set's mask as `<stem>_rvaos.DDS`, **BC7** (`DX10` header, `BC7_UNORM`, the same
+baked) writes a card set's mask as `<stem>_rvaos.DDS`, **RGBA8** (`DX10` header, `R8G8B8A8_UNORM` linear, the same
 size, mips and slices as the sheet it replaces), and rewrites the `.lodm` beside it:
 
 | channel | value |

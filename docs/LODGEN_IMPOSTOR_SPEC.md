@@ -66,7 +66,7 @@ two-channel `_s`.
 | `_d` / `_bc` | BC3 | colour (diffuse / albedo), unlit | | | coverage |
 | `_n` | BC3; **BC7** on a card | normal X | normal Y | height | sway weight |
 | `_gsaos` / `_rmaos` | BC3 | gloss / roughness | specular / metallic | AO | subsurface mask |
-| `_rvaos` (card array after the sky pass, both families) | **BC7** | roughness | sky visibility | AO | subsurface mask (specular / metallic: one value a layer in the `.lodm`, LODGEN_LODM_FORMAT §4.2) |
+| `_rvaos` (card sheets, both families) | **RGBA8** | roughness | sky visibility | AO | subsurface mask (specular / metallic: one value a layer in the `.lodm`, LODGEN_LODM_FORMAT §4.2) |
 | `_g` / `_e` | BC1 | emissive colour | | | — |
 | `_s` (pbr card only, optional) | BC7 | sqrt(F0') R | sqrt(F0') G | sqrt(F0') B | specular weight |
 
@@ -406,10 +406,10 @@ tests low still gets the neighbours' colour there.
   face, 0 = facing down or enclosed. Ground is not geometry: a ray below the
   horizon is never sky. Uncovered texels take their nearest covered texel
   inside the frame; mips are coverage-weighted means. The pass writes the
-  set's mask as `_rvaos` (BC7, one layout whatever the family: R roughness,
+  set's mask as `_rvaos` (RGBA8, one layout whatever the family: R roughness,
   G sky, B AO, A subsurface) and moves the specular / metallic into the
   `.lodm` as one value a layer (LODGEN_LODM_FORMAT §4.2). The NifSkope card
-  shader does not read `_rvaos` yet; Fusion's LOD card reader does.
+  reader and shader read `_rvaos` (debug views 6, 7, 14); a set from a bake before it logs one stale-bake line.
 - the emissive sheet: shader channel 13 — the glow slot RAW where a source
   `.lodm` retargeted it (an EMPTY retarget binds black, which is how a pbr
   set that names no emissive says it emits nothing), else the vanilla glow
