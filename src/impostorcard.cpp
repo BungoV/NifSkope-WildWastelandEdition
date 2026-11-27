@@ -40,8 +40,7 @@ void noteMaskLayout( ImpostorCardSet & set, bool rvaos, const QString & maskPath
 	if ( told.contains( lodmPath ) )
 		return;
 	told.insert( lodmPath );
-	std::fprintf( stderr, "impostor: stale bake %s: mask sheet %s is a pre-_rvaos _gsaos/_rmaos card sheet, drawn as before
-",
+	std::fprintf( stderr, "impostor: stale bake %s: mask sheet %s is a pre-_rvaos _gsaos/_rmaos card sheet, drawn as before\n",
 		lodmPath.toLocal8Bit().constData(), maskPath.toLocal8Bit().constData() );
 }
 
