@@ -727,6 +727,8 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 			prog->uni1b( "hasMaskSheet", haveMask );
 			prog->uni1b( "hasEmissiveSheet", haveEmiss );
 			prog->uni1b( "familyPbr", set.pbr );
+			prog->uni1b( "maskRvaos", set.maskRvaos );
+			prog->uni1f( "cardSpecular", set.specular );
 			prog->uni1f( "emissiveScale", set.emissiveScale );
 		}
 		if ( batch.on ) {
@@ -1145,6 +1147,8 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 		prog->uni1b( "hasMaskSheet", haveMask );
 		prog->uni1b( "hasEmissiveSheet", haveEmiss );
 		prog->uni1b( "familyPbr", set.pbr );
+		prog->uni1b( "maskRvaos", set.maskRvaos );
+		prog->uni1f( "cardSpecular", set.specular );
 		prog->uni1f( "emissiveScale", set.emissiveScale );
 		prog->uni1f( "cardMipCap", float( set.mips ) );
 		prog->uni1f( "cardCovFloor", set.covOk() ? float( set.covFloor ) / 255.0f : 0.0f );

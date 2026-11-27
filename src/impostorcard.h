@@ -72,6 +72,11 @@ struct ImpostorCardSet
 	float center[3] = { 0.0f, 0.0f, 0.0f };
 	float depthSpan = 0.0f;	//!< spec 285: 3 x max(bound radius, 1024)
 	float emissiveScale = 1.0f;	//!< spec 88..95: the multiple, never in the sheet
+	//! The mask sheet is a card `_rvaos` (R roughness, G sky visibility, B AO, A subsurface, whatever
+	//! the family) and `specular` is the layer's one specular / metallic value (`array.specular`).
+	//! False: a bake before it (`_gsaos` / `_rmaos`), drawn as before; a reader logs one stale-bake line.
+	bool maskRvaos = false;
+	float specular = 0.0f;
 	int auxDiv = 1;			//!< spec 617..630: aux sheets at half of each side
 
 	/*! THE COVERAGE CONTRACT, as the set declares it (`card.coverage`, or the

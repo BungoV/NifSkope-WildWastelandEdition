@@ -70,12 +70,14 @@ layout ( depth_greater ) out float gl_FragDepth;
 // --- the four sheets of spec 42..48 -----------------------------------------
 uniform sampler2D ColourSheet;     // _d / _bc : RGB colour (unlit), A coverage
 uniform sampler2D NormalSheet;     // _n       : R nX, G nY, B height, A sway
-uniform sampler2D MaskSheet;       // _gsaos / _rmaos : R, G, B AO, A subsurface; card _rvaos: R roughness, G sky, B AO, A subsurface
+uniform sampler2D MaskSheet;       // _gsaos / _rmaos : R, G, B AO, A subsurface; card _rvaos RGBA8: R roughness, G sky, B AO, A subsurface
 uniform sampler2D EmissiveSheet;   // _g / _e  : RGB emissive colour, BC1
 
 uniform bool  hasMaskSheet;
 uniform bool  hasEmissiveSheet;
 uniform bool  familyPbr;           // false = legacy (gloss/specular), true = pbr
+uniform bool  maskRvaos;           // true = card _rvaos mask (R roughness, G sky, B AO, A subsurface); false = a stale _gsaos/_rmaos bake
+uniform float cardSpecular;        // _rvaos only: the layer's one specular (legacy) or metallic (pbr), array.specular
 uniform float emissiveScale;       // spec 88..95 -- carried, never folded in
 
 // --- the frames this pixel blends (chosen CPU-side, src/impostoroct.cpp) -----
@@ -650,8 +652,8 @@ void main()
 		else if ( debugChannel == 3 ) dbg = normal * 0.5 + 0.5;         // normal, model space
 		else if ( debugChannel == 4 ) dbg = vec3( height );             // height, raw 0..1
 		else if ( debugChannel == 5 ) dbg = vec3( sway );               // sway weight
-		else if ( debugChannel == 6 ) dbg = vec3( mask.r );             // gloss / roughness (card _rvaos: roughness)
-		else if ( debugChannel == 7 ) dbg = vec3( mask.g );             // specular / metallic (card _rvaos: sky visibility)
+		else if ( debugChannel == 6 ) dbg = vec3( ( maskRvaos && !familyPbr ) ? 1.0 - mask.r : mask.r ); // gloss (legacy; 1 - R on _rvaos) / roughness (pbr)
+		else if ( debugChannel == 7 ) dbg = vec3( maskRvaos ? cardSpecular : mask.g );   // specular / metallic (_rvaos: the .lodm's one value)
 		else if ( debugChannel == 8 ) dbg = vec3( mask.b );             // AO
 		else if ( debugChannel == 9 ) dbg = vec3( mask.a );             // subsurface mask
 		else if ( debugChannel == 10 ) dbg = emissive * emissiveScale;  // emissive x its multiple
@@ -665,6 +667,7 @@ void main()
 			dbg = vec3( max( t, 0.0 ), 0.0, max( -t, 0.0 ) );
 		}
 		else if ( debugChannel == 13 ) dbg = nView * 0.5 + 0.5;   // the LIT normal, view space
+		else if ( debugChannel == 14 ) dbg = vec3( maskRvaos ? mask.g : 1.0 );   // sky visibility (_rvaos G)
 		fragColor = vec4( dbg, 1.0 );
 		return;
 	}
@@ -681,9 +684,10 @@ void main()
 	 *     mask.g       legacy: specular       pbr: metallic
 	 *     mask.b       ambient occlusion      (used below, no material needed)
 	 *     mask.a       subsurface mask        (a material label, spec 296)
-	 *     card arrays with array.maskLayout "rvaos" (`_rvaos`, BC7) use one layout
-	 *     whatever the family: R roughness, G sky visibility, B AO, A subsurface;
+	 *     card sheets named `rvaos` (`_rvaos`, RGBA8) use one layout whatever the
+	 *     family: R roughness (legacy gloss = 1 - R), G sky visibility, B AO, A subsurface;
 	 *     the specular / metallic is one value a layer, array.specular in the .lodm
+	 *     (maskRvaos, cardSpecular); a stale _gsaos/_rmaos bake is read as above
 	 *     emissive     the emissive colour; the MULTIPLE is `emissiveScale`
 	 *     familyPbr    which of the two spellings the above are in
 	 *

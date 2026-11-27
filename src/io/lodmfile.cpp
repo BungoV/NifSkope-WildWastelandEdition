@@ -86,7 +86,10 @@ LodmMaterial lodmParse( const QByteArray & bytes )
 	if ( !v3 ) {
 		m.color = tex.value( QLatin1String( lodmColorKey( m.pbr ) ) ).toString();
 		m.normal = tex.value( QStringLiteral( "normal" ) ).toString();
-		m.mask = tex.value( QLatin1String( lodmMaskKey( m.pbr ) ) ).toString();
+		m.mask = tex.value( QLatin1String( lodmCardMaskKey() ) ).toString();
+		m.maskRvaos = !m.mask.isEmpty();
+		if ( !m.maskRvaos )
+			m.mask = tex.value( QLatin1String( lodmMaskKey( m.pbr ) ) ).toString();
 		m.emissive = tex.value( QStringLiteral( "emissive" ) ).toString();
 	} else {
 		// one shared normal, then each family's own colour/mask/emissive, legacy before pbr
@@ -99,7 +102,10 @@ LodmMaterial lodmParse( const QByteArray & bytes )
 			auto & s = m.fam[f];
 			s.present = true;
 			s.color = b.value( QLatin1String( lodmColorKey( f ) ) ).toString();
-			s.mask = b.value( QLatin1String( lodmMaskKey( f ) ) ).toString();
+			s.mask = b.value( QLatin1String( lodmCardMaskKey() ) ).toString();
+			s.rvaos = !s.mask.isEmpty();
+			if ( !s.rvaos )
+				s.mask = b.value( QLatin1String( lodmMaskKey( f ) ) ).toString();
 			s.emissive = b.value( QStringLiteral( "emissive" ) ).toString();
 			if ( s.color.isEmpty() ) {
 				m.error = QStringLiteral( "lodm 3 textures.%1 names no %2" ).arg( fk, QLatin1String( lodmColorKey( f ) ) );
@@ -145,6 +151,7 @@ LodmMaterial lodmParse( const QByteArray & bytes )
 		m.pbr = !m.mixed && first == 1;
 		m.color = m.fam[first].color;
 		m.mask = m.fam[first].mask;
+		m.maskRvaos = m.fam[first].rvaos;
 		m.emissive = m.fam[first].emissive;
 	}
 	// the emissive MULTIPLE (the colour is folded into the sheet); absent means 1

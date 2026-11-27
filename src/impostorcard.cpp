@@ -17,6 +17,8 @@ BSD License - see nifskope.h
 #include <QJsonValue>
 #include <QRegularExpression>
 #include <QTextStream>
+#include <QSet>
+#include <cstdio>
 
 /* ---------------------------------------------------------------------------
  * The `.lodm` -> drawable set step. Everything here is reading and refusing;
@@ -26,6 +28,22 @@ BSD License - see nifskope.h
  * ------------------------------------------------------------------------- */
 
 namespace {
+
+/*! The mask sheet's layout, from the .lodm: a `_rvaos` set says so by its texture key; a set from a bake
+ *  before it names `gsaos` / `rmaos` and is drawn as before, with ONE log line per file. */
+void noteMaskLayout( ImpostorCardSet & set, bool rvaos, const QString & maskPath, const QString & lodmPath )
+{
+	set.maskRvaos = rvaos;
+	if ( rvaos || maskPath.isEmpty() )
+		return;
+	static QSet<QString> told;
+	if ( told.contains( lodmPath ) )
+		return;
+	told.insert( lodmPath );
+	std::fprintf( stderr, "impostor: stale bake %s: mask sheet %s is a pre-_rvaos _gsaos/_rmaos card sheet, drawn as before
+",
+		lodmPath.toLocal8Bit().constData(), maskPath.toLocal8Bit().constData() );
+}
 
 //! A `.lodm` names textures as game paths with backslashes. This is the LAST
 //! component of such a path, which is what a loose sibling would be called.
@@ -333,6 +351,8 @@ ImpostorCardSet impostorCardLoad( const QString & lodmPath, int layer )
 		// After `oct`, which sizes the array.
 		readFrameOffsets( card, set );
 
+		noteMaskLayout( set, mat.maskRvaos, mat.mask, lodmPath );
+		set.specular = float( card.value( "specular" ).toDouble( 0.0 ) );
 		fillSheet( set.colour,   dir, mat.color );
 		fillSheet( set.normal,   dir, mat.normal );
 		fillSheet( set.mask,     dir, mat.mask );
@@ -421,6 +441,10 @@ ImpostorCardSet impostorCardLoad( const QString & lodmPath, int layer )
 		if ( want < es.size() && es.at( want ).isDouble() )
 			set.emissiveScale = float( es.at( want ).toDouble() );
 
+		noteMaskLayout( set, mat.payloadVersion == 3 ? mat.fam[set.pbr ? 1 : 0].rvaos : mat.maskRvaos, maskPath, lodmPath );
+		const QJsonArray spec = arr.value( "specular" ).toArray();
+		if ( want < spec.size() && spec.at( want ).isDouble() )
+			set.specular = float( spec.at( want ).toDouble() );
 		fillSheet( set.colour,   dir, colourPath );
 		fillSheet( set.normal,   dir, mat.normal );
 		fillSheet( set.mask,     dir, maskPath );
